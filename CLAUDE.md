@@ -3,6 +3,7 @@
 ## Issue tracking
 Use `bd` (beads) for all task tracking. Run `bd ready --json` to see available work.
 Do not use markdown TODOs — create a beads issue instead.
+Read AGENTS.md to get an understanding of how beads works.
 
 ## What this repo is
 C17 runtime for Smalltalk/A. The Swift IDE lives in `smalltalk-a-ide` (separate repo).
@@ -58,3 +59,4 @@ tests/                  ← CTest suite
 examples/embed_basic/   ← public API smoke test
 docs/architecture/      ← master architecture document
 docs/decisions/         ← ADRs 001-006
+
