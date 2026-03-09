@@ -116,3 +116,7 @@ conan/
 *.tmp
 *.bak
 scratch/
+
+# Dolt database files (added by bd init)
+.dolt/
+*.db

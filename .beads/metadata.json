@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "server",
+  "dolt_database": "smalltalk_a_vm",
+  "project_id": "2a06ab55-456a-4ed7-b641-8fe8ea51d2bd"
+}
