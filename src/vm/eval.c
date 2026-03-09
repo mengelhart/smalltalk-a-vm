@@ -1,4 +1,4 @@
-#include "sta/vm.h"
+#include <sta/vm.h>
 
 STA_Handle* sta_eval(STA_VM* vm, const char* expression) {
     (void)vm; (void)expression;

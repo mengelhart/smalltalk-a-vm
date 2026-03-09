@@ -1,4 +1,4 @@
-#include "sta/vm.h"
+#include <sta/vm.h>
 
 STA_Handle* sta_handle_retain(STA_VM* vm, STA_Handle* handle) {
     (void)vm;

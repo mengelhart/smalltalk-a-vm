@@ -1,4 +1,4 @@
-#include "sta/vm.h"
+#include <sta/vm.h>
 
 STA_VM* sta_vm_create(const STA_VMConfig* config) {
     (void)config;
