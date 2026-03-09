@@ -1,10 +1,13 @@
 # Smalltalk/A VM — Repository Setup Checklist
 ## For: `smalltalk-a-vm` (C runtime repo)
 ## Target: Claude Code in terminal
+## Environment: macOS Tahoe, Xcode 26.3, Apple clang 17, CMake 4.2.3, arm64 M4 Max
 
 This checklist covers Phase 0 repository scaffolding only.
 No implementation code is written here — only the build system,
-directory structure, public API skeleton, and tooling configuration.
+directory structure, public API skeleton, tooling configuration,
+and decision records.
+
 Stop after each section and verify before continuing.
 
 ---
@@ -13,294 +16,634 @@ Stop after each section and verify before continuing.
 
 - [ ] Create a new directory: `smalltalk-a-vm`
 - [ ] `cd smalltalk-a-vm && git init`
-- [ ] Create a `.gitignore` with entries for:
-  - `build/`
-  - `compile_commands.json` (at root — symlink target, not source-controlled)
-  - `.cache/`
-  - `*.o`, `*.a`, `*.dylib`, `*.so`
-  - `.DS_Store`
-- [ ] Create an empty initial commit: `git commit --allow-empty -m "Initial commit"`
+- [ ] Create `.gitignore` with the following content:
+
+```gitignore
+# =============================================================================
+# Smalltalk/A VM — .gitignore
+# =============================================================================
+
+# CMake build artifacts
+build/
+cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+install_manifest.txt
+CTestTestfile.cmake
+_deps/
+
+# compile_commands.json — lives in build/, symlinked to root, not tracked
+compile_commands.json
+
+# Compiled output
+*.o
+*.a
+*.dylib
+*.so
+*.so.*
+*.out
+
+# clangd cache
+.cache/
+.clangd/
+
+# macOS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+
+# Xcode (belt-and-suspenders — should not appear in VM repo)
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
+DerivedData/
+
+# Emacs
+*~
+\#*\#
+.\#*
+
+# Vim / Neovim
+*.swp
+*.swo
+
+# VS Code / Cursor
+.vscode/
+
+# lldb / Instruments
+*.dSYM/
+*.trace/
+
+# CTest output
+Testing/
+LastTest.log
+CTestCostData.txt
+
+# Dependency managers
+vcpkg_installed/
+conan/
+
+# Crash reports
+*.crash
+
+# Scratch — safe for throwaway spike work inside the repo
+scratch/
+```
+
+- [ ] `git add .gitignore && git commit -m "Add .gitignore"`
 
 ---
 
 ## Section 2 — Directory structure
 
 Create the following directories. Each should contain a `.gitkeep`
-file so they are tracked by git before any real files exist.
+so they are tracked before any real files exist.
 
 ```
 smalltalk-a-vm/
     include/
-        sta/               ← public headers only; this is the stable contract
+        sta/                ← public headers ONLY — the stable external contract
     src/
-        vm/                ← object memory, interpreter, method dispatch
-        actor/             ← actor struct, mailbox, lifecycle
-        gc/                ← garbage collector
-        scheduler/         ← work-stealing scheduler, reduction counter
-        io/                ← async I/O substrate (libuv integration)
-        bootstrap/         ← one-time kernel bootstrap
-    tests/                 ← CTest-based test suite
+        vm/                 ← object memory, interpreter, method dispatch
+        actor/              ← actor struct, mailbox, lifecycle
+        gc/                 ← garbage collector
+        scheduler/          ← work-stealing scheduler, reduction counter
+        io/                 ← async I/O substrate (libuv, Phase 2)
+        bootstrap/          ← one-time kernel bootstrap
+    tests/                  ← CTest-based test suite
     examples/
-        embed_basic/       ← minimal embedding example; permanent API smoke test
-    docs/                  ← design notes, decision records
-    CLAUDE.md              ← context file for Claude Code (see below)
+        embed_basic/        ← minimal embedding example; permanent API smoke test
+    docs/
+        architecture/       ← master architecture document
+        decisions/          ← architectural decision records (ADRs)
+    CLAUDE.md
 ```
 
-- [ ] Create all directories listed above
-- [ ] Add a `.gitkeep` to each empty directory
-- [ ] Verify the full tree with `find . -not -path './.git/*' | sort`
+**Internal header convention — enforced from day one:**
+Internal `.h` files live beside their `.c` files in `src/`.
+`src/actor/actor.h` pairs with `src/actor/actor.c`.
+There is no `src/include/` or `src/internal/` directory.
+`include/` contains only public API headers — nothing else.
+This is ADR 003.
+
+- [ ] Create all directories above with `.gitkeep` files
+- [ ] Verify: `find . -not -path './.git/*' | sort`
 
 ---
 
-## Section 3 — Root CMakeLists.txt
+## Section 3 — Stub source files
 
-Create `CMakeLists.txt` at the repo root with the following requirements.
-Do not implement any library code yet — this file only needs to build
-cleanly with an empty source tree.
+Create these stub `.c` files now — before CMakeLists.txt — so the
+library target is real and concrete from the start. Each file contains
+only the function signatures returning safe no-op values.
+
+**`src/vm/vm.c`:**
+```c
+#include "sta/vm.h"
+
+STA_VM* sta_vm_create(const STA_VMConfig* config) {
+    (void)config;
+    return NULL;
+}
+
+void sta_vm_destroy(STA_VM* vm) {
+    (void)vm;
+}
+
+int sta_vm_load_image(STA_VM* vm, const char* path) {
+    (void)vm; (void)path;
+    return STA_ERR_INTERNAL;
+}
+
+int sta_vm_save_image(STA_VM* vm, const char* path) {
+    (void)vm; (void)path;
+    return STA_ERR_INTERNAL;
+}
+
+const char* sta_vm_last_error(STA_VM* vm) {
+    (void)vm;
+    return "";
+}
+```
+
+**`src/actor/actor.c`:**
+```c
+#include "sta/vm.h"
+
+STA_Actor* sta_actor_spawn(STA_VM* vm, STA_Handle* class_handle) {
+    (void)vm; (void)class_handle;
+    return NULL;
+}
+
+int sta_actor_send(STA_VM* vm, STA_Actor* actor, STA_Handle* message) {
+    (void)vm; (void)actor; (void)message;
+    return STA_ERR_INTERNAL;
+}
+```
+
+**`src/vm/handle.c`:**
+```c
+#include "sta/vm.h"
+
+STA_Handle* sta_handle_retain(STA_VM* vm, STA_Handle* handle) {
+    (void)vm;
+    return handle;
+}
+
+void sta_handle_release(STA_VM* vm, STA_Handle* handle) {
+    (void)vm; (void)handle;
+}
+```
+
+**`src/vm/eval.c`:**
+```c
+#include "sta/vm.h"
+
+STA_Handle* sta_eval(STA_VM* vm, const char* expression) {
+    (void)vm; (void)expression;
+    return NULL;
+}
+
+STA_Handle* sta_inspect(STA_VM* vm, STA_Handle* object) {
+    (void)vm; (void)object;
+    return NULL;
+}
+```
+
+- [ ] Create all four stub files as above
+
+---
+
+## Section 4 — Root CMakeLists.txt
+
+Create `CMakeLists.txt` at the repo root.
 
 Requirements:
-- [ ] Minimum CMake version: 3.20
-- [ ] Project name: `smalltalk-a-vm`, language: C, C standard: C17
-- [ ] Set `CMAKE_C_STANDARD_REQUIRED ON` and `CMAKE_C_EXTENSIONS OFF`
-- [ ] Enable `CMAKE_EXPORT_COMPILE_COMMANDS ON` — required for clangd
-- [ ] Define a static library target `sta_vm` (initially with no source files — use an interface target or placeholder)
-- [ ] Set include path: `include/` is public; `src/` is private
-- [ ] Add a compiler warning set for both Clang and GCC:
-  - `-Wall -Wextra -Wpedantic -Werror`
-  - `-Wno-unused-parameter` (acceptable during early development)
-- [ ] Add an install target that installs:
-  - The static library to `lib/`
-  - `include/sta/vm.h` to `include/sta/`
-  - Nothing else — `src/` headers are never installed
-- [ ] Add subdirectory includes for `tests/` and `examples/embed_basic/`
-- [ ] Verify: `cmake -B build -DCMAKE_BUILD_TYPE=Debug && cmake --build build` completes without errors
+- [ ] `cmake_minimum_required(VERSION 3.20...4.2)` — handles CMake 4.x policy changes
+- [ ] Project: `smalltalk-a-vm`, language C, standard C17
+- [ ] `set(CMAKE_C_STANDARD_REQUIRED ON)`
+- [ ] `set(CMAKE_C_EXTENSIONS OFF)`
+- [ ] `set(CMAKE_EXPORT_COMPILE_COMMANDS ON)`
+- [ ] Static library target `sta_vm` with all four stub source files:
+  - `src/vm/vm.c`
+  - `src/vm/handle.c`
+  - `src/vm/eval.c`
+  - `src/actor/actor.c`
+- [ ] Public include: `include/` (propagated to consumers via INTERFACE)
+- [ ] Private include: `src/` (internal only, not propagated)
+- [ ] Compiler warnings:
+  ```cmake
+  target_compile_options(sta_vm PRIVATE
+      -Wall -Wextra -Wpedantic -Werror
+      -Wno-unused-parameter)
+  ```
+- [ ] libuv hook — wired but OFF by default:
+  ```cmake
+  option(STA_USE_LIBUV "Enable libuv async I/O substrate (Phase 2)" OFF)
+  if(STA_USE_LIBUV)
+      find_package(libuv REQUIRED)
+      target_link_libraries(sta_vm PRIVATE libuv::libuv)
+      target_compile_definitions(sta_vm PRIVATE STA_USE_LIBUV=1)
+  endif()
+  ```
+- [ ] Install target: library to `lib/`, `include/sta/vm.h` to `include/sta/`; nothing from `src/`
+- [ ] `add_subdirectory(tests)`
+- [ ] `add_subdirectory(examples/embed_basic)`
+- [ ] Verify: `cmake -B build -DCMAKE_BUILD_TYPE=Debug && cmake --build build` — zero warnings
 
 ---
 
-## Section 4 — clangd configuration
+## Section 5 — Public API header
 
-- [ ] After running cmake, create a symlink at the repo root:
-  `ln -s build/compile_commands.json compile_commands.json`
-- [ ] Create `.clangd` at the repo root with content:
+Create `include/sta/vm.h`. This is the only header external consumers
+ever include. The IDE will use exactly this file and nothing else.
+
+```c
+/*
+ * sta/vm.h — Smalltalk/A VM public API
+ *
+ * This is the ONLY public header. All implementation is in src/ (private).
+ * The Swift IDE uses only this file. There is no privileged back-channel.
+ *
+ * External callers use STA_Handle* for all object references.
+ * Raw STA_OOP is for internal VM use only.
+ *
+ * Error convention: functions returning int use STA_OK (0) for success
+ * and STA_ERR_* (negative) for failure. Use sta_vm_last_error() for
+ * human-readable diagnostics.
+ */
+
+#ifndef STA_VM_H
+#define STA_VM_H
+
+#include <stddef.h>
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* -------------------------------------------------------------------------
+ * Opaque types
+ * ---------------------------------------------------------------------- */
+
+typedef struct STA_VM     STA_VM;
+typedef struct STA_Actor  STA_Actor;
+typedef struct STA_Handle STA_Handle;  /* preferred over raw OOP across FFI */
+typedef uintptr_t         STA_OOP;    /* internal VM use only */
+
+/* -------------------------------------------------------------------------
+ * Error codes
+ * ---------------------------------------------------------------------- */
+
+#define STA_OK            0    /* success */
+#define STA_ERR_INVALID  (-1)  /* bad argument or precondition */
+#define STA_ERR_OOM      (-2)  /* allocation failure */
+#define STA_ERR_IO       (-3)  /* I/O or image load/save failure */
+#define STA_ERR_INTERNAL (-4)  /* unexpected internal error */
+
+/* -------------------------------------------------------------------------
+ * VM configuration
+ * ---------------------------------------------------------------------- */
+
+typedef struct STA_VMConfig {
+    int         scheduler_threads;   /* 0 = use CPU core count */
+    size_t      initial_heap_bytes;  /* 0 = use default */
+    const char* image_path;          /* NULL = start fresh */
+} STA_VMConfig;
+
+/* -------------------------------------------------------------------------
+ * VM lifecycle
+ * ---------------------------------------------------------------------- */
+
+STA_VM*     sta_vm_create(const STA_VMConfig* config);
+void        sta_vm_destroy(STA_VM* vm);
+int         sta_vm_load_image(STA_VM* vm, const char* path);
+int         sta_vm_save_image(STA_VM* vm, const char* path);
+const char* sta_vm_last_error(STA_VM* vm);  /* never NULL; "" if no error */
+
+/* -------------------------------------------------------------------------
+ * Actor interface
+ * ---------------------------------------------------------------------- */
+
+STA_Actor* sta_actor_spawn(STA_VM* vm, STA_Handle* class_handle);
+int        sta_actor_send(STA_VM* vm, STA_Actor* actor, STA_Handle* message);
+
+/* -------------------------------------------------------------------------
+ * Handle lifecycle
+ *
+ * Handles are acquired per-operation (e.g. from sta_eval, sta_actor_spawn).
+ * sta_handle_retain roots a handle across GC cycles.
+ * sta_handle_release unroots it — every acquired handle must be released.
+ * Handle leaks are real memory leaks.
+ *
+ * Full handle acquisition API is defined in Phase 0 spikes — see ADR 006.
+ * ---------------------------------------------------------------------- */
+
+STA_Handle* sta_handle_retain(STA_VM* vm, STA_Handle* handle);
+void        sta_handle_release(STA_VM* vm, STA_Handle* handle);
+
+/* -------------------------------------------------------------------------
+ * Evaluation and inspection (used by IDE; available to all embedders)
+ * ---------------------------------------------------------------------- */
+
+STA_Handle* sta_eval(STA_VM* vm, const char* expression);
+STA_Handle* sta_inspect(STA_VM* vm, STA_Handle* object);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* STA_VM_H */
+```
+
+- [ ] Create `include/sta/vm.h` with the content above
+- [ ] Verify: `clang -std=c17 -Wall -Wextra -Wpedantic -Iinclude -c /dev/null -include include/sta/vm.h`
+  compiles with zero warnings
+
+---
+
+## Section 6 — clangd configuration
+
+- [ ] `ln -s build/compile_commands.json compile_commands.json`
+- [ ] Create `.clangd`:
   ```yaml
   CompileFlags:
     CompilationDatabase: .
   Diagnostics:
     UnusedIncludes: Strict
   ```
-- [ ] Verify clangd can find the compilation database:
-  `clangd --check=include/sta/vm.h` should run without "no compile commands" errors
+- [ ] Verify: `clangd --check=include/sta/vm.h` — no "no compile commands" errors
 
 ---
 
-## Section 5 — Public API header skeleton
+## Section 7 — Embedding example
 
-Create `include/sta/vm.h`. This is the only header external consumers
-(including the future Swift IDE) will ever include. Keep it minimal.
-This is a skeleton — no implementation exists yet.
+Create `examples/embed_basic/main.c`:
 
-Requirements:
-- [ ] Standard include guard: `#ifndef STA_VM_H` / `#define STA_VM_H`
-- [ ] `#ifdef __cplusplus extern "C" {` guard for future Swift/C++ FFI use
-- [ ] Forward-declare opaque types (no struct bodies exposed):
-  - `typedef struct STA_VM    STA_VM;`
-  - `typedef struct STA_Actor STA_Actor;`
-  - `typedef struct STA_Handle STA_Handle;`  ← opaque handle (preferred over raw OOP)
-- [ ] Define `STA_OOP` as `typedef uintptr_t STA_OOP;` with a comment
-  noting this is for internal/illustrative use; external callers use `STA_Handle*`
-- [ ] Define a minimal `STA_VMConfig` struct with:
-  - `int scheduler_threads;`  ← 0 = use CPU count
-  - `size_t initial_heap_bytes;`
-  - `const char* image_path;`  ← NULL = start fresh
-- [ ] Declare (but do not implement) these lifecycle functions:
-  - `STA_VM*  sta_vm_create(const STA_VMConfig* config);`
-  - `void     sta_vm_destroy(STA_VM* vm);`
-  - `int      sta_vm_load_image(STA_VM* vm, const char* path);`
-  - `int      sta_vm_save_image(STA_VM* vm, const char* path);`
-- [ ] Declare actor interface stubs:
-  - `STA_Actor* sta_actor_spawn(STA_VM* vm, STA_Handle* class_handle);`
-  - `int        sta_actor_send(STA_VM* vm, STA_Actor* actor, STA_Handle* message);`
-- [ ] Declare handle lifecycle stubs:
-  - `void       sta_handle_release(STA_VM* vm, STA_Handle* handle);`
-- [ ] Add a comment block at the top of the file explaining:
-  - This is the only public header
-  - All implementation is in `src/` (private)
-  - The IDE uses only this file — no privileged back-channel
-- [ ] Verify the header compiles cleanly:
-  `clang -std=c17 -Wall -Wextra -Wpedantic -Iinclude -c /dev/null -include include/sta/vm.h`
+```c
+#include <sta/vm.h>
+#include <stdio.h>
 
----
+int main(void) {
+    STA_VMConfig config = {0};  /* all defaults */
 
-## Section 6 — Stub implementation files
+    STA_VM* vm = sta_vm_create(&config);
+    /* vm is NULL from stub — expected */
 
-Create minimal stub `.c` files so the build system has something to
-compile. These contain no real logic — only the function signatures
-returning safe no-op values (NULL, 0, -1 as appropriate).
+    const char* err = sta_vm_last_error(vm);
+    printf("last_error (stub): \"%s\"\n", err);
 
-- [ ] `src/vm/vm.c` — stub implementations of `sta_vm_create`, `sta_vm_destroy`,
-  `sta_vm_load_image`, `sta_vm_save_image`
-- [ ] `src/actor/actor.c` — stub implementations of `sta_actor_spawn`, `sta_actor_send`
-- [ ] `src/vm/handle.c` — stub implementation of `sta_handle_release`
-- [ ] Update `CMakeLists.txt` to add these source files to the `sta_vm` target
-- [ ] Verify: `cmake --build build` compiles cleanly with `-Werror`
+    sta_vm_destroy(vm);  /* NULL-safe */
 
----
+    printf("embed_basic: smoke test passed\n");
+    return 0;
+}
+```
 
-## Section 7 — Minimal embedding example
+Create `examples/embed_basic/CMakeLists.txt`:
+```cmake
+add_executable(embed_basic main.c)
+target_link_libraries(embed_basic PRIVATE sta_vm)
+```
 
-Create `examples/embed_basic/main.c`. This file serves two purposes:
-(1) documents the intended public API usage, and (2) is a permanent
-smoke test that the public API compiles and links.
-
-Requirements:
-- [ ] Include only `<sta/vm.h>` — no internal headers
-- [ ] Create a VM with default config
-- [ ] Attempt to destroy it (even though create returns NULL for now)
-- [ ] Print a "smoke test passed" message to stdout
-- [ ] Create `examples/embed_basic/CMakeLists.txt` that:
-  - Defines an executable target `embed_basic`
-  - Links against `sta_vm`
-  - Uses only the public include path
+- [ ] Create both files
 - [ ] Verify: `cmake --build build && ./build/examples/embed_basic/embed_basic`
-  compiles and runs (even if it just prints the message and exits)
+  prints smoke test message
 
 ---
 
 ## Section 8 — Test scaffolding
 
-- [ ] Create `tests/CMakeLists.txt` that enables CTest:
-  `enable_testing()`
-- [ ] Create `tests/test_public_api.c` with a single test:
-  - Include `<sta/vm.h>` only
-  - Call `sta_vm_create(NULL)` — expect NULL return (stub)
-  - Call `sta_vm_destroy(NULL)` — expect no crash
-  - Exit 0 on success
-- [ ] Add the test to CTest in `tests/CMakeLists.txt`
-- [ ] Verify: `cd build && ctest --output-on-failure` passes
+Create `tests/CMakeLists.txt`:
+```cmake
+enable_testing()
+
+add_executable(test_public_api test_public_api.c)
+target_link_libraries(test_public_api PRIVATE sta_vm)
+
+add_test(NAME test_public_api COMMAND test_public_api)
+```
+
+Create `tests/test_public_api.c`:
+```c
+#include <sta/vm.h>
+#include <assert.h>
+#include <stddef.h>
+
+int main(void) {
+    /* sta_vm_create with NULL config — stub returns NULL */
+    STA_VM* vm = sta_vm_create(NULL);
+    assert(vm == NULL);
+
+    /* sta_vm_last_error — must return non-NULL string even with NULL vm */
+    const char* err = sta_vm_last_error(NULL);
+    assert(err != NULL);
+
+    /* sta_vm_destroy — must not crash on NULL */
+    sta_vm_destroy(NULL);
+
+    /* sta_handle_release — must not crash on NULL */
+    sta_handle_release(NULL, NULL);
+
+    return 0;
+}
+```
+
+- [ ] Create both files
+- [ ] Verify: `cd build && ctest --output-on-failure` — all tests pass
 
 ---
 
-## Section 9 — README and docs
+## Section 9 — Decision records
 
-- [ ] Create `README.md` at root with:
-  - Project name: Smalltalk/A VM (`smalltalk-a-vm`)
-  - One-sentence description from the architecture doc
-  - Build instructions (cmake + make)
-  - Note that this is the C runtime only; IDE lives in `smalltalk-a-ide`
-  - Note on licensing: TBD before public release
-- [ ] Create `docs/decisions/` directory
-- [ ] Create `docs/decisions/001-implementation-language.md` with a brief
-  record of the C language decision and rationale (from architecture doc section 4)
-- [ ] Create `docs/decisions/002-public-api-boundary.md` recording the
-  "IDE uses only sta/vm.h" rule and why it matters
+Create these ADR files in `docs/decisions/`. Keep them short — the
+purpose is to record *what* was decided and *why*, not to re-explain
+the entire architecture.
+
+- [ ] `docs/decisions/001-implementation-language.md`
+  - Decision: C17 for VM/runtime; Swift/SwiftUI for IDE only
+  - Rationale: full memory control; no ARC/GC interference; portable;
+    required for BEAM-density actor heaps and no-GIL concurrent design
+  - Reference: architecture doc Section 4
+
+- [ ] `docs/decisions/002-public-api-boundary.md`
+  - Decision: `include/sta/vm.h` is the only public header; IDE uses
+    only this; no privileged back-channel exists or will be created
+  - Rationale: the only reliable way to ensure the API is sufficient
+    and non-leaky; enables future open sourcing and third-party embedders
+  - Reference: architecture doc Section 4.2
+
+- [ ] `docs/decisions/003-internal-header-convention.md`
+  - Decision: internal `.h` files live beside their `.c` files in `src/`;
+    no `src/include/` or `src/internal/` subdirectory
+  - Rationale: simple, navigable, prevents ad hoc layout drift,
+    clangd resolves correctly with the private `src/` include path
+  - Enforcement: CMake private include path is `src/`; verify with
+    `find include/ -name "*.h"` — must always return exactly one file
+
+- [ ] `docs/decisions/004-live-update-semantics.md`
+  - Status: DEFERRED to Phase 3
+  - Decisions to record when Phase 3 begins:
+    - Method replacement policy (atomic dict update; old activations complete)
+    - Structural ivar change policy (safe-point + explicit migration)
+    - Class addition policy (safe at any time)
+    - Class removal policy (error if live instances exist — early versions)
+  - Reference: architecture doc Section 14.2
+  - Note: FileSyncActor conflict policy (simultaneous browser + file edit)
+    also needs a decision record — add here when addressed
+
+- [ ] `docs/decisions/005-api-error-reporting.md`
+  - Decision: integer `STA_OK` / `STA_ERR_*` codes for all operations;
+    `sta_vm_last_error(vm)` for human-readable diagnostics
+  - Rationale: SQLite pattern — compact, no allocations on error path,
+    clean C FFI, embeddable without exception handling
+  - Richer structured errors are a Phase 4+ concern if needed
+
+- [ ] `docs/decisions/006-handle-lifecycle.md`
+  - Status: DEFERRED to Phase 0 spike
+  - Question: opaque `STA_Handle*` rooted by runtime vs raw `STA_OOP`
+    with explicit pinning
+  - Recommended direction: `STA_Handle*` model (JNI/CPython pattern)
+    — see architecture doc Section 4.3
+  - Lock this decision before any IDE code is written against the API
+  - Record full acquire/retain/release semantics here once spiked
 
 ---
 
-## Section 10 — CLAUDE.md
+## Section 10 — README
 
-Create `CLAUDE.md` at the repo root. This file is read by Claude Code
-at session start and provides essential project context.
+Create `README.md`:
 
-- [ ] Create `CLAUDE.md` with the following sections (content described below)
+```markdown
+# smalltalk-a-vm
 
-### What to put in CLAUDE.md
+C17 runtime for [Smalltalk/A](docs/architecture/smalltalk-a-vision-architecture-v3.md) —
+a modern Smalltalk system with BEAM-class actor concurrency, a live image,
+and a native macOS IDE.
 
-**Keep it focused and operational.** CLAUDE.md is not a copy of the
-architecture document — it is a quick-reference for an AI coding
-assistant that needs to make correct local decisions without
-re-reading 1000 lines of prose. Link to the architecture doc for
-deep reference; summarise only what affects day-to-day coding decisions.
+This repository contains the C runtime only.
+The Swift IDE lives in `smalltalk-a-ide` (separate repository).
 
-Recommended sections:
+## Build
+
+    cmake -B build -DCMAKE_BUILD_TYPE=Debug
+    cmake --build build
+
+## Test
+
+    cd build && ctest --output-on-failure
+
+## Environment
+
+- macOS Tahoe · Xcode 26.3 · Apple clang 17 · CMake 4.2.3 · arm64
+- C17, `-Wall -Wextra -Wpedantic -Werror`
+
+## License
+
+TBD before public release. Candidates: MIT/Apache 2.0 or LGPL.
+```
+
+---
+
+## Section 11 — CLAUDE.md
+
+Create `CLAUDE.md` at the repo root:
 
 ```markdown
 # Smalltalk/A VM — Claude Code Context
 
 ## What this repo is
-C runtime for Smalltalk/A. See docs/architecture/ for full design.
-This repo contains only the VM. The Swift IDE lives in smalltalk-a-ide (separate repo).
+C17 runtime for Smalltalk/A. The Swift IDE lives in `smalltalk-a-ide` (separate repo).
+Full architecture: `docs/architecture/smalltalk-a-vision-architecture-v3.md`
+Decision records: `docs/decisions/` — read ADRs 001-006 before making structural changes.
+
+## Environment
+macOS Tahoe · Xcode 26.3 · Apple clang 17 · CMake 4.2.3 · arm64 M4 Max
 
 ## Hard rules — never violate these
-- The public API is `include/sta/vm.h` ONLY. Never add internal headers to include/.
-- `src/` headers are private. Never include them from examples/ or tests/.
-- The IDE (when it exists) uses only sta/vm.h. No privileged back-channel.
-- No GIL. Every global data structure must be designed for concurrent access.
-- Per-actor heap target: ~300 bytes at creation. Measure it. Treat drift as a bug.
-- C17 only. No GNU extensions. `-std=c17 -Wall -Wextra -Wpedantic -Werror`.
-- CMake is the build system. Do not create Makefiles or Xcode projects in this repo.
+- `include/sta/vm.h` is the ONLY public header. Never add anything else to `include/`.
+- `src/` headers are private. Never include them from `examples/` or `tests/`.
+- The IDE uses only `sta/vm.h`. No privileged back-channel, ever.
+  If the IDE needs something the public API cannot express, extend the API — for everyone.
+- No GIL. Every global data structure must be designed for concurrent access from day one.
+- C17 only. `-std=c17 -Wall -Wextra -Wpedantic -Werror`. No GNU extensions.
+- CMake is the build system. No Makefiles, no Xcode projects in this repo.
+- Internal headers live beside their .c files in `src/`. See ADR 003.
+- Error shape: `STA_OK` / `STA_ERR_*` integer codes + `sta_vm_last_error()`. See ADR 005.
+
+## Actor density target
+~300 bytes per actor at creation — inherited from BEAM, validated in Phase 0 spike.
+Measure actor creation size from every relevant spike.
+Drift from ~300 bytes must be explained in a decision record. Never silently ignored.
+This is a design target and forcing function, not an automatic pass/fail during early spikes.
 
 ## Current phase
 Phase 0 — architectural spikes. No permanent implementation yet.
-Spike, validate, write down the decision, then implement.
+Workflow: spike → measure → write decision record → implement.
 
-## Key architectural decisions
-- VM language: C (full memory control, no ARC/GC interference, portable)
-- Concurrency: BEAM-style, one scheduler thread per CPU core, work-stealing
+## Key architectural decisions (summary — see ADRs and arch doc for full rationale)
+- VM: C17, no GIL, concurrent data structures from day one
+- Concurrency: work-stealing scheduler, one thread per CPU core
 - Preemption: reduction-based (no actor can starve the scheduler)
-- GC: per-actor nursery + progressive old-space; NO stop-the-world GIL
-- Async I/O: libuv (initial); scheduler threads must NEVER block on I/O
+- GC: per-actor nursery + progressive old-space
+- Async I/O: libuv (Phase 2); CMake option STA_USE_LIBUV wired but OFF now
 - Cross-actor messages: deep copy semantics by default
-- Language: standard Smalltalk (Blue Book is the reference); not "Smalltalk-inspired"
-
-## Architecture reference
-Full design: docs/architecture/smalltalk-a-vision-architecture-v3.md
+- Language: standard Smalltalk — Blue Book is the authoritative reference
 
 ## Build
 cmake -B build -DCMAKE_BUILD_TYPE=Debug && cmake --build build
 cd build && ctest --output-on-failure
 
 ## File layout
-include/sta/vm.h     ← public API (the only contract)
-src/vm/              ← object memory, interpreter
-src/actor/           ← actor struct, mailbox, lifecycle
-src/gc/              ← garbage collector
-src/scheduler/       ← work-stealing scheduler
-src/io/              ← async I/O (libuv)
-src/bootstrap/       ← one-time kernel bootstrap
-tests/               ← CTest suite
-examples/embed_basic ← public API smoke test
-docs/decisions/      ← architectural decision records
+include/sta/vm.h        ← public API (only external contract)
+src/vm/                 ← object memory, interpreter, handle, eval stubs
+src/actor/              ← actor struct, mailbox, lifecycle stub
+src/gc/                 ← GC (Phase 1+)
+src/scheduler/          ← work-stealing scheduler (Phase 0 spike)
+src/io/                 ← async I/O via libuv (Phase 2)
+src/bootstrap/          ← one-time kernel bootstrap (Phase 1)
+tests/                  ← CTest suite
+examples/embed_basic/   ← public API smoke test
+docs/architecture/      ← master architecture document
+docs/decisions/         ← ADRs 001-006
 ```
 
 ---
 
-## Section 11 — Architecture document
+## Section 12 — Architecture document
 
-Copy the master architecture document into the repo so Claude Code can
-reference it locally without needing external access.
-
-- [ ] Create `docs/architecture/` directory
-- [ ] Copy `smalltalk-a-vision-architecture-v3.md` into
-  `docs/architecture/smalltalk-a-vision-architecture-v3.md`
-- [ ] Add a note in CLAUDE.md pointing to this path (already included in
-  the CLAUDE.md template above)
+- [ ] Verify `docs/architecture/smalltalk-a-vision-architecture-v3.md` exists
+- [ ] If not present: copy it in from your local docs location now
+- [ ] `ls docs/architecture/` — should show the file
 
 ---
 
-## Final verification checklist
-
-Run these checks before declaring the scaffold complete:
+## Final verification
 
 - [ ] `cmake -B build -DCMAKE_BUILD_TYPE=Debug` — exits 0
 - [ ] `cmake --build build` — exits 0, zero warnings
 - [ ] `cd build && ctest --output-on-failure` — all tests pass
 - [ ] `./build/examples/embed_basic/embed_basic` — prints smoke test message
 - [ ] `clangd --check=include/sta/vm.h` — no errors
+- [ ] `find include/ -name "*.h" | wc -l` — exactly 1
+- [ ] `find src/ -name "*.h"` — internal headers only; nothing leaked to `include/`
+- [ ] `ls docs/decisions/` — six ADR files present (001 through 006)
 - [ ] `git status` — only intentional untracked files
-- [ ] `git log --oneline` — at least 2 commits (initial + scaffold)
-- [ ] `find include/ -name "*.h" | wc -l` — exactly 1 (only vm.h)
-- [ ] `find src/ -name "*.h"` — internal headers only; none in include/
+- [ ] `git log --oneline` — at least 2 commits
 
 ---
 
-## What comes next (Phase 0 spikes — not in this checklist)
+## What comes next (Phase 0 spikes)
 
-Once the scaffold is verified, the first spikes begin:
-1. OOP tagged integer representation and ObjHeader layout in `src/vm/`
-2. Lock-free MPSC mailbox prototype in `src/actor/`
-3. Per-actor heap allocator spike — validate ~300 byte creation target
-4. Work-stealing scheduler skeleton in `src/scheduler/`
-5. libuv async I/O wrapper stub in `src/io/`
+1. OOP tagged integer representation and `ObjHeader` layout — measure struct size on arm64
+2. Lock-free MPSC mailbox prototype — validate in isolation
+3. Per-actor heap allocator spike — validate ~300 byte creation target; record in ADR
+4. Work-stealing scheduler skeleton — pure C, no object system yet
+5. libuv async I/O wrapper — enable `STA_USE_LIBUV`, wire a minimal event loop
+6. Handle lifetime model — resolve ADR 006 before any IDE code touches the public API
 
-Each spike gets a decision record in `docs/decisions/` before any code
-is committed to a non-spike branch.
+Each spike: write decision record first, then implement.
