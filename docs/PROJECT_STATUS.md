@@ -67,6 +67,22 @@ No permanent implementation yet. All spike code is clearly marked.
   - `STA_ActorRevised` projection: 136 bytes with `stack_base` + `stack_top` fields; creation cost = 280 bytes
   - **Headroom: 20 bytes entering Spike 005 — tight, see ADR 010 density table**
 
+### Spike 005 — Async I/O integration via libuv
+- Spike doc: `docs/spikes/spike-005-async-io.md`
+- ADR: `docs/decisions/011-async-io.md`
+- Key results:
+  - Option A chosen: dedicated I/O thread running `uv_run(UV_RUN_DEFAULT)`; scheduler threads never block
+  - `sizeof(uv_loop_t)` = 1,072 bytes — Option C (per-actor loop) trivially rejected on measured data
+  - Model A chosen: direct deque push (`sta_io_sched_push`) on I/O completion — no message allocation
+  - `STA_SCHED_SUSPENDED = 0x04u` gates re-enqueue; three-way flag check prevents double-scheduling
+  - `sizeof(STA_ActorIo)` = 144 bytes; permanent I/O fields: `io_state` (4) + `io_result` (4) = 8 bytes
+  - Total creation cost = 288 bytes (target ~300); **Low scenario** from ADR 010 table; headroom = 12 bytes
+  - 13,150 compute-actor executions during 50 ms I/O wait — scheduler thread never blocked
+  - TCP loopback echo: 16-byte round trip; correct under compute load (82 compute runs during TCP)
+  - TSan clean: all tests pass with `-fsanitize=thread`
+  - Chase-Lev LIFO replaced with FIFO in spike scheduler — single-thread starvation artefact only, not a production change
+  - **`STA_Actor` must add `io_state` + `io_result` before Phase 2; headroom: 12 bytes**
+
 ---
 
 ## Open decisions (from ADR 007, 008, 009, 010)
@@ -83,6 +99,9 @@ These must be resolved before the corresponding component is built:
 9. **Deep-copy visited set** (ADR 008) — hash map for cycles/sharing required before Phase 1 copy implementation
 10. **`ask:` future on mailbox-full** (ADR 008) — future resolution path, Phase 2
 11. **Transfer buffer allocator** (ADR 008) — replace malloc stub with runtime slab, Phase 1
+12. **Resume point protocol for mid-message I/O suspension** (ADR 011) — define valid suspension points before Phase 2 I/O primitives
+13. **Lock-free I/O request queue** (ADR 011) — replace mutex-protected FIFO with `STA_MpscList`, Phase 2
+14. **I/O backpressure integration with §9.4 bounded mailboxes** (ADR 011) — Phase 2 design question
 
 ---
 
@@ -90,7 +109,6 @@ These must be resolved before the corresponding component is built:
 
 | # | Spike | Depends on | Key questions |
 |---|---|---|---|
-| 005 | Async I/O (libuv integration) | ADR 009, ADR 010 | Scheduler-thread never blocks; actor suspend/resume on I/O; `STA_Actor` density impact (20-byte headroom — see ADR 010 §Consequences) |
 | 006 | Image save/load (closed-world subset) | Spikes 002–004 | Serialization format, snapshot safe point, restore integrity |
 | 007 | Native bridge (C runtime ↔ SwiftUI IDE) | Spike 006 | `sta/vm.h` public API surface, FFI contract, live update path |
 
@@ -110,6 +128,7 @@ These must be resolved before the corresponding component is built:
 | 008 | Mailbox and message copy | Accepted |
 | 009 | Work-stealing scheduler and reduction-based preemption | Accepted |
 | 010 | Activation frame layout and tail-call optimisation | Accepted |
+| 011 | Async I/O architecture via libuv | Accepted |
 
 ---
 
@@ -120,8 +139,8 @@ src/vm/                   ← oop_spike.h, actor_spike.h (Phase 0 spike code)
 src/actor/                ← mailbox, lifecycle stubs
 src/gc/                   ← Phase 1+
 src/scheduler/            ← scheduler_spike.h, scheduler_spike.c
-src/io/                   ← Phase 0 spike target (Spike 005)
-docs/decisions/           ← ADRs 001-010
+src/io/                   ← io_spike.h, io_spike.c (Spike 005 complete)
+docs/decisions/           ← ADRs 001-011
 docs/spikes/              ← spike-001 through spike-004
 ```
 
@@ -130,4 +149,4 @@ docs/spikes/              ← spike-001 through spike-004
 ## How to orient a new chat with Claude
 Paste this file plus `CLAUDE.md` at the start of the session.
 For spike design work, also paste the relevant ADR(s) from `docs/decisions/`.
-For Spike 005: paste `CLAUDE.md` + this file + `ADR 009` + `ADR 010`.
+For Spike 006: paste `CLAUDE.md` + this file + `ADR 007` + `ADR 008` + `ADR 009`.
