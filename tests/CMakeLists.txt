@@ -29,3 +29,47 @@ target_include_directories(bench_mailbox_spike PRIVATE ${CMAKE_SOURCE_DIR})
 target_compile_definitions(bench_mailbox_spike PRIVATE STA_BENCH=1)
 target_compile_options(bench_mailbox_spike PRIVATE -O2)
 target_link_libraries(bench_mailbox_spike PRIVATE Threads::Threads)
+
+# ── Spike 003: Work-stealing scheduler — TSan correctness gate ────────────
+add_executable(test_scheduler_spike
+    test_scheduler_spike.c
+    ../src/scheduler/scheduler_spike.c)
+target_include_directories(test_scheduler_spike PRIVATE ${CMAKE_SOURCE_DIR})
+target_compile_options(test_scheduler_spike PRIVATE -fsanitize=thread)
+target_link_options(test_scheduler_spike PRIVATE -fsanitize=thread)
+target_link_libraries(test_scheduler_spike PRIVATE Threads::Threads)
+add_test(NAME scheduler_spike COMMAND test_scheduler_spike)
+set_tests_properties(scheduler_spike PROPERTIES TIMEOUT 120)
+
+# ── Spike 003: Scheduler — benchmark build (run manually, not via ctest) ───
+add_executable(bench_scheduler_spike
+    test_scheduler_spike.c
+    ../src/scheduler/scheduler_spike.c)
+target_include_directories(bench_scheduler_spike PRIVATE ${CMAKE_SOURCE_DIR})
+target_compile_definitions(bench_scheduler_spike PRIVATE STA_BENCH=1)
+target_compile_options(bench_scheduler_spike PRIVATE -O2)
+target_link_libraries(bench_scheduler_spike PRIVATE Threads::Threads)
+
+# ── Spike 003: Per-notification-mode benchmark builds ─────────────────────
+# Run ./build/tests/bench_scheduler_notif_1 (2, 3) for the three-way table.
+foreach(mode 1 2 3)
+    add_executable(bench_scheduler_notif_${mode}
+        test_scheduler_spike.c
+        ../src/scheduler/scheduler_spike.c)
+    target_include_directories(bench_scheduler_notif_${mode}
+        PRIVATE ${CMAKE_SOURCE_DIR})
+    target_compile_definitions(bench_scheduler_notif_${mode}
+        PRIVATE STA_BENCH=1 STA_NOTIF_MODE=${mode})
+    target_compile_options(bench_scheduler_notif_${mode} PRIVATE -O2)
+    target_link_libraries(bench_scheduler_notif_${mode} PRIVATE Threads::Threads)
+endforeach()
+
+# ── Spike 003: Per-deque-variant benchmark build ───────────────────────────
+add_executable(bench_scheduler_deque_b
+    test_scheduler_spike.c
+    ../src/scheduler/scheduler_spike.c)
+target_include_directories(bench_scheduler_deque_b PRIVATE ${CMAKE_SOURCE_DIR})
+target_compile_definitions(bench_scheduler_deque_b
+    PRIVATE STA_BENCH=1 STA_DEQUE_VARIANT=2)
+target_compile_options(bench_scheduler_deque_b PRIVATE -O2)
+target_link_libraries(bench_scheduler_deque_b PRIVATE Threads::Threads)
