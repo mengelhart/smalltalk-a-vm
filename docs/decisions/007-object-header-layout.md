@@ -208,8 +208,9 @@ built.
    path, a 2-bit immediate encoding (bits 1:0 = `10` for nil/true/false) is
    worth the tag complexity.
 
-2. **Character representation.** Immediate vs. interned heap object. Must be
-   decided before string/character primitives are implemented.
+2. **Character representation.** ~~Immediate vs. interned heap object. Must be
+   decided before string/character primitives are implemented.~~ **Resolved —
+   see §Character representation decision below.**
 
 3. **Forwarding pointer mechanics.** When `STA_GC_FORWARDED` is set, where
    exactly is the new address stored? The 12-byte header has only `class_index`
@@ -227,6 +228,100 @@ built.
 
 ---
 
+## Character representation decision
+
+**Status:** Accepted (addendum, 2026-03-11)
+**Resolves:** Open question 2
+
+### Decision: compiled Unicode tables (Option C)
+
+Character property data — category, case mapping, bidirectional class,
+digit value, decomposition — is compiled offline from the Unicode Consortium's
+`UnicodeData.txt` into static C lookup tables and shipped as a generated
+header (`src/vm/unicode_tables.h`). No platform Unicode API is used by the VM.
+
+Three options were evaluated:
+
+- **Option A: Bundle and parse `UnicodeData.txt` at bootstrap.** Fully
+  portable. Cost: ~2 MB file, a parser, and runtime indexing at bootstrap.
+  Used by Cuis Smalltalk.
+- **Option B: Delegate to platform libc** (`<wctype.h>`, `towupper()` etc.).
+  Zero bundle cost, but behavior is locale-dependent and coverage varies
+  across platforms. Unacceptable for a system that must behave consistently
+  on macOS, Linux, and any future arm64 target.
+- **Option C (chosen): Compile `UnicodeData.txt` offline into static C
+  lookup tables.** Same portability as Option A — the VM carries its own
+  Unicode knowledge and has no platform dependency — but with no parse
+  overhead at runtime. The generator runs once during development; the
+  generated tables are committed to the repo and updated when the Unicode
+  version is bumped. This is the approach used by CPython, Ruby MRI, and
+  most production language runtimes.
+
+### Rationale
+
+The VM must be platform-agnostic. arm64 runs on macOS, Linux, and other
+targets; behavior of `Character isLetter`, `Character asUppercase`, and
+string sorting must be identical everywhere. Option B is eliminated on
+this basis alone.
+
+Option C over Option A: the bootstrap sequence is already the most fragile
+part of Phase 1 (see §11 of the architecture document). Adding a Unicode
+parser to the bootstrap path increases complexity and bootstrap time for
+no runtime benefit. Static tables are faster, simpler, and carry zero
+bootstrap risk.
+
+### What the tables cover
+
+The generated tables provide, at minimum:
+
+- General category (`Lu`, `Ll`, `Lt`, `Lm`, `Lo`, `Nd`, `Zs`, etc.)
+- Simple uppercase / lowercase / titlecase mappings
+- Bidirectional class (needed for correct string display)
+- Numeric digit value (for `Character digitValue`)
+- Derived properties: `isLetter`, `isDigit`, `isAlphaNumeric`,
+  `isSeparator`, `isUppercase`, `isLowercase`
+
+Full Unicode normalization (NFC/NFD/NFKC/NFKD) and complex case folding
+are deferred — they are not required by ANSI Smalltalk and can be added
+as a later layer without changing the table format.
+
+### Character OOP representation
+
+Characters are **immediate values** using a 2-bit tag in the low bits of
+the OOP, distinct from SmallInt (bit 0 = 1) and heap pointers (bit 0 = 0).
+The encoding uses bits 1:0 = `10` to identify a Character immediate, with
+the Unicode code point in bits 63:2. This gives a 62-bit code point range —
+far exceeding Unicode's current 21-bit requirement (U+0000 to U+10FFFF).
+
+```c
+/* Character immediate: bits 1:0 = 0b10, code point in bits 63:2 */
+#define STA_IS_CHAR(oop)      (((oop) & 3u) == 2u)
+#define STA_CHAR_VAL(oop)     ((uint32_t)((oop) >> 2))
+#define STA_CHAR_OOP(cp)      (((STA_OOP)(cp) << 2) | 2u)
+```
+
+This supersedes the note in ADR 007 §Q2 that nil/true/false carry no special
+tag and `isNil` uses pointer comparison. The tag space is now:
+
+| bits 1:0 | Meaning |
+|---|---|
+| `01` | SmallInt (63-bit signed, value in bits 63:1) |
+| `10` | Character immediate (code point in bits 63:2) |
+| `00` | Heap pointer (16-byte aligned; bits 3:2 also zero) |
+| `11` | Reserved |
+
+`nil`, `true`, and `false` remain heap objects in the shared immutable
+region. The `isNil` pointer comparison is unchanged.
+
+### Note on the `reserved` field in STA_ObjHeader
+
+The 2-byte `reserved` field at offset 10 in `STA_ObjHeader` is not consumed
+by this decision. Character objects do not exist as heap objects under this
+scheme — all Characters are immediates. The `reserved` field remains
+available for future header extensions.
+
+---
+
 ## Consequences
 
 - `STA_ObjHeader` is locked at 12 bytes / 16-byte allocation unit. Any future
@@ -241,3 +336,14 @@ built.
 - The `class_index` scheme requires a concurrent-safe class table. Its
   synchronization strategy is deferred but must be designed before Phase 1
   method dispatch is implemented.
+- **The OOP tag scheme is extended by the Character immediate decision.**
+  bits 1:0 = `10` identifies a Character immediate; bits 1:0 = `01` remains
+  SmallInt; bits 1:0 = `00` remains heap pointer. All existing SmallInt and
+  heap pointer macros are unaffected — `STA_IS_SMALLINT` checks bit 0 only
+  and correctly excludes Character immediates (bit 0 = 0 for `10`).
+  `STA_IS_HEAP` must be updated: a heap pointer requires bits 1:0 = `00`,
+  not merely bit 0 = 0.
+- Unicode character property data is carried in static compiled tables
+  (`src/vm/unicode_tables.h`). No platform Unicode API is called by the VM.
+  The table generator must be re-run and the tables re-committed when the
+  Unicode version is bumped.
