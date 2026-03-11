@@ -64,6 +64,14 @@ foreach(mode 1 2 3)
     target_link_libraries(bench_scheduler_notif_${mode} PRIVATE Threads::Threads)
 endforeach()
 
+# ── Spike 004: Activation frame layout and TCO ────────────────────────────
+add_executable(test_frame_spike
+    test_frame_spike.c
+    ../src/vm/frame_spike.c
+    ../src/scheduler/scheduler_spike.c)
+target_include_directories(test_frame_spike PRIVATE ${CMAKE_SOURCE_DIR})
+add_test(NAME frame_spike COMMAND test_frame_spike)
+
 # ── Spike 003: Per-deque-variant benchmark build ───────────────────────────
 add_executable(bench_scheduler_deque_b
     test_scheduler_spike.c
