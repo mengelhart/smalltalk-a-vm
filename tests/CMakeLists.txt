@@ -72,6 +72,34 @@ add_executable(test_frame_spike
 target_include_directories(test_frame_spike PRIVATE ${CMAKE_SOURCE_DIR})
 add_test(NAME frame_spike COMMAND test_frame_spike)
 
+# ── Spike 005: Async I/O via libuv ────────────────────────────────────────
+if(STA_USE_LIBUV)
+    find_package(Threads REQUIRED)
+
+    # TSan correctness gate — registered with ctest
+    add_executable(test_io_spike
+        test_io_spike.c
+        ../src/io/io_spike.c
+        ../src/scheduler/scheduler_spike.c)
+    target_include_directories(test_io_spike PRIVATE ${CMAKE_SOURCE_DIR})
+    target_compile_options(test_io_spike PRIVATE -fsanitize=thread -Wall -Wextra)
+    target_link_options(test_io_spike PRIVATE -fsanitize=thread)
+    target_link_libraries(test_io_spike PRIVATE ${LIBUV_TARGET} Threads::Threads)
+    add_test(NAME io_spike COMMAND test_io_spike)
+    set_tests_properties(io_spike PROPERTIES TIMEOUT 120)
+
+    # Benchmark build — no TSan, -O2, run manually for latency numbers
+    add_executable(bench_io_spike
+        test_io_spike.c
+        ../src/io/io_spike.c
+        ../src/scheduler/scheduler_spike.c)
+    target_include_directories(bench_io_spike PRIVATE ${CMAKE_SOURCE_DIR})
+    target_compile_definitions(bench_io_spike PRIVATE STA_BENCH=1)
+    target_compile_options(bench_io_spike PRIVATE -O2 -Wall -Wextra)
+    target_link_libraries(bench_io_spike PRIVATE ${LIBUV_TARGET} Threads::Threads)
+    # Not a ctest target — run manually: ./build/tests/bench_io_spike
+endif()
+
 # ── Spike 003: Per-deque-variant benchmark build ───────────────────────────
 add_executable(bench_scheduler_deque_b
     test_scheduler_spike.c

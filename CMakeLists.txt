@@ -23,11 +23,14 @@ target_compile_options(sta_vm PRIVATE
     -Wno-unused-parameter
 )
 
-option(STA_USE_LIBUV "Enable libuv async I/O substrate (Phase 2)" OFF)
+option(STA_USE_LIBUV "Enable libuv async I/O (required for Spike 005)" OFF)
 if(STA_USE_LIBUV)
-    find_package(libuv REQUIRED)
-    target_link_libraries(sta_vm PRIVATE libuv::libuv)
-    target_compile_definitions(sta_vm PRIVATE STA_USE_LIBUV=1)
+    # Homebrew libuv ships a CMake config; add Homebrew prefix so find_package
+    # locates it without requiring PKG_CONFIG_PATH to be set.
+    list(APPEND CMAKE_PREFIX_PATH /opt/homebrew)
+    find_package(libuv CONFIG REQUIRED)
+    # Targets: libuv::uv (shared) and libuv::uv_a (static).
+    set(LIBUV_TARGET libuv::uv)
 endif()
 
 install(TARGETS sta_vm ARCHIVE DESTINATION lib)
