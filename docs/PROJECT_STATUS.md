@@ -83,9 +83,40 @@ No permanent implementation yet. All spike code is clearly marked.
   - Chase-Lev LIFO replaced with FIFO in spike scheduler — single-thread starvation artefact only, not a production change
   - **`STA_Actor` must add `io_state` + `io_result` before Phase 2; headroom: 12 bytes**
 
+### Spike 006 — Image save/load (closed-world subset)
+- Spike doc: `docs/spikes/spike-006-image.md`
+- ADR: `docs/decisions/012-image-format.md`
+- Key results:
+  - Flat binary format chosen: 48-byte header + immutable section + object data records + relocation table
+  - OOP encoding: SmallInts and Character immediates verbatim; heap ptrs as `(object_id << 2) | 0x3`
+  - Disambiguation via relocation table (authoritative), not tag bits alone
+  - Shared immutables (nil, true, false, symbols) encoded by FNV-1a name key; resolved via callback on load
+  - Restore integrity: all OOPs, flags, and payload words round-trip identically (asserted in test)
+  - Save ~595k objects/sec · 47.9 MB/s; Load ~700k objects/sec (TSan build, M4 Max)
+  - Per-object on-disk overhead: 16 bytes fixed (`STA_ObjRecord`) + payload; reloc: 8 bytes/heap-ptr slot
+  - `STA_Actor` gains `snapshot_id` (4 bytes) + pad (4 bytes); `STA_ACTOR_QUIESCED = 0x08u` reuses `sched_flags`
+  - `sizeof(STA_ActorSnap)` = 152 bytes; total creation cost = **296 bytes; headroom = 4 bytes ⚠**
+  - TSan clean: single-threaded spike, no shared state introduced
+  - **⚠ Only 4 bytes of density headroom remain — any future `STA_Actor` addition requires a new ADR**
+
+### Spike 007 — Native bridge (C runtime ↔ SwiftUI IDE)
+- Spike doc: `docs/spikes/spike-007-native-bridge.md`
+- ADR: `docs/decisions/013-native-bridge.md` (also closes ADR 006 — Handle lifecycle)
+- Key results:
+  - Handle model: explicit reference counting (JNI/CPython); `STA_Handle*` stable, OOP updated in-place on GC move
+  - Bootstrapping: `sta_vm_nil/true/false/lookup_class` provide first handles without `sta_eval`
+  - 10 new `vm.h` functions + 5 types; each justified by a real IDE scenario; no speculative additions
+  - Threading: 3 narrow locks (IDE-API, method-install, actor-registry); scheduler never holds any; not a GIL
+  - `sta_inspect_cstring`: **NOT thread-safe** — single-caller-at-a-time by contract; Phase 3 changes to caller-provided buffer
+  - Live update: method_install and class_define stub-logged under `install_lock`; 8×100 concurrent installs TSan-clean
+  - Actor enumeration: snapshot model (registry lock released before visitor); 10 actors, TSan-clean
+  - Event model: push; `STA_EVT_ACTOR_CRASH`, `METHOD_INSTALLED`, `IMAGE_SAVE_COMPLETE`, `UNHANDLED_EXCEPTION`
+  - `STA_Actor` unchanged: 0 bytes added; **4-byte density headroom preserved**
+  - 15 tests passing; ctest: 0.12 s, TSan-clean; `sizeof(STA_Handle)` = 16, `sizeof(STA_ActorEntry)` = 48
+
 ---
 
-## Open decisions (from ADR 007, 008, 009, 010)
+## Open decisions (from ADRs 007–013)
 These must be resolved before the corresponding component is built:
 
 1. **Nil/True/False as immediates** — decide before first bytecode dispatch loop
@@ -102,15 +133,21 @@ These must be resolved before the corresponding component is built:
 12. **Resume point protocol for mid-message I/O suspension** (ADR 011) — define valid suspension points before Phase 2 I/O primitives
 13. **Lock-free I/O request queue** (ADR 011) — replace mutex-protected FIFO with `STA_MpscList`, Phase 2
 14. **I/O backpressure integration with §9.4 bounded mailboxes** (ADR 011) — Phase 2 design question
+15. **⚠ 4-byte density headroom** (ADR 012) — next `STA_Actor` addition requires a new ADR; breach of 300-byte target must be explicitly justified per CLAUDE.md
+16. **Quiescing protocol for live actors** (ADR 012) — Phase 1 blocker; define before Phase 1 image save
+17. **Root table for multi-root images** (ADR 012) — extend format before Phase 1 bootstrap image save
+18. **Class identifier portability** (ADR 012) — stable class keys required before Phase 1 image save
+19. **Growable handle table** (ADR 013, #88) — fixed 1,024-entry spike table; Phase 3 blocker before Swift FFI wrapper
+20. **Handle validity after `sta_vm_destroy`** (ADR 013, #89) — undefined behaviour contract; Phase 3 blocker before Swift FFI wrapper
+21. **`sta_inspect_cstring` caller-provided buffer** (ADR 013, #90) — source-breaking Phase 3 change; do not add interim "fix"
+22. **Event callback re-entrancy rules** (ADR 013, #91) — specify before Phase 3 Swift FFI wrapper
 
 ---
 
-## Remaining Phase 0 spikes (suggested order)
+## Phase 0 complete
 
-| # | Spike | Depends on | Key questions |
-|---|---|---|---|
-| 006 | Image save/load (closed-world subset) | Spikes 002–004 | Serialization format, snapshot safe point, restore integrity |
-| 007 | Native bridge (C runtime ↔ SwiftUI IDE) | Spike 006 | `sta/vm.h` public API surface, FFI contract, live update path |
+All seven architectural spikes are complete. ADRs 007–013 are accepted.
+The next phase is **Phase 1 — Minimal Live Kernel**.
 
 ---
 
@@ -123,12 +160,14 @@ These must be resolved before the corresponding component is built:
 | 003 | Internal header convention | Accepted |
 | 004 | Live update semantics | Accepted |
 | 005 | API error reporting | Accepted |
-| 006 | Handle lifecycle | Accepted |
+| 006 | Handle lifecycle | Accepted (closed by ADR 013) |
 | 007 | Object header layout and OOP tagging | Accepted |
 | 008 | Mailbox and message copy | Accepted |
 | 009 | Work-stealing scheduler and reduction-based preemption | Accepted |
 | 010 | Activation frame layout and tail-call optimisation | Accepted |
 | 011 | Async I/O architecture via libuv | Accepted |
+| 012 | Image format and snapshot protocol | Accepted |
+| 013 | Native bridge (C runtime ↔ SwiftUI IDE) | Accepted |
 
 ---
 
@@ -140,13 +179,17 @@ src/actor/                ← mailbox, lifecycle stubs
 src/gc/                   ← Phase 1+
 src/scheduler/            ← scheduler_spike.h, scheduler_spike.c
 src/io/                   ← io_spike.h, io_spike.c (Spike 005 complete)
-docs/decisions/           ← ADRs 001-011
-docs/spikes/              ← spike-001 through spike-004
+src/image/                ← image_spike.h, image_spike.c (Spike 006 complete)
+src/bridge/               ← bridge_spike.h, bridge_spike.c (Spike 007 complete)
+docs/decisions/           ← ADRs 001-013
+docs/spikes/              ← spike-001 through spike-007
 ```
 
 ---
 
 ## How to orient a new chat with Claude
 Paste this file plus `CLAUDE.md` at the start of the session.
-For spike design work, also paste the relevant ADR(s) from `docs/decisions/`.
-For Spike 006: paste `CLAUDE.md` + this file + `ADR 007` + `ADR 008` + `ADR 009`.
+Phase 0 is complete. The next session begins Phase 1 — Minimal Live Kernel.
+For Phase 1 work: paste `CLAUDE.md` + this file + the relevant ADRs for the
+component being built (ADR 007 for object memory, ADR 008 for mailbox,
+ADR 009 for scheduler, ADR 013 for public API).

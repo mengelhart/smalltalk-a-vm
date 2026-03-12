@@ -100,6 +100,39 @@ if(STA_USE_LIBUV)
     # Not a ctest target — run manually: ./build/tests/bench_io_spike
 endif()
 
+# ── Spike 006: Image save/load ────────────────────────────────────────────
+add_executable(test_image_spike
+    test_image_spike.c
+    ../src/image/image_spike.c)
+target_include_directories(test_image_spike PRIVATE ${CMAKE_SOURCE_DIR})
+target_compile_options(test_image_spike PRIVATE
+    -Wall -Wextra -Wpedantic -Werror -fsanitize=thread)
+target_link_options(test_image_spike PRIVATE -fsanitize=thread)
+add_test(NAME image_spike COMMAND test_image_spike)
+set_tests_properties(image_spike PROPERTIES TIMEOUT 60)
+
+# Benchmark build — no TSan, -O2, run manually for throughput numbers
+add_executable(bench_image_spike
+    test_image_spike.c
+    ../src/image/image_spike.c)
+target_include_directories(bench_image_spike PRIVATE ${CMAKE_SOURCE_DIR})
+target_compile_definitions(bench_image_spike PRIVATE STA_BENCH=1)
+target_compile_options(bench_image_spike PRIVATE -O2 -Wall -Wextra)
+
+# ── Spike 007: Native bridge — TSan correctness gate ─────────────────────
+add_executable(test_bridge_spike
+    test_bridge_spike.c
+    ../src/bridge/bridge_spike.c)
+target_include_directories(test_bridge_spike PRIVATE
+    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/include)
+target_compile_options(test_bridge_spike PRIVATE
+    -Wall -Wextra -Wpedantic -Werror -fsanitize=thread -g)
+target_link_options(test_bridge_spike PRIVATE -fsanitize=thread)
+target_link_libraries(test_bridge_spike PRIVATE Threads::Threads)
+add_test(NAME bridge_spike COMMAND test_bridge_spike)
+set_tests_properties(bridge_spike PROPERTIES TIMEOUT 60)
+
 # ── Spike 003: Per-deque-variant benchmark build ───────────────────────────
 add_executable(bench_scheduler_deque_b
     test_scheduler_spike.c
