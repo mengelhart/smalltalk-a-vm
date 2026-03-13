@@ -19,11 +19,13 @@ macOS Tahoe · Xcode 26.3 · Apple clang 17 · CMake 4.2.3 · arm64 M4 Max
 - Internal headers live beside their .c files in `src/`. See ADR 003.
 - Error shape: `STA_OK` / `STA_ERR_*` integer codes + `sta_vm_last_error()`. See ADR 005.
 
-## Actor density target
-~300 bytes per actor at creation — inherited from BEAM, validated in Phase 0 spikes.
-Measure actor creation size from every relevant spike.
-Drift from ~300 bytes must be explained in a decision record. Never silently ignored.
-This is a design target and forcing function, not an automatic pass/fail during early spikes.
+## Actor density targets (Phase 1)
+- `STA_Actor` struct: **164 bytes**. Any addition requires a new ADR.
+- Creation cost (struct + nursery + identity object): **308 bytes**.
+- Execution cost (+ initial 512-byte stack segment): **820 bytes**.
+- BEAM comparison: 2,704 bytes at spawn. Smalltalk/A is 3.3× more compact.
+- The 300-byte forcing function served its purpose through Phase 0. Phase 1
+  targets are the numbers above. See ADR 014.
 
 ## Current phase
 Phase 0 — architectural spikes. No permanent implementation yet.
