@@ -124,8 +124,8 @@ These must be resolved before the corresponding component is built:
 3. **Class table concurrency** — decide before method cache is built
 4. **Variant B deque root cause** (ADR 009) — investigate in Phase 1
 5. **Per-actor scheduling fairness** (ADR 009) — measure with real bytecode in Phase 1
-6. **Stack slab growth policy** (ADR 010) — decide before bytecode interpreter is written
-7. **TCO with callee having more locals** (ADR 010) — decide alongside slab growth policy
+6. ~~**Stack slab growth policy**~~ — **Resolved in ADR 014 — linked segments, 512-byte initial, 2 KB growth, deferred allocation.**
+7. ~~**TCO with callee having more locals**~~ — **Resolved in ADR 014 — decline TCO when callee frame does not fit current frame space.**
 8. **Closure and non-local return compatibility** (ADR 010) — design before Phase 1 block/closure support
 9. **Deep-copy visited set** (ADR 008) — hash map for cycles/sharing required before Phase 1 copy implementation
 10. **`ask:` future on mailbox-full** (ADR 008) — future resolution path, Phase 2
@@ -168,6 +168,7 @@ The next phase is **Phase 1 — Minimal Live Kernel**.
 | 011 | Async I/O architecture via libuv | Accepted |
 | 012 | Image format and snapshot protocol | Accepted |
 | 013 | Native bridge (C runtime ↔ SwiftUI IDE) | Accepted |
+| 014 | Stack slab growth policy and TCO frame sizing | Accepted |
 
 ---
 
