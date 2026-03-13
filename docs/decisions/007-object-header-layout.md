@@ -197,16 +197,39 @@ available for future fields under the index scheme.
 
 ---
 
+## Resolved open questions
+
+### Open question 1 — Nil/True/False as immediates vs heap objects
+
+**Status:** Resolved (2026-03-13)
+
+**Decision:** `nil`, `true`, and `false` remain heap objects in the shared
+immutable region. No immediate encoding will be added for them.
+
+**Rationale:**
+- Three objects allocated once at bootstrap, never moved, never collected.
+- `OP_PUSH_NIL` / `OP_PUSH_TRUE` / `OP_PUSH_FALSE` load from `special_objects[]`
+  — one memory read, always L1 hot.
+- No tag bits consumed — OOP tag space stays clean (bit 0 = SmallInt,
+  bits 1:0 = `10` = Character, bits 1:0 = `00` = heap pointer, `11` reserved).
+- Identity comparison (`== nil`) is a pointer compare against a known address,
+  same cost as a tag check on any architecture.
+- A future JIT can hardcode these addresses as immediate operands without
+  any object model change — this decision does not close JIT doors.
+- GC treats them as roots in the immutable region; no special-case dispatch
+  logic is required.
+
+---
+
 ## Open questions (deferred)
 
 These questions were identified by the spike and deliberately left for future
 ADRs. They must be resolved before the corresponding runtime component is
 built.
 
-1. **Nil / True / False as immediates.** Should be decided before the first
-   bytecode dispatch loop is written. If `isNil` appears on a critical hot
-   path, a 2-bit immediate encoding (bits 1:0 = `10` for nil/true/false) is
-   worth the tag complexity.
+1. **Nil / True / False as immediates.** ~~Should be decided before the first
+   bytecode dispatch loop is written.~~ **Resolved — see §Resolved open
+   questions above.**
 
 2. **Character representation.** ~~Immediate vs. interned heap object. Must be
    decided before string/character primitives are implemented.~~ **Resolved —

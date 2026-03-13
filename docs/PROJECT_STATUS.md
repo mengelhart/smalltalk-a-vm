@@ -119,7 +119,7 @@ No permanent implementation yet. All spike code is clearly marked.
 ## Open decisions (from ADRs 007–013)
 These must be resolved before the corresponding component is built:
 
-1. **Nil/True/False as immediates** — decide before first bytecode dispatch loop
+1. ~~**Nil/True/False as immediates**~~ — **Resolved in ADR 007 amendment — heap objects in shared immutable region.**
 2. **Forwarding pointer mechanics** — decide before GC is implemented
 3. **Class table concurrency** — decide before method cache is built
 4. **Variant B deque root cause** (ADR 009) — investigate in Phase 1
