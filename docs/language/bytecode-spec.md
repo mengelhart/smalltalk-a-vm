@@ -96,6 +96,7 @@ This specification depends on decisions recorded in the following ADRs. If a con
 | v1 | March 2026 | Initial specification. |
 | v2 | March 2026 | Revisions from first external review. Key changes: owner class literal changed from Association to direct class OOP (§4.4); OP_PUSH_GLOBAL unbound-global error language removed (§3.2); OP_ACTOR_SPAWN operand corrected to spawn descriptor (§3.9); primitive dispatch protocol clarified (§4.8); TCO/NLR compiler rule added (§5.11, §7.10); Phase 1 block restriction made explicit (§6.11); nil/true/false representation noted as open (§11.1). |
 | v3 | March 2026 | Revisions from second and third external reviews. Second review: added normative scope note (§1.1); marked ISA encoding as provisional (§2.1); added TCO fragility warning (§2.4); tightened undeclared-global compiler/interpreter boundary (§3.2); marked `largeFrame` as provisional VM-private metadata (§4.2); documented primitive dispatch authority split (§4.9); strengthened Phase 1 block subset language and PROJECT_STATUS deference (§6.11); rewritten `ensure:` as bootstrap-only cleanup (§7.7, §7.11); marked frame markers as deliberate forward-compatibility debt (§7.11); marked `ask:` mailbox-full behavior as provisional (§9.3, §9.7); added actor identity vs. capability authorization clarification (§9); added bootstrap image-save scope caveat (§11.7). Third review: fixed OP_WIDE/OP_PRIMITIVE rule contradiction (§2.2); clarified that all primitive methods contain a bytecode preamble (§4.9); fixed actor-address/capability-reference wording leak (§9.6); tightened Phase 1 actor opcode emission rule (§3.9, §9.8). |
+| v4 | March 2026 | Last review find - the §3.9 language already says "decoder or verifier testing" — §9.8 should match |
 
 ---
 
@@ -2034,7 +2035,7 @@ This allows Phase 1 to include compiler tests that emit actor opcodes and verify
 | Closure descriptor | `ClosureDescriptor` | startPC, bodyLength, numArgs, numCopied | `OP_CLOSURE_COPY` |
 | Spawn descriptor | `SpawnDescriptor` | actorClass, numArgs | `OP_ACTOR_SPAWN` |
 
-This allows Phase 1 decoder and verifier test fixtures to exercise actor opcode parsing without requiring the actor runtime to exist.
+All three are small immutable objects stored in the literal frame. The compiler creates them at compile time. They are part of the compiled method and live in the shared immutable region.
 
 ---
 
