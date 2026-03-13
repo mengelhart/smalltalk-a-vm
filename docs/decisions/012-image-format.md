@@ -369,16 +369,69 @@ identity. The class name is the portable identity. Indices are rebuilt on load.
   save and resolved by name on load.
 - No complex hashing or namespace machinery needed for Phase 1.
 
+### Open question 1 — Quiescing protocol for live actors
+
+**Status:** Resolved (2026-03-13)
+
+**Decision:** Quiesce at safe point — end of reduction quantum or already
+suspended. Not message completion. Not mailbox drain.
+
+**Quiesce contract:**
+- An actor is quiesceable when it reaches a safe point: the end of its current
+  reduction quantum (`STA_REDUCTION_QUOTA` exhausted), or it is already in
+  `STA_SCHED_SUSPENDED` state (waiting on I/O).
+- The snapshot captures the actor exactly as it is at the safe point: heap,
+  mailbox (pending messages), execution state (current PC, stack, which message
+  is being processed).
+- An actor mid-message is serialised mid-message. On restore it resumes from
+  the exact bytecode PC where it was suspended.
+- Messages in the mailbox remain in the mailbox. The snapshot does not drain
+  or advance the mailbox.
+- I/O-suspended actors are already at a safe point. On restore, their external
+  handles are invalid — the actor receives a handle-revocation notification and
+  its message handler deals with the failure (per architecture doc §13.2
+  revivable handle semantics).
+
+**Bounded wait property:**
+- No actor runs for more than one reduction quantum (1000 reductions,
+  microseconds) before hitting a preemption check.
+- The quiesce phase completes in microseconds even with millions of actors.
+- This is a hard bound — no actor can delay the snapshot indefinitely.
+
+**Phase 2 protocol (full multi-actor):**
+1. Image save requested (primitive 110 or `sta_image_save`).
+2. Root supervisor sends `#prepareForSnapshot` to all supervisors.
+3. Each scheduler thread: at end of current actor's quantum, mark the actor
+   `STA_ACTOR_QUIESCED` instead of rescheduling. Repeat for all runnable actors.
+4. I/O-suspended actors: mark quiesced immediately (already safe).
+5. Once all actors quiesced (bounded wait), take the snapshot.
+6. After save: clear quiesced flags, reschedule all actors, send
+   `#snapshotComplete`.
+
+**Phase 1 implementation (single-actor, trivially correct):**
+1. Primitive 110 (`snapshotTo:`) fires inside the interpreter.
+2. The single actor is at a message boundary by definition (the primitive is
+   the message being processed).
+3. Set `STA_ACTOR_QUIESCED` flag.
+4. Call image writer.
+5. Clear flag.
+6. Return from primitive.
+
+**API surface:**
+```c
+int sta_image_save(STA_VM *vm, const char *path);
+```
+Phase 1: set flag, write, clear, return.
+Phase 2: replaces internals with full quiesce-all-actors protocol.
+Caller (primitive 110) does not change.
+
 ---
 
 ## Open questions (deferred)
 
-1. **Quiescing protocol for live actors.** Stopping a running actor cleanly
-   for snapshot without data races requires a safe-point: the actor must reach
-   a point where its heap is consistent, then park. The `STA_ACTOR_QUIESCED`
-   flag and the reduction-interrupt mechanism (ADR 009) are the tools; the
-   exact protocol (who sets the flag, in what order relative to the scheduler)
-   must be defined before Phase 1 image save. This is a Phase 1 blocker.
+1. **Quiescing protocol for live actors.** ~~Stopping a running actor cleanly
+   for snapshot without data races requires a safe-point.~~ **Resolved — see
+   §Resolved open questions above.**
 
 2. **Root table.** ~~A single root (object ID 0) is sufficient for the spike.
    Production images need: active process list, class dictionary, symbol table,
