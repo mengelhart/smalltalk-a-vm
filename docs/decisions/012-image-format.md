@@ -281,10 +281,9 @@ re-enqueueing. See Open Questions.
   remaining 4 bytes — or requires a pad reduction to fit — breaches the
   300-byte target and must be explicitly justified per CLAUDE.md.
 
-- **Root table is deferred to Phase 1.** This spike uses a single root
-  (object ID 0). A production image has multiple roots: the active process
-  list, the class dictionary, the symbol table. Phase 1 must define a root
-  table section in the format (version 2 or a reserved header field).
+- **Root table: root-of-roots Array convention adopted.** The single root OOP
+  points to an immutable Array of fixed-index roots. See §Resolved open
+  questions. No format change required.
 
 - **Memory-mapped load deferred to Phase 1.** The five-pass fseek+fread
   implementation is correct and sufficient for Phase 0 development images.
@@ -297,6 +296,47 @@ re-enqueueing. See Open Questions.
 
 ---
 
+## Resolved open questions
+
+### Open question 2 — Root table for multi-root images
+
+**Status:** Resolved (2026-03-13)
+
+**Decision:** Root-of-roots Array convention. The single `root` OOP in the
+image header points to an immutable `Array` containing all top-level image
+roots at fixed indices. No change to the binary format.
+
+**Root Array layout:**
+
+| Index | Constant | Content |
+|---|---|---|
+| 0 | `STA_IMAGE_ROOT_SPECIAL_OBJECTS` | Array of 32 OOPs — the special object table |
+| 1 | `STA_IMAGE_ROOT_CLASS_TABLE` | Array of class OOPs — the class table |
+| 2 | `STA_IMAGE_ROOT_GLOBALS` | SystemDictionary — the global dictionary |
+
+**Constants (defined in `src/image/` headers):**
+
+```c
+#define STA_IMAGE_ROOT_SPECIAL_OBJECTS  0
+#define STA_IMAGE_ROOT_CLASS_TABLE      1
+#define STA_IMAGE_ROOT_GLOBALS          2
+#define STA_IMAGE_ROOT_COUNT            3
+```
+
+**Rationale:**
+- Zero change to the spike-006 binary format — the header stays 48 bytes and
+  the root OOP field stays one field.
+- The root Array is a normal immutable object, serialised and relocated like
+  everything else — no special-case serialisation logic.
+- Extensible by convention: Phase 2+ adds `root[3]`, `root[4]` etc. for actor
+  heaps, capability graphs, etc., without any format change.
+- The loader reads the root, verifies it is an Array of size ≥
+  `STA_IMAGE_ROOT_COUNT`, and extracts the three objects by index.
+- Bootstrap creates the root Array as its final step before calling the image
+  writer.
+
+---
+
 ## Open questions (deferred)
 
 1. **Quiescing protocol for live actors.** Stopping a running actor cleanly
@@ -306,10 +346,11 @@ re-enqueueing. See Open Questions.
    exact protocol (who sets the flag, in what order relative to the scheduler)
    must be defined before Phase 1 image save. This is a Phase 1 blocker.
 
-2. **Root table.** A single root (object ID 0) is sufficient for the spike.
+2. **Root table.** ~~A single root (object ID 0) is sufficient for the spike.
    Production images need: active process list, class dictionary, symbol table,
    bootstrap globals. Define a root table section (likely a header extension or
-   a dedicated pre-data section) before Phase 1 image save.
+   a dedicated pre-data section) before Phase 1 image save.~~ **Resolved — see
+   §Resolved open questions above.**
 
 3. **Incremental save vs. stop-the-world.** Full-image save with a live
    scheduler requires either a read barrier (incremental, no stop) or a
