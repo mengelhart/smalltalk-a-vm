@@ -335,6 +335,40 @@ roots at fixed indices. No change to the binary format.
 - Bootstrap creates the root Array as its final step before calling the image
   writer.
 
+### Open question 4 — Class identifier portability
+
+**Status:** Resolved (2026-03-13)
+
+**Decision:** Fixed indices 0–31, name-based resolution for indices 32+. Class
+indices are an in-memory optimisation (fast array lookup), not a semantic
+identity. The class name is the portable identity. Indices are rebuilt on load.
+
+**Mechanism:**
+- Indices 0–31 are hardcoded in the bytecode spec and assigned during bootstrap.
+  They are the same on every build by construction. The loader writes them
+  directly to their fixed slots — no lookup needed.
+- For indices 32+, the image includes a class name table: an array of
+  `(class_index, symbol_key)` pairs serialised alongside the object data. The
+  `symbol_key` is an FNV-1a hash of the class name, consistent with how
+  spike-006 already encodes shared immutables.
+- On load: the loader reads the name table, looks up each name in the global
+  dictionary (restored from `root[2]`), and assigns class table slots. If a
+  name is not found, the loader signals an error.
+- Indices 32+ may be assigned differently on load than on save. The loader
+  rewrites `class_index` fields in all object headers using the name table
+  mapping. This extends the existing relocation table rewriting — the
+  relocation table already rewrites OOP fields; extending it to rewrite
+  `class_index` fields is a natural addition.
+
+**Rationale:**
+- Kernel classes 0–31 are stable by construction — no portability concern.
+- Class name is the stable identity; index is a runtime optimisation.
+- Builds on the existing ADR 012 relocation infrastructure — no new mechanism
+  required.
+- User-defined classes created at runtime are captured in the name table on
+  save and resolved by name on load.
+- No complex hashing or namespace machinery needed for Phase 1.
+
 ---
 
 ## Open questions (deferred)
@@ -359,11 +393,11 @@ roots at fixed indices. No change to the binary format.
    approach changes this format. Decide the quiesce strategy as part of the
    Phase 1 save protocol definition.
 
-4. **Class identifier portability.** The spike uses `class_index` (an actor-
+4. **Class identifier portability.** ~~The spike uses `class_index` (an actor-
    local integer) for non-immutable objects and FNV-1a name hash for immutable
    classes. The production class registry (Phase 1) must assign stable,
-   portable class identifiers. Recommendation: class name string, same
-   mechanism as immutable symbols. Define before Phase 1 bootstrap image save.
+   portable class identifiers.~~ **Resolved — see §Resolved open questions
+   above.**
 
 5. **4-byte density headroom.** With only 4 bytes remaining, the next `STA_Actor`
    field addition requires a new ADR and an explicit decision: either accept a

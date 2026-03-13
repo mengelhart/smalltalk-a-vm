@@ -136,7 +136,7 @@ These must be resolved before the corresponding component is built:
 15. **⚠ 4-byte density headroom** (ADR 012) — next `STA_Actor` addition requires a new ADR; breach of 300-byte target must be explicitly justified per CLAUDE.md
 16. **Quiescing protocol for live actors** (ADR 012) — Phase 1 blocker; define before Phase 1 image save
 17. ~~**Root table for multi-root images**~~ — **Resolved in ADR 012 amendment — root-of-roots Array convention, no format change.**
-18. **Class identifier portability** (ADR 012) — stable class keys required before Phase 1 image save
+18. ~~**Class identifier portability**~~ — **Resolved in ADR 012 amendment — fixed indices 0-31, name-based resolution for 32+.**
 19. **Growable handle table** (ADR 013, #88) — fixed 1,024-entry spike table; Phase 3 blocker before Swift FFI wrapper
 20. **Handle validity after `sta_vm_destroy`** (ADR 013, #89) — undefined behaviour contract; Phase 3 blocker before Swift FFI wrapper
 21. **`sta_inspect_cstring` caller-provided buffer** (ADR 013, #90) — source-breaking Phase 3 change; do not add interim "fix"
