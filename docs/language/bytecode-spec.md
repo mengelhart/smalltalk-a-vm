@@ -1,4 +1,4 @@
-# Smalltalk/A Bytecode Specification v2
+# Smalltalk/A Bytecode Specification v4
 
 ## Table of Contents
 
@@ -23,6 +23,8 @@
 This is the authoritative specification for the Smalltalk/A bytecode instruction set, compiled method format, block/closure model, primitive table, and actor extension opcodes. The compiler emits bytecode conforming to this spec. The interpreter executes bytecode conforming to this spec. Where this document and any implementation disagree, this document is correct.
 
 This is not a tutorial, a design rationale document, or an architecture overview. For architecture and rationale, see `docs/architecture/smalltalk-a-vision-architecture-v3.md`. For individual design decisions, see the ADR series in `docs/decisions/`.
+
+> **Normative scope.** This specification is normative for the bytecode format and interpreter/compiler contract only where explicitly stated. Where `PROJECT_STATUS.md` still marks a dependency as open, this document should be read as defining provisional execution scaffolding rather than a frozen architectural decision. In any conflict between this specification and an unresolved open decision in `PROJECT_STATUS.md`, the open decision takes precedence — this spec will be updated when that decision is closed.
 
 ### 1.2 Relationship to the Blue Book
 
@@ -92,7 +94,8 @@ This specification depends on decisions recorded in the following ADRs. If a con
 | Version | Date | Summary |
 |---|---|---|
 | v1 | March 2026 | Initial specification. |
-| v2 | March 2026 | Revisions from external review. Key changes: owner class literal changed from Association to direct class OOP (§4.4); OP_PUSH_GLOBAL unbound-global error language removed (§3.2); OP_ACTOR_SPAWN operand corrected to spawn descriptor (§3.9); primitive dispatch protocol clarified (§4.8); TCO/NLR compiler rule added (§5.11, §7.10); Phase 1 block restriction made explicit (§6.11); nil/true/false representation noted as open (§11.1). |
+| v2 | March 2026 | Revisions from first external review. Key changes: owner class literal changed from Association to direct class OOP (§4.4); OP_PUSH_GLOBAL unbound-global error language removed (§3.2); OP_ACTOR_SPAWN operand corrected to spawn descriptor (§3.9); primitive dispatch protocol clarified (§4.8); TCO/NLR compiler rule added (§5.11, §7.10); Phase 1 block restriction made explicit (§6.11); nil/true/false representation noted as open (§11.1). |
+| v3 | March 2026 | Revisions from second and third external reviews. Second review: added normative scope note (§1.1); marked ISA encoding as provisional (§2.1); added TCO fragility warning (§2.4); tightened undeclared-global compiler/interpreter boundary (§3.2); marked `largeFrame` as provisional VM-private metadata (§4.2); documented primitive dispatch authority split (§4.9); strengthened Phase 1 block subset language and PROJECT_STATUS deference (§6.11); rewritten `ensure:` as bootstrap-only cleanup (§7.7, §7.11); marked frame markers as deliberate forward-compatibility debt (§7.11); marked `ask:` mailbox-full behavior as provisional (§9.3, §9.7); added actor identity vs. capability authorization clarification (§9); added bootstrap image-save scope caveat (§11.7). Third review: fixed OP_WIDE/OP_PRIMITIVE rule contradiction (§2.2); clarified that all primitive methods contain a bytecode preamble (§4.9); fixed actor-address/capability-reference wording leak (§9.6); tightened Phase 1 actor opcode emission rule (§3.9, §9.8). |
 
 ---
 
@@ -113,6 +116,8 @@ There are no 1-byte instructions and no variable-length instructions other than 
 
 The operand byte is an unsigned 8-bit value (0–255). Its interpretation depends on the opcode: it may be a literal frame index, a temp index, an instVar index, a jump offset, an argument count, or unused (set to 0x00 for opcodes that take no operand).
 
+This fixed-width encoding with `OP_WIDE` extension is chosen for initial interpreter simplicity and may be revisited after profiling of code density, dispatch cost, and compiler output shape.
+
 ### 2.2 Wide prefix
 
 When an operand value exceeds 255, the instruction is preceded by the `OP_WIDE` prefix byte and a high-byte operand, forming a 4-byte sequence:
@@ -129,7 +134,7 @@ The effective operand is `(high_byte << 8) | low_byte`, yielding a 16-bit unsign
 `OP_WIDE` is not an instruction — it is a prefix that modifies the next instruction. It has no stack effect of its own. The interpreter, upon seeing `OP_WIDE`, reads the high byte, advances to the opcode, reads the low byte, computes the 16-bit operand, and dispatches the opcode normally.
 
 Rules:
-- `OP_WIDE` may precede any opcode that uses its operand byte as an index or offset (push, store, send, jump).
+- `OP_WIDE` may precede any opcode with a defined 16-bit extended operand form. This includes index-bearing opcodes (push, store, send, block/closure copy, actor spawn), offset-bearing opcodes (jump), and `OP_PRIMITIVE` (for extension primitive indices 256+).
 - `OP_WIDE` must not precede opcodes where the operand is an argument count that will never exceed 255 (no Smalltalk method takes 256+ arguments).
 - `OP_WIDE` must not precede another `OP_WIDE`. The maximum operand is 16 bits.
 - For the purposes of TCO lookahead, `OP_WIDE + instruction` occupies 4 bytes. The lookahead checks `bytecode[pc + STA_SEND_WIDTH]` for a standard send and `bytecode[pc + 4]` for a wide send. The compiler must not emit a wide send immediately before a return if it expects TCO — see §2.4.
@@ -164,6 +169,8 @@ Wide send at pc:
 The compiler must be aware that TCO only fires when `OP_RETURN_TOP` is the *physically next* instruction after the send. Inserting any instruction between a tail-position send and its return (including `OP_POP`, `OP_DUP`, or another `OP_WIDE`) defeats TCO. This is a compiler responsibility, not an interpreter responsibility — the interpreter's check is purely mechanical.
 
 **Additional restriction:** A send is not in tail position if the enclosing method contains any block literal with a non-local return (`^`). See §5.11 for the full rule.
+
+**Fragility under transformation:** Tail-call recognition is currently defined syntactically by immediate adjacency to `OP_RETURN_TOP`. Any compiler pass, instrumentation step, or bytecode transformation that inserts instructions between the send and return must preserve or intentionally discard tail-call eligibility. A future revision may replace this syntactic rule with explicit tail-position metadata if tooling or optimization pressure requires it.
 
 ### 2.5 Operand value 0x00
 
@@ -207,7 +214,7 @@ Opcodes are assigned in contiguous ranges by functional group. Unassigned values
 | `0x06` | `OP_PUSH_LIT` | lit index | `( -- value )` | Push `lit[operand]` — a literal from the compiled method's literal frame (§4). | Phase 1 |
 | `0x07` | `OP_PUSH_TEMP` | temp index | `( -- value )` | Push `temp[operand]` — a temporary or argument from the current frame. Arguments occupy temps 0 through `numArgs - 1`; temporaries follow. | Phase 1 |
 | `0x08` | `OP_PUSH_INSTVAR` | instVar index | `( -- value )` | Push `instVar[operand]` — a named instance variable of the receiver. Index 0 is the first instance variable. | Phase 1 |
-| `0x09` | `OP_PUSH_GLOBAL` | lit index | `( -- value )` | Push the value of the global variable whose Association is `lit[operand]`. The Association object is stored in the literal frame; the interpreter reads its `value` slot. The compiler only emits this opcode for globals that have been resolved to an Association at compile time. Reading an Association whose `value` slot contains `nil` simply pushes `nil` — this is not an error condition at the interpreter level. | Phase 1 |
+| `0x09` | `OP_PUSH_GLOBAL` | lit index | `( -- value )` | Push the value of the global variable whose Association is `lit[operand]`. The Association object is stored in the literal frame; the interpreter reads its `value` slot. The compiler only emits this opcode for globals that have been resolved to an Association at compile time; references to undeclared globals are rejected during compilation. Reading an Association whose `value` slot contains `nil` simply pushes `nil` — this is not an error condition at the interpreter level. At runtime, `OP_PUSH_GLOBAL` never performs name resolution; it dereferences only the literal Association supplied by the compiled method. | Phase 1 |
 | `0x0A` | `OP_PUSH_CONTEXT` | unused (0x00) | `( -- context )` | Push a reified `thisContext` object representing the current activation frame. The frame is promoted to a heap object on demand (see §6). | Phase 3 |
 | `0x0B` | `OP_PUSH_SMALLINT` | unsigned byte | `( -- int )` | Push the SmallInteger value `operand` (range 0–255). For values outside this range, the compiler uses `OP_PUSH_LIT` with a SmallInteger literal in the literal frame. With `OP_WIDE`, range extends to 0–65535. | Phase 1 |
 | `0x0C` | `OP_PUSH_MINUS_ONE` | unused (0x00) | `( -- -1 )` | Push SmallInteger `-1`. Common enough to warrant its own opcode; avoids a literal frame slot. | Phase 1 |
@@ -306,7 +313,7 @@ All actor opcodes trigger deep-copy of message arguments per ADR 008. Immutable 
 | `0x72` | `OP_ACTOR_SPAWN` | lit index | `( arg1 ... argN -- actor )` | Spawn a new actor. `lit[operand]` is a **spawn descriptor** in the literal frame containing the actor class OOP and the initialization argument count (see §4.7, §9.4). Arguments are deep-copied and passed to the new actor's `initialize` method. The new actor's opaque address is pushed onto the spawning actor's stack. The new actor is registered with the scheduler and becomes runnable. | Phase 2 |
 | `0x73` | `OP_SELF_ADDRESS` | unused (0x00) | `( -- addr )` | Push the current actor's opaque address. Used when an actor needs to pass its own address to another actor so it can receive replies. | Phase 2 |
 
-Phase 1 behavior: these opcodes occupy their assigned byte values. The interpreter recognizes them but signals `NotYetImplemented` if executed. The compiler may emit them in Phase 1 for testing purposes, but no actor runtime exists to service them until Phase 2.
+Phase 1 behavior: these opcodes occupy their assigned byte values. The interpreter recognizes them but signals `NotYetImplemented` if executed. The Phase 1 compiler must not emit actor opcodes in normal compilation — they are not part of the Phase 1 executable subset. Test harnesses may construct bytecode arrays containing reserved opcodes for decoder or verifier testing, but such artifacts are not produced by the compiler's normal code path and are not part of the Phase 1 executable image.
 
 Byte values `0x74–0x7F` are reserved for future use within the actor group.
 
@@ -384,7 +391,7 @@ Bit layout (63 usable bits after the SmallInteger tag in bit 0):
 | 17–24 | 8 | `numLiterals` | 0–255 | Number of OOP slots in the literal frame. With `OP_WIDE`, literal indices can reach 65535 — but the header field is 8 bits, limiting a single method to 255 literal slots. This is a deliberate constraint; methods needing more than 255 literals should be decomposed. |
 | 25–32 | 8 | `primitiveIndex` | 0–255 | Primitive number for this method, or 0 if no primitive. Values 1–255 address Blue Book primitives directly. For Smalltalk/A extension primitives (256+), this field is 0 and the extended primitive number is encoded in the bytecode preamble — see §4.8 for the complete dispatch protocol. |
 | 33 | 1 | `hasPrimitive` | 0–1 | 1 if this method has a primitive (the interpreter tries the primitive before executing bytecode). 0 otherwise. |
-| 34 | 1 | `largeFrame` | 0–1 | 1 if this method requires a large stack frame. 0 for the default frame size. The interpreter uses this to decide how much stack slab space to reserve when activating the method. This is a Phase 1 minimum; it may become a multi-bit field or computed value in later phases once the stack slab growth policy (open decision #6 from PROJECT_STATUS) is resolved. |
+| 34 | 1 | `largeFrame` | 0–1 | Provisional Phase 1 frame-shape discriminator. 1 if this method requires a large stack frame; 0 for the default frame size. The interpreter uses this to decide how much stack slab space to reserve when activating the method. This field is not yet a permanent guarantee of the compiled-method format — it may be revised (widened, replaced, or removed) once the stack slab growth policy (open decision #6 from PROJECT_STATUS) is finalized. Consumers must treat this field as VM-private execution metadata rather than long-term image ABI. |
 | 35–62 | 28 | reserved | — | Reserved for future use (invocation counters, JIT metadata, etc.). Must be 0. |
 
 The method header is read by the interpreter on every method activation. It must be decodable with simple shifts and masks — no indirection, no secondary lookups.
@@ -467,13 +474,15 @@ The bytecode array length is not stored explicitly in the method header. It is d
 
 ### 4.9 Primitive dispatch protocol
 
-This section defines the single authoritative protocol for primitive dispatch. The method header and the bytecode preamble work together in a defined two-stage sequence — there is no ambiguity about which is authoritative.
+This section defines the single authoritative protocol for primitive dispatch. The method header and the bytecode preamble work together in a defined two-stage sequence.
+
+**Authority model:** Primitive-bearing methods are identified first by method header metadata. For primitive indices 1–255, the method header is sufficient and authoritative — no bytecode is read. For extended primitive indices 256+, the header marks the method as primitive-bearing (`hasPrimitive = 1`, `primitiveIndex = 0`) and the `OP_WIDE OP_PRIMITIVE` bytecode preamble supplies the extended index. This two-authority split is a provisional design that trades encoding simplicity (8-bit header field covers the hot Blue Book range) against purity (a single authority for all primitive numbers). It may be unified in a later bytecode revision if the split proves problematic.
 
 **Stage 1 — Header check.** On method activation, the interpreter checks `hasPrimitive` in the method header. If clear (0), this method has no primitive — skip to bytecode execution.
 
 **Stage 2 — Primitive number resolution.** If `hasPrimitive` is set (1):
 
-- If `primitiveIndex != 0` (range 1–255): the primitive number is `primitiveIndex`. Call the C function registered for that number directly. **No bytecode is read.** This is the fast path for Blue Book kernel primitives.
+- If `primitiveIndex != 0` (range 1–255): the primitive number is `primitiveIndex`. Call the C function registered for that number directly. **The header provides the primitive number on the fast path — no bytecode is read to determine which primitive to try.**
 - If `primitiveIndex == 0`: this is an extension primitive (number 256+). The first instruction in the bytecode array is the primitive preamble:
 
 ```
@@ -483,6 +492,8 @@ For extension primitives:
 ```
 
 The interpreter reads these 4 bytes, computes the extended primitive number, and calls the C function registered for that number.
+
+**Bytecode preamble rule:** every primitive method — whether standard (1–255) or extended (256+) — contains a bytecode preamble. Standard primitive methods begin with `OP_PRIMITIVE primitiveIndex` (2 bytes). Extended primitive methods begin with `OP_WIDE highByte OP_PRIMITIVE lowByte` (4 bytes). The header's `primitiveIndex` field is a fast-path shortcut for the interpreter; the bytecode preamble is always present so that (a) the fallback entry point is uniform and (b) the method is self-describing for tooling that reads bytecode without consulting headers.
 
 **On primitive success:** the C function writes the result. The interpreter pushes the result onto the caller's stack in place of the receiver and arguments. No frame is created. No bytecode executes. The method returns immediately.
 
@@ -1308,6 +1319,8 @@ This is expensive and should be rare. The compiler emits `OP_PUSH_CONTEXT` only 
 
 **Phase 1 blocks are a deliberately restricted subset.** In Phase 1, the compiler must reject (as a compile-time error) any block that would require variable capture or non-local return. Only clean blocks — those referencing only their own arguments, literals, and `self` — are legal in Phase 1. Control structure inlining (`ifTrue:`, `whileTrue:`, `to:do:`, etc.) does not create block objects and is unaffected. This restriction is lifted in Phase 2 when `OP_CLOSURE_COPY` and `OP_NON_LOCAL_RETURN` become available.
 
+Phase 1 block support is a restricted bootstrap subset only. It does **not** imply that full closure semantics, escaping blocks, or non-local return compatibility are resolved. The final closure/NLR design remains gated by the open decision tracked in `PROJECT_STATUS.md`. Any conflict between this restricted Phase 1 block subset and the later closure/NLR design is resolved in favor of the later design.
+
 ---
 
 ## §7 Non-Local Return and Unwinding
@@ -1442,7 +1455,7 @@ This field is initialized to `nil` on frame creation. It is set by the `markForU
 
 **Frame layout impact:** one additional OOP-sized field (8 bytes on 64-bit). This increases `STA_Frame` from 40 bytes (ADR 010) to 48 bytes. The increase affects stack slab consumption (deeper call chains use more slab space) but does not affect per-actor creation cost — the stack slab is pre-allocated at a fixed size and grows on demand.
 
-**Phase 1 stance:** the `unwindHandler` field exists in the frame layout from Phase 1. It is always initialized to `nil`. The `markForUnwind:` and `unmarkForUnwind` primitives exist as stubs that set and clear the field. `ensure:` is implementable in Phase 1 as a Smalltalk method using these primitives, but only for normal completion — `ensureBlock` is called at the Smalltalk level after `self value` returns. Abnormal unwinding (non-local return or exception triggering unwind handler execution) is a Phase 2 concern. Phase 1's `ensure:` is a deliberately incomplete subset that works correctly for the normal-completion path only.
+**Phase 1 stance:** the `unwindHandler` field exists in the frame layout from Phase 1. It is always initialized to `nil`. The `markForUnwind:` and `unmarkForUnwind` primitives exist as stubs that set and clear the field. Phase 1 provides a bootstrap-only normal-completion cleanup mechanism using these primitives to support early library construction. It is **not** full Smalltalk `ensure:` semantics, because abnormal unwinding (non-local return or exception triggering unwind handler execution) is not yet implemented — that is a Phase 2 concern. User-visible code should not rely on full `ensure:` guarantees until Phase 2 unwind semantics are present.
 
 ### 7.8 Exception handling
 
@@ -1495,13 +1508,15 @@ If the block subsequently attempts `OP_NON_LOCAL_RETURN` and checks the `homeFra
 |---|---|---|
 | Frame marker (live/dead detection) | Phase 1 | Written on frame creation, cleared on frame pop. Always present even though non-local return is Phase 2 — the field costs one word and the write/clear cost is negligible. |
 | Unwind handler slot in frame | Phase 1 | Always initialized to nil. `markForUnwind:` / `unmarkForUnwind` primitives exist as stubs. |
-| `ensure:` normal completion | Phase 1 | Works via Smalltalk-level implementation; handler block called after `self value` returns. This is a deliberately incomplete subset — abnormal unwinding is Phase 2. |
+| `ensure:` normal completion | Phase 1 | Bootstrap-only normal-completion cleanup. **Not** full Smalltalk `ensure:` — abnormal unwinding is Phase 2. Do not rely on full `ensure:` guarantees until Phase 2. |
 | Exception handling via handler stack | Phase 1 | `on:do:`, `signal`, `resume:`, basic unwind. No `thisContext` dependency. |
 | `OP_NON_LOCAL_RETURN` | Phase 2 | Full unwind with home frame validation, `BlockCannotReturn`, and unwind handler execution. |
 | `ensure:` / `ifCurtailed:` abnormal unwinding | Phase 2 | Unwind handlers fire during non-local return and exception propagation. |
 | Cross-actor block prohibition | Phase 2 | Deep copy rejects block closures. |
 | TCO + non-local return interaction | Phase 2 | Compiler rule prevents TCO in NLR-bearing methods; runtime marker check as safety net. |
 | `thisContext`-based exception handling | Phase 3 | Optional replacement for handler stack approach. Context chain walking. |
+
+**Forward-compatibility note:** The frame marker and unwind handler slot are included in Phase 1 specifically to preserve compatibility with later non-local return and unwind semantics. They are intentional forward-compatibility costs, not accidental overhead. Implementors must not remove or "optimize away" these fields — Phase 2 depends on them being present and correctly maintained in all Phase 1 frames.
 
 ---
 
@@ -1798,6 +1813,8 @@ All primitive numbers are reserved from Phase 1 onward. Unimplemented primitives
 
 This section defines the complete semantics of the four actor extension opcodes introduced in §3.9. These opcodes are the bytecode-level interface between Smalltalk code and the actor runtime. They are the only instructions that cross actor boundaries — every other opcode operates within a single actor's heap, stack slab, and execution context.
 
+**Actor identity vs. capability authorization.** Phase 2 actor opcodes operate on actor identity and routing references only. They do **not** define or imply capability-based authorization. The opaque actor address used by `OP_SEND_ASYNC`, `OP_ASK`, `OP_ACTOR_SPAWN`, and `OP_SELF_ADDRESS` is an unforgeable routing token — it identifies an actor for message delivery. Capability-bearing references and authorization tokens are a distinct concept introduced in the architecture's capability model (Phase 4). A future capability reference may wrap or incorporate actor identity, but must not be treated as semantically equivalent to a plain actor address.
+
 ### 9.1 Relationship to actor primitives
 
 The actor opcodes (`OP_SEND_ASYNC`, `OP_ASK`, `OP_ACTOR_SPAWN`) and the actor primitives (§8.11, prims 256–265) serve different roles:
@@ -1864,7 +1881,7 @@ Steps 1–5 are identical to `OP_SEND_ASYNC` (§9.2), with one addition:
 
 7. **Attach the future's identity to the message envelope.** The envelope includes a reply token that the target actor's runtime uses to route the response back to the correct future in the sending actor.
 
-8. **Enqueue the envelope** in the target actor's mailbox. Same overflow behavior as `OP_SEND_ASYNC`. **Mailbox-full on `OP_ASK`:** the initial stance is to signal `MailboxFull` as an exception in the sender, consistent with `OP_SEND_ASYNC`. The future is not created if the enqueue fails. This behavior is subject to Phase 2 design review (open decision #10 from PROJECT_STATUS.md) — alternative resolutions include transitioning the future to a failed state rather than signaling an exception.
+8. **Enqueue the envelope** in the target actor's mailbox. Same overflow behavior as `OP_SEND_ASYNC`. **Mailbox-full on `OP_ASK` (provisional):** current provisional rule: if enqueue fails with mailbox full, the sender receives `MailboxFull` immediately and no future is created. This behavior is provisional and not yet architecturally frozen — it is subject to Phase 2 design review (open decision #10 from PROJECT_STATUS.md). Alternative resolutions include transitioning the future to a failed state rather than signaling an exception. All code consuming this behavior should be written to tolerate a change in the error-reporting mechanism.
 
 9. **Push the future** onto the sending actor's stack. Execution continues immediately — the sending actor does not block waiting for the reply.
 
@@ -1975,7 +1992,7 @@ All three message-passing opcodes (`OP_SEND_ASYNC`, `OP_ASK`, `OP_ACTOR_SPAWN`) 
 | Object with `STA_OBJ_IMMUTABLE` flag | Shared by pointer. No copy. The flag is set at allocation time for symbols, compiled methods, frozen literals, and explicitly frozen user objects. |
 | Mutable heap object | Deep-copied recursively. Each reachable mutable object is copied into the transfer buffer. |
 | `BlockClosure` | **Not copyable.** Signals `CannotCopyBlock` in the sending actor. Blocks contain frame pointers into the sending actor's stack slab; these are meaningless in the receiving actor. |
-| Actor address (opaque token) | Copied as an opaque value. The token itself is immutable — it is a capability reference, not a mutable object. |
+| Actor address (opaque token) | Copied as an opaque value. The token itself is immutable and routable — it is an opaque actor reference, not a mutable object. This reference does not by itself confer capability-based authorization (see §9 actor identity note). |
 | Object containing a cycle | Handled by the deep-copy visited set. Each object is copied once; subsequent references to the same source object are redirected to the single copy. |
 
 **Transfer buffer ownership:** the deep-copy produces a set of objects in a transfer buffer. When the message is enqueued, ownership of the transfer buffer passes to the target actor. The target actor's runtime integrates the transferred objects into its private heap. The sending actor retains no references to the transferred objects.
@@ -1988,7 +2005,7 @@ All three message-passing opcodes (`OP_SEND_ASYNC`, `OP_ASK`, `OP_ACTOR_SPAWN`) 
 | `OP_SEND_ASYNC` | Mailbox full | `MailboxFull` exception in sender |
 | `OP_SEND_ASYNC` | Argument contains BlockClosure | `CannotCopyBlock` exception in sender |
 | `OP_ASK` | Invalid actor address | `InvalidActorAddress` exception in sender |
-| `OP_ASK` | Mailbox full | `MailboxFull` exception in sender (initial stance — see §9.3 for open decision) |
+| `OP_ASK` | Mailbox full | `MailboxFull` exception in sender **(provisional — see §9.3)** |
 | `OP_ASK` | Argument contains BlockClosure | `CannotCopyBlock` exception in sender |
 | `OP_ASK` | Target crashes during processing | Future transitions to **failed** |
 | `OP_ASK` | Timeout expires | Future transitions to **timed out** |
@@ -2005,7 +2022,7 @@ In Phase 1, all four actor opcodes are recognized by the interpreter (they have 
 
 1. The interpreter signals `NotYetImplemented` as an exception in the current execution context.
 2. The exception is catchable via `on:do:` — it is not a fatal interpreter error.
-3. The compiler may emit these opcodes freely. Test code can verify that the opcodes parse, that the stack effects are correct (values are on the stack before the opcode), and that the `NotYetImplemented` exception is properly raised and catchable.
+3. Test harnesses may construct bytecode arrays containing these opcodes for decoder or verifier testing. Such artifacts verify that the opcodes parse, that the stack effects are correct, and that the `NotYetImplemented` exception is properly raised and catchable. The normal Phase 1 compiler does not emit these opcodes.
 
 This allows Phase 1 to include compiler tests that emit actor opcodes and verify the bytecode structure without requiring the actor runtime to exist.
 
@@ -2017,7 +2034,7 @@ This allows Phase 1 to include compiler tests that emit actor opcodes and verify
 | Closure descriptor | `ClosureDescriptor` | startPC, bodyLength, numArgs, numCopied | `OP_CLOSURE_COPY` |
 | Spawn descriptor | `SpawnDescriptor` | actorClass, numArgs | `OP_ACTOR_SPAWN` |
 
-All three are small immutable objects stored in the literal frame. The compiler creates them at compile time. They are part of the compiled method and live in the shared immutable region.
+This allows Phase 1 decoder and verifier test fixtures to exercise actor opcode parsing without requiring the actor runtime to exist.
 
 ---
 
@@ -2518,6 +2535,8 @@ The `Smalltalk` global dictionary (`SPC_SMALLTALK`, special object index 3) is a
 Every class created during bootstrap is registered in the global dictionary with its name as the key. The compiler resolves class names by looking up Associations in this dictionary and embedding the Association in the literal frame (`OP_PUSH_GLOBAL`).
 
 ### 11.7 Bootstrap execution sequence
+
+> **Scope limitation.** This section defines bytecode-facing bootstrap requirements only — the objects, classes, and wiring needed before the first bytecode can execute, and the sequence in which they are created. It does **not** imply that Phase 1 image save is fully specified. Final image-save semantics remain gated by unresolved decisions in `PROJECT_STATUS.md`, including the quiescing protocol for live actors, root-table structure for multi-root images, and stable class identifiers for cross-image portability. Steps below that reference image save (step 11) assume those decisions will be resolved before the step is implemented.
 
 The bootstrap runs once — when creating a fresh image from scratch. Subsequent launches load the saved image (ADR 012) and skip the bootstrap entirely.
 
