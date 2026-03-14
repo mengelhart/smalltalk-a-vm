@@ -680,6 +680,47 @@ static void test_return_true_false(void) {
     printf(" ok\n");
 }
 
+/* ── Test: chained expression 10 + (3 + 4) = 17 (sp restoration) ─────── */
+
+static void test_chained_expression(void) {
+    printf("  10 + (3 + 4) = 17 (sp restore)...");
+
+    /* This test verifies that slab->sp is correctly restored when a
+     * callee frame returns. Without saved_sp restoration, the sender's
+     * pending expression stack items (the 10) get corrupted. */
+
+    STA_OOP plus_sel = sym("+");
+
+    /* Harness method:
+     *   PUSH_SMALLINT 10     — left operand, sits on stack during inner send
+     *   PUSH_SMALLINT 3
+     *   PUSH_SMALLINT 4
+     *   SEND #+              — 3 + 4 = 7 (inner send)
+     *   SEND #+              — 10 + 7 = 17 (outer send)
+     *   RETURN_TOP
+     */
+    STA_OOP harness_lits[] = { plus_sel, STA_SMALLINT_OOP(0) };
+    uint8_t harness_bc[] = {
+        OP_PUSH_SMALLINT, 10,
+        OP_PUSH_SMALLINT, 3,
+        OP_PUSH_SMALLINT, 4,
+        OP_SEND, 0,
+        OP_SEND, 0,
+        OP_RETURN_TOP, 0
+    };
+    STA_OOP harness = sta_compiled_method_create(g_sp, 0, 0, 0,
+        harness_lits, 2, harness_bc, sizeof(harness_bc));
+    assert(harness);
+
+    STA_StackSlab *slab = sta_stack_slab_create(65536);
+    STA_OOP result = sta_interpret(slab, g_heap, g_ct, harness,
+                                    STA_SMALLINT_OOP(0), NULL, 0);
+    assert(result == STA_SMALLINT_OOP(17));
+
+    sta_stack_slab_destroy(slab);
+    printf(" ok\n");
+}
+
 /* ── Main ──────────────────────────────────────────────────────────────── */
 
 int main(void) {
@@ -699,6 +740,7 @@ int main(void) {
     test_push_small_constants();
     test_dup();
     test_return_true_false();
+    test_chained_expression();
 
     teardown();
     printf("All interpreter tests passed.\n");

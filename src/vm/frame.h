@@ -13,18 +13,20 @@
 #include <stdint.h>
 #include <stddef.h>
 
-/* ── Frame struct (40 bytes, ADR 010) ──────────────────────────────────── */
+/* ── Frame struct (48 bytes; ADR 010 specified 40, grown by +8 for saved_sp) */
+/*    saved_sp records the sender's expression stack position so that        */
+/*    sta_frame_pop can restore slab->sp correctly when the callee returns.  */
 
 typedef struct STA_Frame {
     STA_OOP           method;         /* CompiledMethod OOP                 */
     STA_OOP           receiver;       /* receiver OOP (self)                */
     struct STA_Frame *sender;         /* calling frame (NULL for bottom)    */
+    uint8_t          *saved_sp;       /* sender's slab->sp at push time    */
     uint32_t          pc;             /* program counter (byte offset)      */
     uint16_t          arg_count;      /* number of argument slots           */
     uint16_t          local_count;    /* number of temp slots               */
     uint32_t          flags;          /* bit 0: marker, others reserved     */
-    uint32_t          _pad;           /* align payload to 8-byte boundary   */
-} STA_Frame;                          /* sizeof = 40 bytes                  */
+} STA_Frame;                          /* sizeof = 48 bytes                  */
 
 /* ── Stack slab ────────────────────────────────────────────────────────── */
 

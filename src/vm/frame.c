@@ -54,11 +54,11 @@ STA_Frame *sta_frame_push(STA_StackSlab *slab, STA_OOP method,
     frame->method      = method;
     frame->receiver    = receiver;
     frame->sender      = sender;
+    frame->saved_sp    = slab->sp;   /* save sender's expression stack position */
     frame->pc          = 0;
     frame->arg_count   = nargs;
     frame->local_count = local_count;
     frame->flags       = 0;
-    frame->_pad        = 0;
 
     STA_OOP *slots = sta_frame_slots(frame);
 
@@ -82,9 +82,8 @@ STA_Frame *sta_frame_push(STA_StackSlab *slab, STA_OOP method,
 /* ── Frame pop ─────────────────────────────────────────────────────────── */
 
 void sta_frame_pop(STA_StackSlab *slab, STA_Frame *frame) {
+    slab->sp  = frame->saved_sp;     /* restore sender's expression stack position */
     slab->top = (uint8_t *)frame;
-    /* Reset sp to the expression stack base of the sender frame, if any.
-     * The caller is responsible for setting sp appropriately after pop. */
 }
 
 /* ── GC root enumeration ──────────────────────────────────────────────── */
