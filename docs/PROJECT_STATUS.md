@@ -9,9 +9,8 @@ Hard rules and toolchain: `CLAUDE.md`
 ---
 
 ## Current phase
-**Phase 0 — Architectural spikes**
-Spike → measure → write decision record → implement.
-No permanent implementation yet. All spike code is clearly marked.
+**Phase 1 — Minimal Live Kernel**
+Object memory, interpreter, bootstrap, image save/load.
 
 ---
 
@@ -146,8 +145,22 @@ These must be resolved before the corresponding component is built:
 
 ## Phase 0 complete
 
-All seven architectural spikes are complete. ADRs 007–013 are accepted.
-The next phase is **Phase 1 — Minimal Live Kernel**.
+All seven architectural spikes are complete. ADRs 007–014 are accepted.
+
+---
+
+## Phase 1 progress
+
+### Epic 1: Object Memory and Allocator — COMPLETE
+- GitHub: Epic #108, stories #109–#113 (all closed)
+- Branch: `phase1/epic-1-object-memory` (merged to main)
+- Production files:
+  - `src/vm/oop.h`, `src/vm/oop.c` — OOP typedef, STA_ObjHeader (12 bytes / 16-byte alloc unit), SmallInt/Character/heap tagging, gc_flags/obj_flags bit definitions
+  - `src/vm/immutable_space.h`, `src/vm/immutable_space.c` — mmap-backed bump allocator for shared immutable region, mprotect seal after bootstrap
+  - `src/vm/heap.h`, `src/vm/heap.c` — actor-local bump allocator (single-heap Phase 1 variant, API accepts context parameter for Phase 2 per-actor heaps)
+  - `src/vm/special_objects.h`, `src/vm/special_objects.c` — 32-entry special object table per bytecode spec §11.1
+  - `src/vm/class_table.h`, `src/vm/class_table.c` — class table with 32 reserved indices per bytecode spec §11.5, atomic backing pointer for Phase 2 growth
+- Tests: 12/12 passing (5 new production + 7 existing spike tests)
 
 ---
 
@@ -175,14 +188,21 @@ The next phase is **Phase 1 — Minimal Live Kernel**.
 ## Repo layout reminder
 ```
 include/sta/vm.h          ← only public header (never add anything else here)
-src/vm/                   ← oop_spike.h, actor_spike.h (Phase 0 spike code)
+src/vm/                   ← Phase 1 production code + Phase 0 spike code
+  oop.h, oop.c                ← OOP typedef, ObjHeader, tagging macros (production)
+  immutable_space.h/c         ← shared immutable region allocator (production)
+  heap.h/c                    ← actor-local heap allocator (production)
+  special_objects.h/c         ← 32-entry special object table (production)
+  class_table.h/c             ← class table with reserved indices (production)
+  oop_spike.h, actor_spike.h  ← Phase 0 spike code (exploratory, not promoted)
+  frame_spike.h/c             ← Phase 0 spike code
 src/actor/                ← mailbox, lifecycle stubs
 src/gc/                   ← Phase 1+
 src/scheduler/            ← scheduler_spike.h, scheduler_spike.c
 src/io/                   ← io_spike.h, io_spike.c (Spike 005 complete)
 src/image/                ← image_spike.h, image_spike.c (Spike 006 complete)
 src/bridge/               ← bridge_spike.h, bridge_spike.c (Spike 007 complete)
-docs/decisions/           ← ADRs 001-013
+docs/decisions/           ← ADRs 001-014
 docs/spikes/              ← spike-001 through spike-007
 ```
 
@@ -190,7 +210,7 @@ docs/spikes/              ← spike-001 through spike-007
 
 ## How to orient a new chat with Claude
 Paste this file plus `CLAUDE.md` at the start of the session.
-Phase 0 is complete. The next session begins Phase 1 — Minimal Live Kernel.
+Phase 1 is in progress. Epic 1 (object memory) is complete.
 For Phase 1 work: paste `CLAUDE.md` + this file + the relevant ADRs for the
 component being built (ADR 007 for object memory, ADR 008 for mailbox,
-ADR 009 for scheduler, ADR 013 for public API).
+ADR 009 for scheduler, ADR 010 for frames, ADR 013 for public API).
