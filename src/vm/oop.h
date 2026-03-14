@@ -17,6 +17,8 @@
 typedef uintptr_t STA_OOP;
 
 /* ── Tag predicates ─────────────────────────────────────────────────────── */
+/* Note: also true for tag 11 (reserved/snapshot); callers handling raw
+ * image data must check STA_IS_HEAP first or use the relocation table. */
 #define STA_IS_SMALLINT(oop)    (((oop) & 1u) != 0u)
 #define STA_IS_CHAR(oop)        (((oop) & 3u) == 2u)
 #define STA_IS_HEAP(oop)        (((oop) & 3u) == 0u)
