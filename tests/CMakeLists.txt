@@ -46,6 +46,32 @@ target_include_directories(test_method_dict PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(test_method_dict PRIVATE sta_vm)
 add_test(NAME method_dict COMMAND test_method_dict)
 
+# ── Phase 1 Epic 3: Bytecode Interpreter Core ─────────────────────────────
+add_executable(test_compiled_method test_compiled_method.c)
+target_include_directories(test_compiled_method PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_compiled_method PRIVATE sta_vm)
+add_test(NAME compiled_method COMMAND test_compiled_method)
+
+add_executable(test_frame test_frame.c)
+target_include_directories(test_frame PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_frame PRIVATE sta_vm)
+add_test(NAME frame COMMAND test_frame)
+
+add_executable(test_selector test_selector.c)
+target_include_directories(test_selector PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_selector PRIVATE sta_vm)
+add_test(NAME selector COMMAND test_selector)
+
+add_executable(test_primitive_table test_primitive_table.c)
+target_include_directories(test_primitive_table PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_primitive_table PRIVATE sta_vm)
+add_test(NAME primitive_table COMMAND test_primitive_table)
+
+add_executable(test_interpreter test_interpreter.c)
+target_include_directories(test_interpreter PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_interpreter PRIVATE sta_vm)
+add_test(NAME interpreter COMMAND test_interpreter)
+
 # ── Spike 002: MPSC mailbox — TSan correctness gate ───────────────────────
 find_package(Threads REQUIRED)
 
