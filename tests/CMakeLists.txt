@@ -72,6 +72,12 @@ target_include_directories(test_interpreter PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(test_interpreter PRIVATE sta_vm)
 add_test(NAME interpreter COMMAND test_interpreter)
 
+# ── Phase 1 Epic 4: Bootstrap ────────────────────────────────────────────
+add_executable(test_bootstrap test_bootstrap.c)
+target_include_directories(test_bootstrap PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_bootstrap PRIVATE sta_vm)
+add_test(NAME bootstrap COMMAND test_bootstrap)
+
 # ── Spike 002: MPSC mailbox — TSan correctness gate ───────────────────────
 find_package(Threads REQUIRED)
 

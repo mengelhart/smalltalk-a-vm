@@ -45,3 +45,9 @@ void sta_primitive_table_init(void);
 #define STA_PRIM_OUT_OF_RANGE     3
 #define STA_PRIM_NO_MEMORY        4
 #define STA_PRIM_NOT_AVAILABLE    5
+
+/* ── Class table context for primitives ───────────────────────────────── */
+
+/* Set the class table used by primitives that need class lookup
+ * (e.g. #class, #respondsTo:). Called by bootstrap. */
+void sta_primitive_set_class_table(STA_ClassTable *ct);
