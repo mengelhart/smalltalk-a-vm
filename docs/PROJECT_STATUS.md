@@ -171,6 +171,18 @@ All seven architectural spikes are complete. ADRs 007–014 are accepted.
   - `src/vm/special_selectors.h`, `src/vm/special_selectors.c` — Bootstrap interning of all 32 special selectors (bytecode spec §10.7), populates SPC_SPECIAL_SELECTORS Array and individual SPC entries (doesNotUnderstand:, cannotReturn:, mustBeBoolean, startUp, shutDown, run)
 - Tests: 14/14 passing (7 production + 7 existing spike tests)
 
+### Epic 3: Bytecode Interpreter Core — COMPLETE
+- GitHub: Epic #123, stories #124–#131 (all closed)
+- Branch: `phase1/epic-3-interpreter` (merged to main)
+- Production files:
+  - `src/vm/compiled_method.h`, `src/vm/compiled_method.c` — CompiledMethod layout (header word with bitfield encoding: numArgs, numTemps, numLiterals, primitiveIndex, hasPrimitive, largeFrame), header decode/encode macros, literal/bytecode accessors, builder allocating in immutable space
+  - `src/vm/frame.h`, `src/vm/frame.c` — STA_Frame (48 bytes: method, receiver, sender, saved_sp, pc, arg_count, local_count, flags), STA_StackSlab bump allocator, frame push/pop with expression stack pointer save/restore, inline expression stack ops (push/pop/peek/depth), GC root enumeration
+  - `src/vm/selector.h`, `src/vm/selector.c` — Selector arity helper: binary (first char is special), keyword (count colons), unary (neither)
+  - `src/vm/primitive_table.h`, `src/vm/primitive_table.c` — 256-entry primitive function table, kernel primitives: SmallInt #+→1 #-→2 #<→3 #>→4 #=→7 #*→9, Object #==→29 #class→30, Array #at:→51 #at:put:→52 #size→53, overflow-safe arithmetic via `__builtin_*_overflow`
+  - `src/vm/interpreter.h`, `src/vm/interpreter.c` — Full dispatch loop with all Phase 1 opcodes (push/pop/store/dup, jumps, sends, returns, primitives, OP_WIDE), message dispatch with class hierarchy walk, two-stage primitive dispatch (header check → prim call), TCO via send-return lookahead (ADR 010/014), reduction counting (quota=1000)
+- Tests: 19/19 passing (5 new production + 14 existing)
+- Milestone: **"3 + 4 = 7" executes through full send/dispatch/primitive path**
+
 ---
 
 ## ADR index
@@ -206,6 +218,11 @@ src/vm/                   ← Phase 1 production code + Phase 0 spike code
   symbol_table.h/c            ← symbol interning and FNV-1a hash (production)
   method_dict.h/c             ← method dictionary with backing Array (production)
   special_selectors.h/c       ← bootstrap interning of 32 special selectors (production)
+  compiled_method.h/c         ← CompiledMethod layout, header macros, builder (production)
+  frame.h/c                   ← activation frame, stack slab, expression stack (production)
+  selector.h/c                ← selector arity helper (production)
+  primitive_table.h/c         ← 256-entry primitive table, kernel primitives (production)
+  interpreter.h/c             ← bytecode dispatch loop, message send, TCO (production)
   oop_spike.h, actor_spike.h  ← Phase 0 spike code (exploratory, not promoted)
   frame_spike.h/c             ← Phase 0 spike code
 src/actor/                ← mailbox, lifecycle stubs
@@ -222,7 +239,7 @@ docs/spikes/              ← spike-001 through spike-007
 
 ## How to orient a new chat with Claude
 Paste this file plus `CLAUDE.md` at the start of the session.
-Phase 1 is in progress. Epics 1 (object memory) and 2 (symbols/method dict) are complete.
+Phase 1 is in progress. Epics 1 (object memory), 2 (symbols/method dict), and 3 (bytecode interpreter) are complete.
 For Phase 1 work: paste `CLAUDE.md` + this file + the relevant ADRs for the
 component being built (ADR 007 for object memory, ADR 008 for mailbox,
 ADR 009 for scheduler, ADR 010 for frames, ADR 013 for public API).
