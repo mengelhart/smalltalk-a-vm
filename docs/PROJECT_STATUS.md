@@ -162,6 +162,15 @@ All seven architectural spikes are complete. ADRs 007–014 are accepted.
   - `src/vm/class_table.h`, `src/vm/class_table.c` — class table with 32 reserved indices per bytecode spec §11.5, atomic backing pointer for Phase 2 growth
 - Tests: 12/12 passing (5 new production + 7 existing spike tests)
 
+### Epic 2: Symbol Table and Method Dictionary — COMPLETE
+- GitHub: Epic #115, stories #116–#120 (all closed)
+- Branch: `phase1/epic-2-symbols-method-dict` (merged to main)
+- Production files:
+  - `src/vm/symbol_table.h`, `src/vm/symbol_table.c` — Symbol object layout (class_index 7, FNV-1a hash in slot 0, packed UTF-8 in slots 1+), symbol table with open-addressing linear probe, idempotent interning in immutable space, power-of-two capacity with 70% load-factor growth
+  - `src/vm/method_dict.h`, `src/vm/method_dict.c` — MethodDictionary (class_index 15) with backing Array, selector→method lookup by identity, insert with 70% load-factor growth and rehash
+  - `src/vm/special_selectors.h`, `src/vm/special_selectors.c` — Bootstrap interning of all 32 special selectors (bytecode spec §10.7), populates SPC_SPECIAL_SELECTORS Array and individual SPC entries (doesNotUnderstand:, cannotReturn:, mustBeBoolean, startUp, shutDown, run)
+- Tests: 14/14 passing (7 production + 7 existing spike tests)
+
 ---
 
 ## ADR index
@@ -194,6 +203,9 @@ src/vm/                   ← Phase 1 production code + Phase 0 spike code
   heap.h/c                    ← actor-local heap allocator (production)
   special_objects.h/c         ← 32-entry special object table (production)
   class_table.h/c             ← class table with reserved indices (production)
+  symbol_table.h/c            ← symbol interning and FNV-1a hash (production)
+  method_dict.h/c             ← method dictionary with backing Array (production)
+  special_selectors.h/c       ← bootstrap interning of 32 special selectors (production)
   oop_spike.h, actor_spike.h  ← Phase 0 spike code (exploratory, not promoted)
   frame_spike.h/c             ← Phase 0 spike code
 src/actor/                ← mailbox, lifecycle stubs
@@ -210,7 +222,7 @@ docs/spikes/              ← spike-001 through spike-007
 
 ## How to orient a new chat with Claude
 Paste this file plus `CLAUDE.md` at the start of the session.
-Phase 1 is in progress. Epic 1 (object memory) is complete.
+Phase 1 is in progress. Epics 1 (object memory) and 2 (symbols/method dict) are complete.
 For Phase 1 work: paste `CLAUDE.md` + this file + the relevant ADRs for the
 component being built (ADR 007 for object memory, ADR 008 for mailbox,
 ADR 009 for scheduler, ADR 010 for frames, ADR 013 for public API).
