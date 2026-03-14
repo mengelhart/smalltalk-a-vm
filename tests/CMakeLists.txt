@@ -9,6 +9,32 @@ add_executable(test_objheader_spike test_objheader_spike.c)
 target_include_directories(test_objheader_spike PRIVATE ${CMAKE_SOURCE_DIR})
 add_test(NAME objheader_spike COMMAND test_objheader_spike)
 
+# ── Phase 1 Epic 1: Object Memory ──────────────────────────────────────
+add_executable(test_oop test_oop.c)
+target_include_directories(test_oop PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_oop PRIVATE sta_vm)
+add_test(NAME oop COMMAND test_oop)
+
+add_executable(test_immutable_space test_immutable_space.c)
+target_include_directories(test_immutable_space PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_immutable_space PRIVATE sta_vm)
+add_test(NAME immutable_space COMMAND test_immutable_space)
+
+add_executable(test_heap test_heap.c)
+target_include_directories(test_heap PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_heap PRIVATE sta_vm)
+add_test(NAME heap COMMAND test_heap)
+
+add_executable(test_special_objects test_special_objects.c)
+target_include_directories(test_special_objects PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_special_objects PRIVATE sta_vm)
+add_test(NAME special_objects COMMAND test_special_objects)
+
+add_executable(test_class_table test_class_table.c)
+target_include_directories(test_class_table PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_class_table PRIVATE sta_vm)
+add_test(NAME class_table COMMAND test_class_table)
+
 # ── Spike 002: MPSC mailbox — TSan correctness gate ───────────────────────
 find_package(Threads REQUIRED)
 
