@@ -34,6 +34,17 @@ uint32_t sta_symbol_hash(const char *utf8, size_t len) {
 STA_SymbolTable *sta_symbol_table_create(uint32_t initial_capacity) {
     if (initial_capacity == 0) initial_capacity = 16;
 
+    /* Round up to next power of two (required for bitmask probing). */
+    uint32_t cap = initial_capacity;
+    cap--;
+    cap |= cap >> 1;
+    cap |= cap >> 2;
+    cap |= cap >> 4;
+    cap |= cap >> 8;
+    cap |= cap >> 16;
+    cap++;
+    initial_capacity = cap;
+
     STA_SymbolTable *st = malloc(sizeof(*st));
     if (!st) return NULL;
 
