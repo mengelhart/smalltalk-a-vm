@@ -28,8 +28,9 @@ macOS Tahoe · Xcode 26.3 · Apple clang 17 · CMake 4.2.3 · arm64 M4 Max
   targets are the numbers above. See ADR 014.
 
 ## Current phase
-Phase 0 — architectural spikes. No permanent implementation yet.
-Workflow: spike → measure → write decision record → implement.
+Phase 1 — Minimal Live Kernel.
+Object memory, interpreter, bootstrap, image save/load.
+Phase 0 spikes are complete — all spike code in `src/` is exploratory reference.
 
 ## Key architectural decisions (summary — see ADRs and arch doc for full rationale)
 - VM: C17, no GIL, concurrent data structures from day one
@@ -58,30 +59,29 @@ src/bootstrap/          ← one-time kernel bootstrap (Phase 1)
 tests/                  ← CTest suite
 examples/embed_basic/   ← public API smoke test
 docs/architecture/      ← master architecture document
-docs/decisions/         ← ADRs 001-009
+docs/decisions/         ← ADRs 001-014
 ```
 
 ---
 
 ## Branching
 
-Never commit directly to `main`. Every spike and every task gets its own branch.
+Never commit directly to `main`. Every epic and every task gets its own branch.
 
 ```bash
-# Spikes
-git checkout -b spike/004-frame-layout
+# Phase 1 epics
+git checkout -b phase1/epic-N-<short-name>
 
-# Non-spike tasks (ADR revisions, tooling, doc fixes)
+# Non-epic tasks (ADR revisions, tooling, doc fixes)
 git checkout -b task/<short-name>
 ```
 
 Naming conventions:
-- `spike/00N-<short-name>` — one branch per Phase 0 spike (e.g. `spike/004-frame-layout`)
-- `task/<short-name>` — for any non-spike work (e.g. `task/update-adr-007`)
+- `phase1/epic-N-<short-name>` — one branch per Phase 1 epic (e.g. `phase1/epic-1-object-memory`)
+- `task/<short-name>` — for any non-epic work (e.g. `task/update-adr-007`)
+- `spike/00N-<short-name>` — Phase 0 only (complete, no new spike branches)
 
-Phase 0 spike branches are not merged to `main` — spike code is exploratory and
-clearly marked as such. The ADR is the deliverable, not the branch. Merging
-decisions are made explicitly at the end of each phase.
+Phase 1 epic branches are merged to `main` via squash-merge PR after review.
 
 ---
 
@@ -92,9 +92,8 @@ Use the `gh` CLI for all issue operations.
 
 ### Orientation — start here in a new session
 ```bash
-gh issue list --milestone "Phase 0 — Architectural Spikes" --state open
+gh issue list --milestone "Phase 1 — Minimal Live Kernel" --state open
 gh issue list --label "decision-pending"
-gh issue list --label "spike" --state open
 ```
 
 ### Labels in use
