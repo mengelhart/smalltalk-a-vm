@@ -10,6 +10,11 @@ add_library(sta_vm STATIC
     src/vm/vm.c
     src/vm/handle.c
     src/vm/eval.c
+    src/vm/oop.c
+    src/vm/immutable_space.c
+    src/vm/heap.c
+    src/vm/special_objects.c
+    src/vm/class_table.c
     src/actor/actor.c
 )
 
