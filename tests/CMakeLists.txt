@@ -35,6 +35,17 @@ target_include_directories(test_class_table PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(test_class_table PRIVATE sta_vm)
 add_test(NAME class_table COMMAND test_class_table)
 
+# ── Phase 1 Epic 2: Symbol Table and Method Dictionary ─────────────────
+add_executable(test_symbol_table test_symbol_table.c)
+target_include_directories(test_symbol_table PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_symbol_table PRIVATE sta_vm)
+add_test(NAME symbol_table COMMAND test_symbol_table)
+
+add_executable(test_method_dict test_method_dict.c)
+target_include_directories(test_method_dict PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_method_dict PRIVATE sta_vm)
+add_test(NAME method_dict COMMAND test_method_dict)
+
 # ── Spike 002: MPSC mailbox — TSan correctness gate ───────────────────────
 find_package(Threads REQUIRED)
 
