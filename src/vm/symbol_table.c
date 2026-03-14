@@ -1,0 +1,186 @@
+/* src/vm/symbol_table.c
+ * Symbol interning and FNV-1a hash — see symbol_table.h for documentation.
+ */
+#include "symbol_table.h"
+#include "immutable_space.h"
+#include "class_table.h"
+#include <stdlib.h>
+#include <string.h>
+
+/* ── Symbol table structure ────────────────────────────────────────────── */
+
+struct STA_SymbolTable {
+    STA_OOP  *slots;      /* open-addressing hash table of Symbol OOPs   */
+    uint32_t  capacity;   /* number of slots                              */
+    uint32_t  count;      /* number of occupied slots                     */
+};
+
+/* ── FNV-1a (32-bit) ───────────────────────────────────────────────────── */
+
+#define FNV_OFFSET_BASIS  2166136261u
+#define FNV_PRIME         16777619u
+
+uint32_t sta_symbol_hash(const char *utf8, size_t len) {
+    uint32_t h = FNV_OFFSET_BASIS;
+    for (size_t i = 0; i < len; i++) {
+        h ^= (uint8_t)utf8[i];
+        h *= FNV_PRIME;
+    }
+    return h;
+}
+
+/* ── Table lifecycle ───────────────────────────────────────────────────── */
+
+STA_SymbolTable *sta_symbol_table_create(uint32_t initial_capacity) {
+    if (initial_capacity == 0) initial_capacity = 16;
+
+    /* Round up to next power of two (required for bitmask probing). */
+    uint32_t cap = initial_capacity;
+    cap--;
+    cap |= cap >> 1;
+    cap |= cap >> 2;
+    cap |= cap >> 4;
+    cap |= cap >> 8;
+    cap |= cap >> 16;
+    cap++;
+    initial_capacity = cap;
+
+    STA_SymbolTable *st = malloc(sizeof(*st));
+    if (!st) return NULL;
+
+    st->slots = calloc(initial_capacity, sizeof(STA_OOP));
+    if (!st->slots) { free(st); return NULL; }
+
+    st->capacity = initial_capacity;
+    st->count    = 0;
+    return st;
+}
+
+void sta_symbol_table_destroy(STA_SymbolTable *st) {
+    if (!st) return;
+    free(st->slots);
+    free(st);
+}
+
+/* ── Internal helpers ──────────────────────────────────────────────────── */
+
+/* Compare the bytes of an existing Symbol object against a candidate string. */
+static int symbol_bytes_equal(STA_OOP sym, const char *utf8, size_t len) {
+    size_t sym_len;
+    const char *sym_bytes = sta_symbol_get_bytes(sym, &sym_len);
+    if (sym_len != len) return 0;
+    return memcmp(sym_bytes, utf8, len) == 0;
+}
+
+/* Probe the table for a matching symbol. Returns the slot index.
+ * If found, slots[index] is the symbol OOP.
+ * If not found, slots[index] is 0 (the first empty slot). */
+static uint32_t probe(const STA_SymbolTable *st,
+                      const char *utf8, size_t len, uint32_t hash) {
+    uint32_t mask = st->capacity - 1;
+    uint32_t idx  = hash & mask;
+
+    for (;;) {
+        STA_OOP slot = st->slots[idx];
+        if (slot == 0) return idx;                /* empty — not found       */
+        if (symbol_bytes_equal(slot, utf8, len))  /* match — found           */
+            return idx;
+        idx = (idx + 1) & mask;                   /* linear probe            */
+    }
+}
+
+/* Grow the table by doubling capacity and rehashing all entries. */
+static int table_grow(STA_SymbolTable *st) {
+    uint32_t new_cap = st->capacity * 2;
+    STA_OOP *new_slots = calloc(new_cap, sizeof(STA_OOP));
+    if (!new_slots) return -1;
+
+    uint32_t new_mask = new_cap - 1;
+
+    for (uint32_t i = 0; i < st->capacity; i++) {
+        STA_OOP sym = st->slots[i];
+        if (sym == 0) continue;
+
+        uint32_t h   = sta_symbol_get_hash(sym);
+        uint32_t idx = h & new_mask;
+        while (new_slots[idx] != 0)
+            idx = (idx + 1) & new_mask;
+        new_slots[idx] = sym;
+    }
+
+    free(st->slots);
+    st->slots    = new_slots;
+    st->capacity = new_cap;
+    return 0;
+}
+
+/* Allocate a Symbol object in immutable space.
+ * Layout: slot 0 = hash, slots 1+ = packed UTF-8 bytes (NUL-terminated). */
+static STA_OOP alloc_symbol(STA_ImmutableSpace *sp,
+                            const char *utf8, size_t len, uint32_t hash) {
+    /* Number of 8-byte words needed for bytes + NUL terminator. */
+    uint32_t byte_words = (uint32_t)((len + 1 + 7) / 8);
+    uint32_t nwords     = 1 + byte_words;   /* slot 0 = hash */
+
+    STA_ObjHeader *h = sta_immutable_alloc(sp, STA_CLS_SYMBOL, nwords);
+    if (!h) return 0;
+
+    STA_OOP *payload = sta_payload(h);
+
+    /* Slot 0: precomputed hash (stored in the low 32 bits of an OOP word). */
+    payload[0] = (STA_OOP)hash;
+
+    /* Slots 1+: raw bytes. Payload was zeroed by sta_immutable_alloc,
+     * so the NUL terminator and trailing padding are already zero. */
+    memcpy(&payload[1], utf8, len);
+
+    return (STA_OOP)(uintptr_t)h;
+}
+
+/* ── Public API ────────────────────────────────────────────────────────── */
+
+STA_OOP sta_symbol_lookup(const STA_SymbolTable *st,
+                          const char *utf8, size_t len) {
+    uint32_t hash = sta_symbol_hash(utf8, len);
+    uint32_t idx  = probe(st, utf8, len, hash);
+    return st->slots[idx];
+}
+
+STA_OOP sta_symbol_intern(STA_ImmutableSpace *sp, STA_SymbolTable *st,
+                          const char *utf8, size_t len) {
+    uint32_t hash = sta_symbol_hash(utf8, len);
+    uint32_t idx  = probe(st, utf8, len, hash);
+
+    /* Already interned — return canonical OOP. */
+    if (st->slots[idx] != 0) return st->slots[idx];
+
+    /* Grow if load factor would exceed 70%. */
+    if ((st->count + 1) * 10 > st->capacity * 7) {
+        if (table_grow(st) != 0) return 0;
+        /* Re-probe after growth (slot indices changed). */
+        idx = probe(st, utf8, len, hash);
+    }
+
+    STA_OOP sym = alloc_symbol(sp, utf8, len, hash);
+    if (sym == 0) return 0;
+
+    st->slots[idx] = sym;
+    st->count++;
+    return sym;
+}
+
+uint32_t sta_symbol_get_hash(STA_OOP symbol) {
+    STA_ObjHeader *h = (STA_ObjHeader *)(uintptr_t)symbol;
+    STA_OOP *payload = sta_payload(h);
+    return (uint32_t)payload[0];
+}
+
+const char *sta_symbol_get_bytes(STA_OOP symbol, size_t *out_len) {
+    STA_ObjHeader *h = (STA_ObjHeader *)(uintptr_t)symbol;
+    STA_OOP *payload = sta_payload(h);
+    const char *bytes = (const char *)&payload[1];
+    if (out_len) {
+        *out_len = strlen(bytes);
+    }
+    return bytes;
+}

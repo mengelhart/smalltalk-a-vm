@@ -15,6 +15,9 @@ add_library(sta_vm STATIC
     src/vm/heap.c
     src/vm/special_objects.c
     src/vm/class_table.c
+    src/vm/symbol_table.c
+    src/vm/method_dict.c
+    src/vm/special_selectors.c
     src/actor/actor.c
 )
 
