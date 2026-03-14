@@ -18,6 +18,11 @@ add_library(sta_vm STATIC
     src/vm/symbol_table.c
     src/vm/method_dict.c
     src/vm/special_selectors.c
+    src/vm/compiled_method.c
+    src/vm/frame.c
+    src/vm/selector.c
+    src/vm/primitive_table.c
+    src/vm/interpreter.c
     src/actor/actor.c
 )
 
