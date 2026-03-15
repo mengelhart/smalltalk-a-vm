@@ -6,6 +6,8 @@
 #include "interpreter.h"
 #include "method_dict.h"
 #include "special_objects.h"
+#include "symbol_table.h"
+#include <stdlib.h>
 #include <string.h>
 
 STA_PrimFn sta_primitives[STA_PRIM_TABLE_SIZE];
@@ -260,6 +262,285 @@ static int prim_basic_new_size(STA_OOP *args, uint8_t nargs, STA_OOP *result) {
     return STA_PRIM_SUCCESS;
 }
 
+/* ── Helper: get class format OOP for a heap object ────────────────────── */
+
+/* Look up the receiver's class via class_index, read its format field.
+ * Returns 0 if class table is unavailable or class not found. */
+static STA_OOP get_receiver_format(STA_ObjHeader *h) {
+    if (!g_prim_class_table) return 0;
+    STA_OOP cls = sta_class_table_get(g_prim_class_table, h->class_index);
+    if (cls == 0) return 0;
+    STA_ObjHeader *cls_h = (STA_ObjHeader *)(uintptr_t)cls;
+    return sta_payload(cls_h)[STA_CLASS_SLOT_FORMAT];
+}
+
+/* ── Object and memory primitives (§8.5, prims 33–41) ─────────────────── */
+
+/* Prim 33: Object >> #basicAt: */
+static int prim_basic_at(STA_OOP *args, uint8_t nargs, STA_OOP *result) {
+    (void)nargs;
+    if (STA_IS_IMMEDIATE(args[0])) return 1; /* not indexable */
+    if (!STA_IS_SMALLINT(args[1])) return 3; /* arg not SmallInteger */
+
+    STA_ObjHeader *h = (STA_ObjHeader *)(uintptr_t)args[0];
+    STA_OOP fmt = get_receiver_format(h);
+    if (fmt == 0) return 1;
+
+    if (!sta_format_is_indexable(fmt)) return 1; /* not indexable */
+
+    uint8_t inst_vars = STA_FORMAT_INST_VARS(fmt);
+    intptr_t idx = STA_SMALLINT_VAL(args[1]);
+
+    if (sta_format_is_bytes(fmt)) {
+        /* Byte-indexable: compute exact byte count. */
+        uint32_t var_words = h->size - inst_vars;
+        uint32_t byte_count = var_words * (uint32_t)sizeof(STA_OOP)
+                              - STA_BYTE_PADDING(h);
+        if (idx < 1 || (uint32_t)idx > byte_count) return 2;
+        uint8_t *bytes = (uint8_t *)&sta_payload(h)[inst_vars];
+        *result = STA_SMALLINT_OOP(bytes[idx - 1]);
+    } else {
+        /* Pointer-indexable. */
+        uint32_t var_count = h->size - inst_vars;
+        if (idx < 1 || (uint32_t)idx > var_count) return 2;
+        *result = sta_payload(h)[inst_vars + idx - 1];
+    }
+    return STA_PRIM_SUCCESS;
+}
+
+/* Prim 34: Object >> #basicAt:put: */
+static int prim_basic_at_put(STA_OOP *args, uint8_t nargs, STA_OOP *result) {
+    (void)nargs;
+    if (STA_IS_IMMEDIATE(args[0])) return 1;
+    if (!STA_IS_SMALLINT(args[1])) return 3;
+
+    STA_ObjHeader *h = (STA_ObjHeader *)(uintptr_t)args[0];
+    if (h->obj_flags & STA_OBJ_IMMUTABLE) return 4;
+
+    STA_OOP fmt = get_receiver_format(h);
+    if (fmt == 0) return 1;
+    if (!sta_format_is_indexable(fmt)) return 1;
+
+    uint8_t inst_vars = STA_FORMAT_INST_VARS(fmt);
+    intptr_t idx = STA_SMALLINT_VAL(args[1]);
+
+    if (sta_format_is_bytes(fmt)) {
+        uint32_t var_words = h->size - inst_vars;
+        uint32_t byte_count = var_words * (uint32_t)sizeof(STA_OOP)
+                              - STA_BYTE_PADDING(h);
+        if (idx < 1 || (uint32_t)idx > byte_count) return 2;
+        if (!STA_IS_SMALLINT(args[2])) return 3;
+        intptr_t val = STA_SMALLINT_VAL(args[2]);
+        if (val < 0 || val > 255) return 5;
+        uint8_t *bytes = (uint8_t *)&sta_payload(h)[inst_vars];
+        bytes[idx - 1] = (uint8_t)val;
+        *result = args[2];
+    } else {
+        uint32_t var_count = h->size - inst_vars;
+        if (idx < 1 || (uint32_t)idx > var_count) return 2;
+        sta_payload(h)[inst_vars + idx - 1] = args[2];
+        *result = args[2];
+    }
+    return STA_PRIM_SUCCESS;
+}
+
+/* Prim 35: Object >> #basicSize */
+static int prim_basic_size(STA_OOP *args, uint8_t nargs, STA_OOP *result) {
+    (void)nargs;
+    if (STA_IS_IMMEDIATE(args[0])) {
+        *result = STA_SMALLINT_OOP(0);
+        return STA_PRIM_SUCCESS;
+    }
+
+    STA_ObjHeader *h = (STA_ObjHeader *)(uintptr_t)args[0];
+    STA_OOP fmt = get_receiver_format(h);
+    if (fmt == 0) {
+        *result = STA_SMALLINT_OOP(0);
+        return STA_PRIM_SUCCESS;
+    }
+
+    if (!sta_format_is_indexable(fmt)) {
+        *result = STA_SMALLINT_OOP(0);
+        return STA_PRIM_SUCCESS;
+    }
+
+    uint8_t inst_vars = STA_FORMAT_INST_VARS(fmt);
+    if (sta_format_is_bytes(fmt)) {
+        uint32_t var_words = h->size - inst_vars;
+        uint32_t byte_count = var_words * (uint32_t)sizeof(STA_OOP)
+                              - STA_BYTE_PADDING(h);
+        *result = STA_SMALLINT_OOP((intptr_t)byte_count);
+    } else {
+        uint32_t var_count = h->size - inst_vars;
+        *result = STA_SMALLINT_OOP((intptr_t)var_count);
+    }
+    return STA_PRIM_SUCCESS;
+}
+
+/* Prim 36: Object >> #hash */
+static int prim_hash(STA_OOP *args, uint8_t nargs, STA_OOP *result) {
+    (void)nargs;
+    if (STA_IS_SMALLINT(args[0])) {
+        /* SmallInteger: hash is the value itself. */
+        *result = args[0];
+        return STA_PRIM_SUCCESS;
+    }
+    if (STA_IS_CHAR(args[0])) {
+        /* Character: hash is the code point. */
+        *result = STA_SMALLINT_OOP((intptr_t)STA_CHAR_VAL(args[0]));
+        return STA_PRIM_SUCCESS;
+    }
+
+    /* Heap object. Symbols use FNV-1a from slot 0. */
+    STA_ObjHeader *h = (STA_ObjHeader *)(uintptr_t)args[0];
+    if (h->class_index == STA_CLS_SYMBOL) {
+        uint32_t fnv = sta_symbol_get_hash(args[0]);
+        /* Mask to positive SmallInteger range. */
+        *result = STA_SMALLINT_OOP((intptr_t)(fnv & 0x3FFFFFFFu));
+        return STA_PRIM_SUCCESS;
+    }
+
+    /* Other heap objects: use identity hash (prim 40 logic). */
+    uintptr_t addr = (uintptr_t)args[0];
+    intptr_t hash = (intptr_t)((addr >> 4) & 0x3FFFFFFFu);
+    *result = STA_SMALLINT_OOP(hash);
+    return STA_PRIM_SUCCESS;
+}
+
+/* Prim 37: Object >> #become: */
+static int prim_become(STA_OOP *args, uint8_t nargs, STA_OOP *result) {
+    (void)nargs;
+    if (STA_IS_IMMEDIATE(args[0])) return 1;
+    if (STA_IS_IMMEDIATE(args[1])) return 1;
+
+    /* become: yourself is a no-op. */
+    if (args[0] == args[1]) {
+        *result = args[0];
+        return STA_PRIM_SUCCESS;
+    }
+
+    STA_ObjHeader *a = (STA_ObjHeader *)(uintptr_t)args[0];
+    STA_ObjHeader *b = (STA_ObjHeader *)(uintptr_t)args[1];
+
+    if (a->obj_flags & STA_OBJ_IMMUTABLE) return 1;
+    if (b->obj_flags & STA_OBJ_IMMUTABLE) return 1;
+
+    /* Both must have same total allocation size. */
+    size_t size_a = sta_alloc_size(a->size);
+    size_t size_b = sta_alloc_size(b->size);
+    if (size_a != size_b) return 6;
+
+    /* Swap via temp buffer.
+     * TODO: Phase 2 — add cross-actor check. */
+    size_t total = size_a;
+    /* Use stack buffer for small objects, heap for larger. */
+    uint8_t stack_buf[256];
+    uint8_t *tmp = (total <= sizeof(stack_buf)) ? stack_buf : (uint8_t *)malloc(total);
+    if (!tmp) return 6;
+
+    memcpy(tmp, a, total);
+    memcpy(a, b, total);
+    memcpy(b, tmp, total);
+
+    if (tmp != stack_buf) free(tmp);
+
+    *result = args[0];
+    return STA_PRIM_SUCCESS;
+}
+
+/* Prim 38: Object >> #instVarAt: */
+static int prim_inst_var_at(STA_OOP *args, uint8_t nargs, STA_OOP *result) {
+    (void)nargs;
+    if (STA_IS_IMMEDIATE(args[0])) return 2; /* no named instVars */
+    if (!STA_IS_SMALLINT(args[1])) return 3;
+
+    STA_ObjHeader *h = (STA_ObjHeader *)(uintptr_t)args[0];
+    STA_OOP fmt = get_receiver_format(h);
+    if (fmt == 0) return 2;
+
+    uint8_t inst_var_count = STA_FORMAT_INST_VARS(fmt);
+    intptr_t idx = STA_SMALLINT_VAL(args[1]);
+
+    if (idx < 1 || (uint32_t)idx > inst_var_count) return 2;
+
+    *result = sta_payload(h)[idx - 1];
+    return STA_PRIM_SUCCESS;
+}
+
+/* Prim 39: Object >> #instVarAt:put: */
+static int prim_inst_var_at_put(STA_OOP *args, uint8_t nargs, STA_OOP *result) {
+    (void)nargs;
+    if (STA_IS_IMMEDIATE(args[0])) return 2;
+    if (!STA_IS_SMALLINT(args[1])) return 3;
+
+    STA_ObjHeader *h = (STA_ObjHeader *)(uintptr_t)args[0];
+    if (h->obj_flags & STA_OBJ_IMMUTABLE) return 4;
+
+    STA_OOP fmt = get_receiver_format(h);
+    if (fmt == 0) return 2;
+
+    uint8_t inst_var_count = STA_FORMAT_INST_VARS(fmt);
+    intptr_t idx = STA_SMALLINT_VAL(args[1]);
+
+    if (idx < 1 || (uint32_t)idx > inst_var_count) return 2;
+
+    sta_payload(h)[idx - 1] = args[2];
+    *result = args[2];
+    return STA_PRIM_SUCCESS;
+}
+
+/* Prim 40: Object >> #identityHash */
+static int prim_identity_hash(STA_OOP *args, uint8_t nargs, STA_OOP *result) {
+    (void)nargs;
+    if (STA_IS_SMALLINT(args[0])) {
+        /* SmallInteger: derived from value. */
+        *result = STA_SMALLINT_OOP((intptr_t)(STA_SMALLINT_VAL(args[0]) & 0x3FFFFFFFu));
+        return STA_PRIM_SUCCESS;
+    }
+    if (STA_IS_CHAR(args[0])) {
+        /* Character: derived from code point. */
+        *result = STA_SMALLINT_OOP((intptr_t)(STA_CHAR_VAL(args[0]) & 0x3FFFFFFFu));
+        return STA_PRIM_SUCCESS;
+    }
+
+    /* Heap objects: address-derived hash.
+     * IMPORTANT: Phase 1 uses non-moving GC, so address is stable.
+     * Phase 2 (compacting GC) will require a stored hash field. */
+    uintptr_t addr = (uintptr_t)args[0];
+    intptr_t hash = (intptr_t)((addr >> 4) & 0x3FFFFFFFu);
+    *result = STA_SMALLINT_OOP(hash);
+    return STA_PRIM_SUCCESS;
+}
+
+/* Prim 41: Object >> #shallowCopy */
+static int prim_shallow_copy(STA_OOP *args, uint8_t nargs, STA_OOP *result) {
+    (void)nargs;
+
+    /* Immediates: return self (they are values, not heap objects). */
+    if (STA_IS_IMMEDIATE(args[0])) {
+        *result = args[0];
+        return STA_PRIM_SUCCESS;
+    }
+
+    if (!g_prim_heap) return 7;
+
+    STA_ObjHeader *h = (STA_ObjHeader *)(uintptr_t)args[0];
+    STA_ObjHeader *copy = sta_heap_alloc(g_prim_heap, h->class_index, h->size);
+    if (!copy) return 7;
+
+    /* Copy payload verbatim. */
+    memcpy(sta_payload(copy), sta_payload(h), (size_t)h->size * sizeof(STA_OOP));
+
+    /* Preserve reserved field (byte padding). */
+    copy->reserved = h->reserved;
+
+    /* The copy is always mutable — clear immutable flag. */
+    copy->obj_flags &= (uint8_t)~STA_OBJ_IMMUTABLE;
+
+    *result = (STA_OOP)(uintptr_t)copy;
+    return STA_PRIM_SUCCESS;
+}
+
 /* ── Array primitives ──────────────────────────────────────────────────── */
 
 /* Prim 51: Array >> #at: */
@@ -325,6 +606,17 @@ void sta_primitive_table_init(void) {
     /* Object creation (§8.5) */
     sta_primitives[31] = prim_basic_new;       /* #basicNew */
     sta_primitives[32] = prim_basic_new_size;  /* #basicNew: */
+
+    /* Object and memory (§8.5) */
+    sta_primitives[33] = prim_basic_at;        /* #basicAt: */
+    sta_primitives[34] = prim_basic_at_put;    /* #basicAt:put: */
+    sta_primitives[35] = prim_basic_size;      /* #basicSize */
+    sta_primitives[36] = prim_hash;            /* #hash */
+    sta_primitives[37] = prim_become;          /* #become: */
+    sta_primitives[38] = prim_inst_var_at;     /* #instVarAt: */
+    sta_primitives[39] = prim_inst_var_at_put; /* #instVarAt:put: */
+    sta_primitives[40] = prim_identity_hash;   /* #identityHash */
+    sta_primitives[41] = prim_shallow_copy;    /* #shallowCopy */
 
     /* Object (§8.4) */
     sta_primitives[42]  = prim_yourself;       /* #yourself */
