@@ -214,6 +214,15 @@ All seven architectural spikes are complete. ADRs 007–014 are accepted.
   - `test_object_creation.c` — end-to-end: store/retrieve, size check, multi-object arrays, chained creates
 - Milestone: **Smalltalk code can create objects via new/new:/basicNew/basicNew: through normal message dispatch — first time the interpreter reads the class format field to determine allocation shape**
 
+### Epic 6: Object and Memory Primitives (prims 33–41) — COMPLETE
+- GitHub: Epic #144, stories #145–#150 (all closed)
+- Branch: `phase1/epic-6-object-memory-prims` (merged to main)
+- Modified files:
+  - `src/vm/primitive_table.h/c` — Added prims 33 (basicAt:), 34 (basicAt:put:), 35 (basicSize), 36 (hash), 37 (become:), 38 (instVarAt:), 39 (instVarAt:put:), 40 (identityHash), 41 (shallowCopy); get_receiver_format() helper
+  - `src/bootstrap/bootstrap.c` — Installed 9 primitive methods on Object in step 7; dict capacity 16→32
+- Tests: 26/26 passing
+- Milestone: **Complete Object protocol (prims 29–42) — all Blue Book §8.5 object/memory primitives implemented**
+
 ---
 
 ## ADR index
@@ -271,7 +280,7 @@ docs/spikes/              ← spike-001 through spike-007
 
 ## How to orient a new chat with Claude
 Paste this file plus `CLAUDE.md` at the start of the session.
-Phase 1 is in progress. Epics 1–5 are complete (object memory, symbols/method dict, bytecode interpreter, bootstrap, object creation). Epic 6 (object/memory primitives) is next.
+Phase 1 is in progress. Epics 1–6 are complete. Epic 7 (compiler) is next.
 
 Epic ordering (actual):
   1. Object memory  2. Symbols/MethodDict  3. Interpreter  4. Bootstrap
