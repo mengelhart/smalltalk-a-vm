@@ -132,6 +132,17 @@ target_include_directories(test_compiler_integration PRIVATE ${CMAKE_SOURCE_DIR}
 target_link_libraries(test_compiler_integration PRIVATE sta_vm)
 add_test(NAME compiler_integration COMMAND test_compiler_integration)
 
+# ── Phase 1 Epic 8: Exception Handling ───────────────────────────────
+add_executable(test_handler test_handler.c)
+target_include_directories(test_handler PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_handler PRIVATE sta_vm)
+add_test(NAME handler COMMAND test_handler)
+
+add_executable(test_exceptions test_exceptions.c)
+target_include_directories(test_exceptions PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_exceptions PRIVATE sta_vm)
+add_test(NAME exceptions COMMAND test_exceptions)
+
 # ── Spike 002: MPSC mailbox — TSan correctness gate ───────────────────────
 find_package(Threads REQUIRED)
 

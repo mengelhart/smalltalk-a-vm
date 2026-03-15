@@ -811,9 +811,10 @@ static void emit_block(Codegen *cg, STA_AstNode *node) {
     cg->temp_count = saved_temp_count;
 
     /* Create BlockDescriptor object:
-     * 3 slots: startPC (SmallInt), bodyLength (SmallInt), numArgs (SmallInt) */
+     * 4 slots: startPC, bodyLength, numArgs, tempOffset (all SmallInt).
+     * tempOffset is the temp index where the first block arg should go. */
     STA_ObjHeader *bd = sta_heap_alloc(cg->ctx->heap,
-                                        STA_CLS_BLOCKDESCRIPTOR, 3);
+                                        STA_CLS_BLOCKDESCRIPTOR, 4);
     if (!bd) {
         cg_error(cg, "failed to allocate block descriptor");
         return;
@@ -822,6 +823,7 @@ static void emit_block(Codegen *cg, STA_AstNode *node) {
     bdp[0] = STA_SMALLINT_OOP(body_start);
     bdp[1] = STA_SMALLINT_OOP(body_length);
     bdp[2] = STA_SMALLINT_OOP(node->as.method.arg_count);
+    bdp[3] = STA_SMALLINT_OOP(saved_temp_count);
 
     /* Patch the literal slot. */
     cg->literals.items[desc_idx] = (STA_OOP)(uintptr_t)bd;

@@ -19,6 +19,7 @@
 #include "oop.h"
 #include "heap.h"
 #include "class_table.h"
+#include "frame.h"
 #include <stdint.h>
 
 /* ── Primitive function pointer type ───────────────────────────────────── */
@@ -55,3 +56,7 @@ void sta_primitive_set_class_table(STA_ClassTable *ct);
 /* Set the heap used by allocation primitives (e.g. #basicNew, #basicNew:).
  * Called by bootstrap after heap is ready. */
 void sta_primitive_set_heap(STA_Heap *heap);
+
+/* Set the stack slab used by exception primitives (on:do:, ensure:).
+ * Called by the interpreter at dispatch loop entry. */
+void sta_primitive_set_slab(STA_StackSlab *slab);

@@ -23,6 +23,7 @@ add_library(sta_vm STATIC
     src/vm/selector.c
     src/vm/primitive_table.c
     src/vm/interpreter.c
+    src/vm/handler.c
     src/actor/actor.c
     src/bootstrap/bootstrap.c
     src/compiler/scanner.c

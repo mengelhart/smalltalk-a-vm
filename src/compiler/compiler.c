@@ -67,9 +67,40 @@ STA_CompileResult sta_compile_expression(
     STA_Heap *heap,
     STA_OOP system_dict)
 {
-    /* Wrap expression in: doIt ^<expression> */
+    /* Wrap expression in a doIt method.
+     * Single expression:        doIt ^<source>
+     * Multi-statement:          doIt <stmts>. ^<last>
+     * With temps (| x y | ...): doIt | x y | <stmts>. ^<last>
+     */
     size_t src_len = strlen(source);
-    size_t buf_len = 6 + src_len + 1; /* "doIt ^" + source + NUL */
+
+    /* Find the last '.' that is NOT inside a string literal or block. */
+    int last_dot = -1;
+    int depth = 0;       /* nesting depth for [] */
+    bool in_string = false;
+    for (size_t i = 0; i < src_len; i++) {
+        char c = source[i];
+        if (in_string) {
+            if (c == '\'' && i + 1 < src_len && source[i + 1] == '\'') {
+                i++; /* skip escaped quote */
+            } else if (c == '\'') {
+                in_string = false;
+            }
+        } else {
+            if (c == '\'') {
+                in_string = true;
+            } else if (c == '[') {
+                depth++;
+            } else if (c == ']') {
+                depth--;
+            } else if (c == '.' && depth == 0) {
+                last_dot = (int)i;
+            }
+        }
+    }
+
+    /* "doIt " (5) + source + "^" (1) + NUL */
+    size_t buf_len = 5 + src_len + 2;
     char *buf = malloc(buf_len);
     if (!buf) {
         STA_CompileResult result;
@@ -78,7 +109,19 @@ STA_CompileResult sta_compile_expression(
         snprintf(result.error_msg, sizeof(result.error_msg), "out of memory");
         return result;
     }
-    snprintf(buf, buf_len, "doIt ^%s", source);
+
+    if (last_dot < 0) {
+        /* Single expression — simple case. */
+        snprintf(buf, buf_len, "doIt ^%s", source);
+    } else {
+        /* Multi-statement: copy up to and including last '.', then ^rest. */
+        /* Skip trailing whitespace after last dot. */
+        int rest_start = last_dot + 1;
+        while (rest_start < (int)src_len && source[rest_start] == ' ')
+            rest_start++;
+        snprintf(buf, buf_len, "doIt %.*s ^%s",
+                 last_dot + 1, source, source + rest_start);
+    }
 
     /* Use Object as the class (no instvars). */
     STA_CompileResult result = sta_compile_method(

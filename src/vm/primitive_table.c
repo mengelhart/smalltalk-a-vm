@@ -3,12 +3,15 @@
  */
 #include "primitive_table.h"
 #include "format.h"
+#include "handler.h"
 #include "interpreter.h"
 #include "method_dict.h"
 #include "special_objects.h"
 #include "symbol_table.h"
 #include <stdlib.h>
 #include <string.h>
+#include <setjmp.h>
+#include <stdio.h>
 
 STA_PrimFn sta_primitives[STA_PRIM_TABLE_SIZE];
 
@@ -24,6 +27,13 @@ static STA_Heap *g_prim_heap;
 
 void sta_primitive_set_heap(STA_Heap *heap) {
     g_prim_heap = heap;
+}
+
+/* Stack slab pointer for exception primitives (on:do:, ensure:). */
+static STA_StackSlab *g_prim_slab;
+
+void sta_primitive_set_slab(STA_StackSlab *slab) {
+    g_prim_slab = slab;
 }
 
 /* ── SmallInteger arithmetic primitives ────────────────────────────────── */
@@ -586,6 +596,113 @@ static int prim_array_size(STA_OOP *args, uint8_t nargs, STA_OOP *result) {
     return STA_PRIM_SUCCESS;
 }
 
+/* ── Exception primitives (§7.8, §8.8) ─────────────────────────────────── */
+
+/* Prim 88: BlockClosure >> #on:do:
+ * args[0] = body block (receiver), args[1] = exception class,
+ * args[2] = handler block.
+ * Uses setjmp/longjmp for signal → on:do: transfer. */
+static int prim_on_do(STA_OOP *args, uint8_t nargs, STA_OOP *result) {
+    (void)nargs;
+    if (!g_prim_slab || !g_prim_heap || !g_prim_class_table)
+        return STA_PRIM_NOT_AVAILABLE;
+
+    STA_OOP body_block    = args[0];
+    STA_OOP exc_class     = args[1];
+    STA_OOP handler_block = args[2];
+
+    STA_HandlerEntry entry;
+    memset(&entry, 0, sizeof(entry));
+    entry.exception_class = exc_class;
+    entry.handler_block   = handler_block;
+    entry.saved_slab_top  = g_prim_slab->top;
+    entry.saved_slab_sp   = g_prim_slab->sp;
+
+    if (setjmp(entry.jmp) == 0) {
+        /* Normal path: push handler, evaluate body. */
+        sta_handler_push(&entry);
+        STA_OOP body_result = sta_eval_block(g_prim_slab, g_prim_heap,
+                                               g_prim_class_table,
+                                               body_block, NULL, 0);
+        sta_handler_pop();
+        *result = body_result;
+        return STA_PRIM_SUCCESS;
+    } else {
+        /* Signal transferred control here via longjmp.
+         * The handler chain was already popped by the signal primitive.
+         * Restore slab state to discard frames from the aborted body. */
+        g_prim_slab->top = entry.saved_slab_top;
+        g_prim_slab->sp  = entry.saved_slab_sp;
+
+        STA_OOP exc = sta_handler_get_signaled_exception();
+        STA_OOP handler_args[1] = { exc };
+        STA_OOP handler_result = sta_eval_block(g_prim_slab, g_prim_heap,
+                                                  g_prim_class_table,
+                                                  handler_block,
+                                                  handler_args, 1);
+        *result = handler_result;
+        return STA_PRIM_SUCCESS;
+    }
+}
+
+/* Prim 89: Exception >> #signal
+ * args[0] = exception instance (receiver). No arguments.
+ * Walks the handler chain, longjmp to matching on:do:. */
+static int prim_signal(STA_OOP *args, uint8_t nargs, STA_OOP *result) {
+    (void)nargs; (void)result;
+    if (!g_prim_class_table) return STA_PRIM_NOT_AVAILABLE;
+
+    STA_OOP exception = args[0];
+
+    STA_HandlerEntry *entry = sta_handler_find(exception, g_prim_class_table);
+    if (entry) {
+        /* Pop all handlers down to and including the matched entry. */
+        sta_handler_set_top(entry->prev);
+
+        /* Store exception in global (avoids volatile issues with setjmp). */
+        sta_handler_set_signaled_exception(exception);
+
+        /* Transfer control to the matching on:do: primitive. */
+        longjmp(entry->jmp, 1);
+        /* NOTREACHED */
+    }
+
+    /* No handler found — unhandled exception. */
+    fprintf(stderr, "Unhandled exception (class index %u)\n",
+            STA_IS_HEAP(exception)
+                ? ((STA_ObjHeader *)(uintptr_t)exception)->class_index
+                : 0u);
+    abort();
+
+    return STA_PRIM_NOT_AVAILABLE;  /* unreachable, silences warning */
+}
+
+/* Prim 90: BlockClosure >> #ensure:
+ * args[0] = body block (receiver), args[1] = ensure block.
+ * Phase 1: normal completion only — ensure block does NOT fire
+ * on exception or NLR unwinding (that is Phase 2). */
+static int prim_ensure(STA_OOP *args, uint8_t nargs, STA_OOP *result) {
+    (void)nargs;
+    if (!g_prim_slab || !g_prim_heap || !g_prim_class_table)
+        return STA_PRIM_NOT_AVAILABLE;
+
+    STA_OOP body_block   = args[0];
+    STA_OOP ensure_block = args[1];
+
+    /* Evaluate body block. */
+    STA_OOP body_result = sta_eval_block(g_prim_slab, g_prim_heap,
+                                           g_prim_class_table,
+                                           body_block, NULL, 0);
+
+    /* Unconditionally evaluate ensure block (discard result). */
+    (void)sta_eval_block(g_prim_slab, g_prim_heap,
+                          g_prim_class_table,
+                          ensure_block, NULL, 0);
+
+    *result = body_result;
+    return STA_PRIM_SUCCESS;
+}
+
 /* ── Table initialization ──────────────────────────────────────────────── */
 
 void sta_primitive_table_init(void) {
@@ -625,6 +742,11 @@ void sta_primitive_table_init(void) {
     sta_primitives[51] = prim_array_at;        /* #at: */
     sta_primitives[52] = prim_array_at_put;    /* #at:put: */
     sta_primitives[53] = prim_array_size;      /* #size */
+
+    /* Exception handling (§7.8, §8.8) */
+    sta_primitives[88]  = prim_on_do;          /* BlockClosure >> #on:do: */
+    sta_primitives[89]  = prim_signal;         /* Exception >> #signal */
+    sta_primitives[90]  = prim_ensure;         /* BlockClosure >> #ensure: */
 
     /* Reflection / error handling */
     sta_primitives[120] = prim_responds_to;    /* #respondsTo: */

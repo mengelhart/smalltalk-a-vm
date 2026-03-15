@@ -72,43 +72,46 @@ the interpreter's method activation code.
 ## Part 2: Dependency Map
 
 ```
-Epic 0: Resolve 5 blocking decisions (ADRs) ← design work, not CC
-    |
-    v
 Epic 1: Object memory & allocator
     |
     v
 Epic 2: Symbol table, method dictionary
     |
     v
-Epic 3: Bootstrap Tier 0 (metaclass circularity)
+Epic 3: Bytecode interpreter (dispatch + primitives + blocks)
+    |       "3 + 4 = 7" milestone reached here
+    v
+Epic 4: Bootstrap (Tier 0 metaclass circularity + Tier 1 kernel classes + primitive methods)
     |
     v
-Epic 4: Bootstrap Tier 1 (kernel classes + primitive methods)
+Epic 5: Object creation (basicNew / basicNew:)
     |
     v
-Epic 5: Bytecode interpreter (dispatch + primitives + blocks)
+Epic 6: Object & memory primitives (prims 33–41)
     |
     v
-Epic 6: Compiler (Smalltalk source -> bytecodes)
+Epic 7: Compiler (Smalltalk source → bytecodes)
     |
     v
-Epic 7: Exception handling (handler stack, on:do:, signal)
+Epic 8: Exception handling (handler stack, on:do:, signal, ensure:, DNU)
     |
     v
-Epic 8: Kernel source loading (file-in)
+Epic 9: Kernel source loading (file-in)
     |
     v
-Epic 9: Image save/load (production format)
+Epic 10: Image save/load (production format)
     |
     v
-Epic 10: Eval loop & smoke test ("3 + 4 -> 7")
+Epic 11: Eval loop & smoke test
 ```
 
-Epics 1-4 are strictly sequential. Epics 5 and 6 have a tight feedback loop
-(interpreter needs compiled methods to test; compiler needs interpreter to verify).
-Epics 7-8 depend on both. Epic 9 promotes spike-006 to production. Epic 10 is the
-integration milestone.
+Epics 1–2 are strictly sequential (symbols need the allocator). Epic 3 (interpreter) was built before bootstrap so hand-assembled methods could validate the dispatch loop immediately. Epic 4 (bootstrap) then wired real class objects into the working interpreter.
+
+Epics 5–6 were split out from the original plan — object creation and memory primitives each warranted their own epic to keep CC context focused.
+
+Epic 7 (compiler) depends on all prior epics for its test suite. Epic 8 (exceptions) depends on the compiler to install Smalltalk-level exception methods. Epics 9–11 are strictly sequential.
+
+Epic 0 (resolve blocking decisions) was completed as part of early epic work rather than as a standalone gate — ADR 014 was the last decision resolved, during Epic 3.
 
 ---
 

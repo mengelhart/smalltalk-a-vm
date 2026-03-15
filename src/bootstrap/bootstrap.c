@@ -17,6 +17,8 @@
 #include "../vm/special_objects.h"
 #include "../vm/special_selectors.h"
 #include "../vm/primitive_table.h"
+#include "../compiler/compiler.h"
+#include <stdio.h>
 #include <string.h>
 #include <assert.h>
 
@@ -337,8 +339,8 @@ static int step4_tier1(BS *bs) {
     STA_OOP assoc      = create_class(bs, "Association", obj, STA_CLS_ASSOCIATION, 2, STA_FMT_NORMAL);
     STA_OOP cm         = create_class(bs, "CompiledMethod", obj, STA_CLS_COMPILEDMETHOD, 0, STA_FMT_COMPILED_METHOD);
     STA_OOP methdict   = create_class(bs, "MethodDictionary", obj, STA_CLS_METHODDICTIONARY, 2, STA_FMT_NORMAL);
-    STA_OOP blockclo   = create_class(bs, "BlockClosure", obj, STA_CLS_BLOCKCLOSURE, 4, STA_FMT_NORMAL);
-    STA_OOP blockdesc  = create_class(bs, "BlockDescriptor", obj, STA_CLS_BLOCKDESCRIPTOR, 3, STA_FMT_NORMAL);
+    STA_OOP blockclo   = create_class(bs, "BlockClosure", obj, STA_CLS_BLOCKCLOSURE, 5, STA_FMT_NORMAL);
+    STA_OOP blockdesc  = create_class(bs, "BlockDescriptor", obj, STA_CLS_BLOCKDESCRIPTOR, 4, STA_FMT_NORMAL);
     STA_OOP message    = create_class(bs, "Message", obj, STA_CLS_MESSAGE, 3, STA_FMT_NORMAL);
     (void)assoc; (void)cm; (void)methdict; (void)blockclo;
     (void)blockdesc; (void)message;
@@ -635,6 +637,96 @@ static int step7_methods(BS *bs) {
     return 0;
 }
 
+/* ── Step 8: Exception handling methods ─────────────────────────────────── */
+
+/* Helper: compile a method from source and install it on a class.
+ * Uses the compiler (scanner → parser → codegen → CompiledMethod). */
+static int install_source_method(BS *bs, STA_OOP class_oop,
+                                   const char *source,
+                                   const char *selector_str,
+                                   const char **instvar_names,
+                                   uint32_t instvar_count) {
+    STA_OOP sysdict = sta_spc_get(SPC_SMALLTALK);
+    STA_CompileResult cr = sta_compile_method(
+        source, class_oop, instvar_names, instvar_count,
+        bs->st, bs->sp, bs->heap, sysdict);
+    if (cr.had_error) {
+        fprintf(stderr, "bootstrap: compile error for %s: %s\n",
+                selector_str, cr.error_msg);
+        return -1;
+    }
+
+    STA_OOP sel = bs_intern(bs, selector_str);
+    if (sel == 0) return -1;
+
+    STA_OOP md = sta_class_method_dict(class_oop);
+    return sta_method_dict_insert(bs->heap, md, sel, cr.method);
+}
+
+static int step8_exception_methods(BS *bs) {
+    STA_OOP obj_cls = bs->cls_object;
+    STA_OOP bc_cls  = sta_class_table_get(bs->ct, STA_CLS_BLOCKCLOSURE);
+    STA_OOP exc_cls = sta_class_table_get(bs->ct, STA_CLS_EXCEPTION);
+    STA_OOP err_cls = sta_class_table_get(bs->ct, STA_CLS_ERROR);
+    STA_OOP mnu_cls = sta_class_table_get(bs->ct, STA_CLS_MESSAGENOTUNDERSTOOD);
+
+    /* ── Exception accessor methods ──────────────────────────────────── */
+    /* Exception instVars: messageText (0), signalContext (1) */
+    static const char *exc_ivars[] = { "messageText", "signalContext" };
+
+    if (install_source_method(bs, exc_cls,
+            "messageText ^messageText", "messageText",
+            exc_ivars, 2) != 0) return -1;
+    if (install_source_method(bs, exc_cls,
+            "messageText: aString messageText := aString", "messageText:",
+            exc_ivars, 2) != 0) return -1;
+
+    /* Exception >> signal — primitive 89 */
+    if (install_prim_method(bs, exc_cls, "signal", 89, 0) != 0) return -1;
+
+    /* ── Error (no additional methods needed for Phase 1) ────────────── */
+    (void)err_cls;
+
+    /* ── MessageNotUnderstood accessor methods ───────────────────────── */
+    /* MNU instVars: messageText (0), signalContext (1), message (2), receiver (3) */
+    static const char *mnu_ivars[] = {
+        "messageText", "signalContext", "message", "receiver"
+    };
+
+    if (install_source_method(bs, mnu_cls,
+            "message ^message", "message",
+            mnu_ivars, 4) != 0) return -1;
+    if (install_source_method(bs, mnu_cls,
+            "message: aMessage message := aMessage", "message:",
+            mnu_ivars, 4) != 0) return -1;
+    if (install_source_method(bs, mnu_cls,
+            "receiver ^receiver", "receiver",
+            mnu_ivars, 4) != 0) return -1;
+    if (install_source_method(bs, mnu_cls,
+            "receiver: anObject receiver := anObject", "receiver:",
+            mnu_ivars, 4) != 0) return -1;
+
+    /* ── BlockClosure >> on:do: — primitive 88 ───────────────────────── */
+    if (install_prim_method(bs, bc_cls, "on:do:", 88, 2) != 0) return -1;
+
+    /* ── BlockClosure >> ensure: — primitive 90 ──────────────────────── */
+    if (install_prim_method(bs, bc_cls, "ensure:", 90, 1) != 0) return -1;
+
+    /* ── Object >> doesNotUnderstand: — real Smalltalk method ─────────── */
+    /* Replaces the prim 121 stub. Creates MessageNotUnderstood and signals. */
+    if (install_source_method(bs, obj_cls,
+            "doesNotUnderstand: aMessage "
+              "| ex | "
+              "ex := MessageNotUnderstood new. "
+              "ex receiver: self. "
+              "ex message: aMessage. "
+              "ex signal",
+            "doesNotUnderstand:",
+            NULL, 0) != 0) return -1;
+
+    return 0;
+}
+
 /* ── Bootstrap entry point ────────────────────────────────────────────── */
 
 STA_BootstrapResult sta_bootstrap(
@@ -677,6 +769,9 @@ STA_BootstrapResult sta_bootstrap(
     /* Set the class table and heap for primitives that need them. */
     sta_primitive_set_class_table(class_table);
     sta_primitive_set_heap(heap);
+
+    if (step8_exception_methods(&bs) != 0)
+        return (STA_BootstrapResult){ -1, "step 8: failed to install exception methods" };
 
     return (STA_BootstrapResult){ 0, NULL };
 }
