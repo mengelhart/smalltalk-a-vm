@@ -20,6 +20,8 @@
 #include "heap.h"
 #include "class_table.h"
 #include "frame.h"
+#include "symbol_table.h"
+#include "immutable_space.h"
 #include <stdint.h>
 
 /* ── Primitive function pointer type ───────────────────────────────────── */
@@ -60,3 +62,11 @@ void sta_primitive_set_heap(STA_Heap *heap);
 /* Set the stack slab used by exception primitives (on:do:, ensure:).
  * Called by the interpreter at dispatch loop entry. */
 void sta_primitive_set_slab(STA_StackSlab *slab);
+
+/* Set the symbol table used by class-creation primitive.
+ * Called by bootstrap after symbol table is ready. */
+void sta_primitive_set_symbol_table(STA_SymbolTable *st);
+
+/* Set the immutable space used by class-creation primitive.
+ * Called by bootstrap after immutable space is ready. */
+void sta_primitive_set_immutable_space(STA_ImmutableSpace *sp);

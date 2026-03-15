@@ -634,6 +634,13 @@ static int step7_methods(BS *bs) {
         if (install_bc_method(bs, false_cls, "ifTrue:ifFalse:", 2, 2, lits, 2, bc, 6) != 0) return -1;
     }
 
+    /* ── Class >> subclass:instanceVariableNames:classVariableNames:
+     *              poolDictionaries:category: — primitive 122 ────────────── */
+    STA_OOP cls_cls = bs->cls_class;
+    if (install_prim_method(bs, cls_cls,
+            "subclass:instanceVariableNames:classVariableNames:poolDictionaries:category:",
+            122, 5) != 0) return -1;
+
     return 0;
 }
 
@@ -766,9 +773,11 @@ STA_BootstrapResult sta_bootstrap(
     if (step7_methods(&bs) != 0)
         return (STA_BootstrapResult){ -1, "step 7: failed to install kernel methods" };
 
-    /* Set the class table and heap for primitives that need them. */
+    /* Set the class table, heap, symbol table, and immutable space for primitives. */
     sta_primitive_set_class_table(class_table);
     sta_primitive_set_heap(heap);
+    sta_primitive_set_symbol_table(symbol_table);
+    sta_primitive_set_immutable_space(immutable_space);
 
     if (step8_exception_methods(&bs) != 0)
         return (STA_BootstrapResult){ -1, "step 8: failed to install exception methods" };

@@ -8,6 +8,7 @@
 #include "method_dict.h"
 #include "special_objects.h"
 #include "symbol_table.h"
+#include "immutable_space.h"
 #include <stdlib.h>
 #include <string.h>
 #include <setjmp.h>
@@ -34,6 +35,20 @@ static STA_StackSlab *g_prim_slab;
 
 void sta_primitive_set_slab(STA_StackSlab *slab) {
     g_prim_slab = slab;
+}
+
+/* Symbol table pointer for class-creation primitive. */
+static STA_SymbolTable *g_prim_symbol_table;
+
+void sta_primitive_set_symbol_table(STA_SymbolTable *st) {
+    g_prim_symbol_table = st;
+}
+
+/* Immutable space pointer for class-creation primitive. */
+static STA_ImmutableSpace *g_prim_immutable_space;
+
+void sta_primitive_set_immutable_space(STA_ImmutableSpace *sp) {
+    g_prim_immutable_space = sp;
 }
 
 /* ── SmallInteger arithmetic primitives ────────────────────────────────── */
@@ -703,6 +718,194 @@ static int prim_ensure(STA_OOP *args, uint8_t nargs, STA_OOP *result) {
     return STA_PRIM_SUCCESS;
 }
 
+/* ── Class creation primitive (§9, prim 122) ───────────────────────────── */
+
+/* Helper: extract bytes from a Smalltalk String OOP as a C string.
+ * Returns a pointer to the raw bytes inside the String object.
+ * Sets *out_len to the byte count. Returns NULL for non-String objects. */
+static const char *string_bytes(STA_OOP str, size_t *out_len) {
+    if (STA_IS_IMMEDIATE(str)) return NULL;
+    STA_ObjHeader *h = (STA_ObjHeader *)(uintptr_t)str;
+    if (h->class_index != STA_CLS_STRING && h->class_index != STA_CLS_SYMBOL)
+        return NULL;
+    uint32_t var_words = h->size;
+    uint32_t byte_count = var_words * (uint32_t)sizeof(STA_OOP)
+                          - STA_BYTE_PADDING(h);
+    *out_len = byte_count;
+    return (const char *)sta_payload(h);
+}
+
+/* Helper: insert (symbol, association) into SystemDictionary. */
+static int prim_sysdict_put(STA_OOP dict, STA_OOP key_sym, STA_OOP value) {
+    if (!g_prim_heap) return -1;
+
+    /* Create Association. */
+    STA_ObjHeader *ah = sta_heap_alloc(g_prim_heap, STA_CLS_ASSOCIATION, 2);
+    if (!ah) return -1;
+    sta_payload(ah)[0] = key_sym;
+    sta_payload(ah)[1] = value;
+    STA_OOP assoc = (STA_OOP)(uintptr_t)ah;
+
+    /* Dict payload: slot 0 = tally, slot 1 = backing array. */
+    STA_ObjHeader *dh = (STA_ObjHeader *)(uintptr_t)dict;
+    STA_OOP *dp = sta_payload(dh);
+    STA_OOP arr = dp[1];
+    uint32_t tally = (uint32_t)STA_SMALLINT_VAL(dp[0]);
+
+    STA_ObjHeader *arr_h = (STA_ObjHeader *)(uintptr_t)arr;
+    uint32_t cap = arr_h->size / 2;
+    STA_OOP *slots = sta_payload(arr_h);
+
+    uint32_t hash = sta_symbol_get_hash(key_sym);
+    uint32_t idx = hash % cap;
+
+    for (uint32_t i = 0; i < cap; i++) {
+        uint32_t pos = ((idx + i) % cap) * 2;
+        if (slots[pos] == 0) {
+            slots[pos]     = key_sym;
+            slots[pos + 1] = assoc;
+            dp[0] = STA_SMALLINT_OOP((intptr_t)(tally + 1));
+            return 0;
+        }
+        if (slots[pos] == key_sym) {
+            slots[pos + 1] = assoc;
+            return 0;
+        }
+    }
+    return -1;  /* table full */
+}
+
+/* Prim 122: Class >> #subclass:instanceVariableNames:classVariableNames:
+ *                       poolDictionaries:category:
+ * args[0] = receiver (superclass), args[1] = className (Symbol),
+ * args[2] = instVarNames (String), args[3] = classVarNames (String),
+ * args[4] = poolDicts (String), args[5] = category (String).
+ *
+ * Creates a new Class + Metaclass pair, wires superclass chains,
+ * registers in class table, adds to SystemDictionary. */
+static int prim_subclass(STA_OOP *args, uint8_t nargs, STA_OOP *result) {
+    (void)nargs;
+    if (!g_prim_class_table || !g_prim_heap ||
+        !g_prim_symbol_table || !g_prim_immutable_space)
+        return STA_PRIM_NOT_AVAILABLE;
+
+    STA_OOP superclass = args[0];
+    STA_OOP name_sym   = args[1];
+    STA_OOP ivars_str  = args[2];
+    /* args[3] classVarNames — ignored in Phase 1 */
+    /* args[4] poolDicts — ignored in Phase 1 */
+    /* args[5] category — ignored in Phase 1 */
+
+    if (STA_IS_IMMEDIATE(superclass)) return STA_PRIM_BAD_RECEIVER;
+
+    /* name_sym must be a Symbol. */
+    if (STA_IS_IMMEDIATE(name_sym)) return STA_PRIM_BAD_ARGUMENT;
+    STA_ObjHeader *name_h = (STA_ObjHeader *)(uintptr_t)name_sym;
+    if (name_h->class_index != STA_CLS_SYMBOL) return STA_PRIM_BAD_ARGUMENT;
+
+    /* Parse instvar names string (space-separated). */
+    size_t ivars_len = 0;
+    const char *ivars_bytes = NULL;
+    uint16_t inst_var_count = 0;
+
+    if (!STA_IS_IMMEDIATE(ivars_str)) {
+        ivars_bytes = string_bytes(ivars_str, &ivars_len);
+    }
+
+    /* Count instvar names by counting whitespace-separated tokens. */
+    if (ivars_bytes && ivars_len > 0) {
+        bool in_word = false;
+        for (size_t i = 0; i < ivars_len; i++) {
+            if (ivars_bytes[i] == ' ' || ivars_bytes[i] == '\t' ||
+                ivars_bytes[i] == '\n' || ivars_bytes[i] == '\r') {
+                in_word = false;
+            } else {
+                if (!in_word) inst_var_count++;
+                in_word = true;
+            }
+        }
+    }
+
+    /* Get superclass's instvar count to compute total. */
+    STA_ObjHeader *super_h = (STA_ObjHeader *)(uintptr_t)superclass;
+    STA_OOP super_fmt = sta_payload(super_h)[STA_CLASS_SLOT_FORMAT];
+    uint8_t super_inst_vars = STA_FORMAT_INST_VARS(super_fmt);
+    uint16_t total_inst_vars = (uint16_t)super_inst_vars + inst_var_count;
+
+    if (total_inst_vars > 255) return STA_PRIM_OUT_OF_RANGE;
+
+    /* Allocate class table indices. */
+    uint32_t cls_index = sta_class_table_alloc_index(g_prim_class_table);
+    if (cls_index == 0) return STA_PRIM_NO_MEMORY;
+    /* Temporarily reserve it so the next alloc gets a different slot. */
+    sta_class_table_set(g_prim_class_table, cls_index, STA_SMALLINT_OOP(1));
+
+    uint32_t meta_index = sta_class_table_alloc_index(g_prim_class_table);
+    if (meta_index == 0) {
+        sta_class_table_set(g_prim_class_table, cls_index, 0);
+        return STA_PRIM_NO_MEMORY;
+    }
+
+    /* Allocate class (class_index → its metaclass). */
+    STA_ObjHeader *cls_h = sta_heap_alloc(g_prim_heap, meta_index, 4);
+    if (!cls_h) {
+        sta_class_table_set(g_prim_class_table, cls_index, 0);
+        return STA_PRIM_NO_MEMORY;
+    }
+    STA_OOP cls = (STA_OOP)(uintptr_t)cls_h;
+
+    /* Allocate metaclass (class_index = Metaclass). */
+    STA_ObjHeader *meta_h = sta_heap_alloc(g_prim_heap, STA_CLS_METACLASS, 4);
+    if (!meta_h) {
+        sta_class_table_set(g_prim_class_table, cls_index, 0);
+        return STA_PRIM_NO_MEMORY;
+    }
+    STA_OOP meta = (STA_OOP)(uintptr_t)meta_h;
+
+    /* Create empty method dictionaries. */
+    STA_OOP cls_md  = sta_method_dict_create(g_prim_heap, 8);
+    STA_OOP meta_md = sta_method_dict_create(g_prim_heap, 4);
+    if (!cls_md || !meta_md) {
+        sta_class_table_set(g_prim_class_table, cls_index, 0);
+        return STA_PRIM_NO_MEMORY;
+    }
+
+    /* Metaclass superclass = superclass's metaclass. */
+    STA_OOP nil_oop = sta_spc_get(SPC_NIL);
+    STA_OOP meta_super = nil_oop;
+    if (superclass != 0 && superclass != nil_oop) {
+        uint32_t super_meta_idx = super_h->class_index;
+        meta_super = sta_class_table_get(g_prim_class_table, super_meta_idx);
+    }
+
+    /* Wire class slots. */
+    STA_OOP *cls_slots = sta_payload(cls_h);
+    cls_slots[STA_CLASS_SLOT_SUPERCLASS] = superclass;
+    cls_slots[STA_CLASS_SLOT_METHODDICT] = cls_md;
+    cls_slots[STA_CLASS_SLOT_FORMAT]     = STA_FORMAT_ENCODE(total_inst_vars, STA_FMT_NORMAL);
+    cls_slots[STA_CLASS_SLOT_NAME]       = name_sym;
+
+    /* Wire metaclass slots. */
+    STA_OOP *meta_slots = sta_payload(meta_h);
+    meta_slots[STA_CLASS_SLOT_SUPERCLASS] = meta_super;
+    meta_slots[STA_CLASS_SLOT_METHODDICT] = meta_md;
+    meta_slots[STA_CLASS_SLOT_FORMAT]     = STA_FORMAT_ENCODE(4, STA_FMT_NORMAL);
+    meta_slots[STA_CLASS_SLOT_NAME]       = nil_oop;
+
+    /* Register in class table. */
+    sta_class_table_set(g_prim_class_table, cls_index, cls);
+    sta_class_table_set(g_prim_class_table, meta_index, meta);
+
+    /* Add to SystemDictionary. */
+    STA_OOP sysdict = sta_spc_get(SPC_SMALLTALK);
+    if (sysdict != 0 && sysdict != nil_oop) {
+        prim_sysdict_put(sysdict, name_sym, cls);
+    }
+
+    *result = cls;
+    return STA_PRIM_SUCCESS;
+}
+
 /* ── Table initialization ──────────────────────────────────────────────── */
 
 void sta_primitive_table_init(void) {
@@ -751,4 +954,7 @@ void sta_primitive_table_init(void) {
     /* Reflection / error handling */
     sta_primitives[120] = prim_responds_to;    /* #respondsTo: */
     sta_primitives[121] = prim_dnu;            /* #doesNotUnderstand: */
+
+    /* Class creation (§9) */
+    sta_primitives[122] = prim_subclass;       /* Class >> #subclass:... */
 }

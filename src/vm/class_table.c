@@ -55,3 +55,11 @@ uint32_t sta_class_table_index_of(STA_ClassTable *ct, STA_OOP class_oop) {
     }
     return 0;
 }
+
+uint32_t sta_class_table_alloc_index(STA_ClassTable *ct) {
+    STA_OOP *entries = atomic_load_explicit(&ct->entries, memory_order_relaxed);
+    for (uint32_t i = STA_CLS_RESERVED_COUNT; i < ct->capacity; i++) {
+        if (entries[i] == 0) return i;
+    }
+    return 0;
+}

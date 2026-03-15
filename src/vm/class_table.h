@@ -83,3 +83,8 @@ uint32_t sta_class_table_capacity(STA_ClassTable *ct);
  * Returns the index (1..capacity-1) on success, 0 if not found.
  * Linear scan — O(capacity). Fine for Phase 1 class counts. */
 uint32_t sta_class_table_index_of(STA_ClassTable *ct, STA_OOP class_oop);
+
+/* Allocate the next free class table index (starting from STA_CLS_RESERVED_COUNT).
+ * Returns the index on success, 0 if the table is full.
+ * Linear scan — O(capacity). Fine for Phase 1 class counts. */
+uint32_t sta_class_table_alloc_index(STA_ClassTable *ct);
