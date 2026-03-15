@@ -304,6 +304,9 @@ src/scheduler/            ← scheduler_spike.h, scheduler_spike.c
 src/io/                   ← io_spike.h, io_spike.c (Spike 005 complete)
 src/image/                ← image_spike.h, image_spike.c (Spike 006 complete)
 src/bridge/               ← bridge_spike.h, bridge_spike.c (Spike 007 complete)
+src/bootstrap/            ← one-time kernel bootstrap + file-in reader
+  bootstrap.h/c               ← kernel bootstrap (Epics 4/5/8) (production)
+  filein.h/c                  ← chunk-format file-in reader (Epic 9) (scaffolding)
 src/compiler/             ← scanner, parser, AST, codegen (Epic 7)
   scanner.h/c                 ← pull-model lexer for method source (production)
   ast.h, ast.c                ← AST node types and recursive free (production)
@@ -314,11 +317,30 @@ docs/decisions/           ← ADRs 001-014
 docs/spikes/              ← spike-001 through spike-007
 ```
 
+### Epic 9: Kernel Source Loading — IN PROGRESS (Session 1/4: Stories 1-2)
+- GitHub: Epic #169, stories #170, #171 (closed), #172, #173 (open)
+- Branch: phase1/epic-9a-filein-infra
+- New files:
+  - `src/bootstrap/filein.h`, `src/bootstrap/filein.c` — Chunk format reader
+    (Phase 1 C scaffolding; will be replaced by Smalltalk implementation)
+  - `tests/fixtures/simple.st`, `tests/fixtures/escaped.st` — Test .st files
+  - `tests/test_class_creation.c` — 8 tests for class creation primitive
+  - `tests/test_filein.c` — 3 tests for chunk format reader
+- Modified files:
+  - `src/vm/primitive_table.h/c` — Added prim 122 (subclass:instanceVariableNames:
+    classVariableNames:poolDictionaries:category:), symbol table and immutable space context setters
+  - `src/vm/class_table.h/c` — Added sta_class_table_alloc_index() for dynamic index allocation
+  - `src/bootstrap/bootstrap.c` — Installed class creation method on Class, wired symbol table and immutable space to primitive context
+  - `CMakeLists.txt` — filein.c added to sta_vm library
+- Tests: 34/34 passing (11 new)
+- Session 1 complete: class creation primitive + chunk reader
+- Session 2 next: public API (sta_vm_load_source), smoke test, then kernel .st files
+
 ---
 
 ## How to orient a new chat with Claude
 Paste this file plus `CLAUDE.md` at the start of the session.
-Phase 1 is in progress. Epics 1–8 are complete. Epic 9 (kernel source loading) is next.
+Phase 1 is in progress. Epics 1–8 are complete. Epic 9 is in progress (Stories 1-2 done, Stories 3-4 + kernel source next).
 
 Epic ordering (actual):
   1. Object memory  2. Symbols/MethodDict  3. Interpreter  4. Bootstrap

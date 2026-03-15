@@ -26,6 +26,7 @@ add_library(sta_vm STATIC
     src/vm/handler.c
     src/actor/actor.c
     src/bootstrap/bootstrap.c
+    src/bootstrap/filein.c
     src/compiler/scanner.c
     src/compiler/ast.c
     src/compiler/parser.c

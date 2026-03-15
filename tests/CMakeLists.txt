@@ -143,6 +143,19 @@ target_include_directories(test_exceptions PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(test_exceptions PRIVATE sta_vm)
 add_test(NAME exceptions COMMAND test_exceptions)
 
+# ── Phase 1 Epic 9: Kernel Source Loading ─────────────────────────────────
+add_executable(test_class_creation test_class_creation.c)
+target_include_directories(test_class_creation PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_class_creation PRIVATE sta_vm)
+add_test(NAME class_creation COMMAND test_class_creation)
+
+add_executable(test_filein test_filein.c)
+target_include_directories(test_filein PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_definitions(test_filein PRIVATE
+    FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+target_link_libraries(test_filein PRIVATE sta_vm)
+add_test(NAME filein COMMAND test_filein)
+
 # ── Spike 002: MPSC mailbox — TSan correctness gate ───────────────────────
 find_package(Threads REQUIRED)
 
