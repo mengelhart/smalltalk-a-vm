@@ -201,7 +201,7 @@ static int step3_tier0(BS *bs) {
     /* ── Pass 2: Wire pointers ────────────────────────────────────────── */
 
     /* Create empty method dictionaries. */
-    STA_OOP obj_md = sta_method_dict_create(bs->heap, 16);
+    STA_OOP obj_md = sta_method_dict_create(bs->heap, 32);
     STA_OOP beh_md = sta_method_dict_create(bs->heap, 8);
     STA_OOP cd_md  = sta_method_dict_create(bs->heap, 8);
     STA_OOP cls_md = sta_method_dict_create(bs->heap, 8);
@@ -508,6 +508,15 @@ static int step7_methods(BS *bs) {
     /* ── Object methods ───────────────────────────────────────────────── */
     if (install_prim_method(bs, obj_cls, "==",                  29, 1) != 0) return -1;
     if (install_prim_method(bs, obj_cls, "class",               30, 0) != 0) return -1;
+    if (install_prim_method(bs, obj_cls, "basicAt:",             33, 1) != 0) return -1;
+    if (install_prim_method(bs, obj_cls, "basicAt:put:",        34, 2) != 0) return -1;
+    if (install_prim_method(bs, obj_cls, "basicSize",           35, 0) != 0) return -1;
+    if (install_prim_method(bs, obj_cls, "hash",                36, 0) != 0) return -1;
+    if (install_prim_method(bs, obj_cls, "become:",             37, 1) != 0) return -1;
+    if (install_prim_method(bs, obj_cls, "instVarAt:",          38, 1) != 0) return -1;
+    if (install_prim_method(bs, obj_cls, "instVarAt:put:",      39, 2) != 0) return -1;
+    if (install_prim_method(bs, obj_cls, "identityHash",        40, 0) != 0) return -1;
+    if (install_prim_method(bs, obj_cls, "shallowCopy",         41, 0) != 0) return -1;
     if (install_prim_method(bs, obj_cls, "yourself",            42, 0) != 0) return -1;
     if (install_prim_method(bs, obj_cls, "respondsTo:",        120, 1) != 0) return -1;
     if (install_prim_method(bs, obj_cls, "doesNotUnderstand:", 121, 1) != 0) return -1;

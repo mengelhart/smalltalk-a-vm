@@ -104,6 +104,12 @@ target_include_directories(test_object_creation PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(test_object_creation PRIVATE sta_vm)
 add_test(NAME object_creation COMMAND test_object_creation)
 
+# ── Phase 1 Epic 6: Object and Memory Primitives ────────────────────────
+add_executable(test_object_memory_prims test_object_memory_prims.c)
+target_include_directories(test_object_memory_prims PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_object_memory_prims PRIVATE sta_vm)
+add_test(NAME object_memory_prims COMMAND test_object_memory_prims)
+
 # ── Spike 002: MPSC mailbox — TSan correctness gate ───────────────────────
 find_package(Threads REQUIRED)
 
