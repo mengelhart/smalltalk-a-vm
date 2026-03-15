@@ -110,6 +110,28 @@ target_include_directories(test_object_memory_prims PRIVATE ${CMAKE_SOURCE_DIR}/
 target_link_libraries(test_object_memory_prims PRIVATE sta_vm)
 add_test(NAME object_memory_prims COMMAND test_object_memory_prims)
 
+# ── Phase 1 Epic 7: Compiler — Scanner and Parser ────────────────────────
+add_executable(test_scanner test_scanner.c)
+target_include_directories(test_scanner PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_scanner PRIVATE sta_vm)
+add_test(NAME scanner COMMAND test_scanner)
+
+add_executable(test_parser test_parser.c)
+target_include_directories(test_parser PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_parser PRIVATE sta_vm)
+add_test(NAME parser COMMAND test_parser)
+
+# ── Phase 1 Epic 7b: Compiler — Codegen and Integration ───────────────
+add_executable(test_codegen test_codegen.c)
+target_include_directories(test_codegen PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_codegen PRIVATE sta_vm)
+add_test(NAME codegen COMMAND test_codegen)
+
+add_executable(test_compiler_integration test_compiler_integration.c)
+target_include_directories(test_compiler_integration PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_compiler_integration PRIVATE sta_vm)
+add_test(NAME compiler_integration COMMAND test_compiler_integration)
+
 # ── Spike 002: MPSC mailbox — TSan correctness gate ───────────────────────
 find_package(Threads REQUIRED)
 

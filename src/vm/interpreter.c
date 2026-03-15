@@ -530,11 +530,42 @@ STA_OOP sta_interpret(STA_StackSlab *slab, STA_Heap *heap,
             break;
         }
 
-        /* ── Block / closure — Phase 1: NYI ────────────────────────────── */
-        case OP_BLOCK_COPY:
-            fprintf(stderr, "FATAL: OP_BLOCK_COPY not yet implemented\n");
-            abort();
+        /* ── Block / closure — Phase 1 ─────────────────────────────────── */
+        case OP_BLOCK_COPY: {
+            /* operand = literal index of BlockDescriptor.
+             * BlockDescriptor slots: [startPC, bodyLength, numArgs].
+             * Create a BlockClosure object on the heap:
+             *   slot 0: startPC (SmallInt)
+             *   slot 1: numArgs (SmallInt)
+             *   slot 2: homeMethod (OOP)
+             *   slot 3: receiver (OOP)
+             * Then jump past the block body. */
+            STA_OOP desc = sta_method_literal(frame->method, (uint8_t)operand);
+            STA_ObjHeader *dh = (STA_ObjHeader *)(uintptr_t)desc;
+            STA_OOP *dp = sta_payload(dh);
+            STA_OOP start_pc_oop  = dp[0];
+            STA_OOP body_len_oop  = dp[1];
+            STA_OOP num_args_oop  = dp[2];
+            uint32_t blk_start  = (uint32_t)STA_SMALLINT_VAL(start_pc_oop);
+            uint32_t blk_length = (uint32_t)STA_SMALLINT_VAL(body_len_oop);
+
+            STA_ObjHeader *bc_h = sta_heap_alloc(heap, STA_CLS_BLOCKCLOSURE, 4);
+            if (!bc_h) {
+                fprintf(stderr, "FATAL: failed to allocate BlockClosure\n");
+                abort();
+            }
+            STA_OOP *bc_slots = sta_payload(bc_h);
+            bc_slots[0] = start_pc_oop;        /* startPC */
+            bc_slots[1] = num_args_oop;         /* numArgs */
+            bc_slots[2] = frame->method;        /* homeMethod */
+            bc_slots[3] = frame->receiver;      /* receiver */
+
+            sta_stack_push(slab, (STA_OOP)(uintptr_t)bc_h);
+
+            /* Jump past the block body. */
+            frame->pc = blk_start + blk_length;
             break;
+        }
 
         /* ── Phase 2 opcodes — NYI ─────────────────────────────────────── */
         case OP_STORE_OUTER_TEMP:
