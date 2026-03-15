@@ -24,6 +24,7 @@ add_library(sta_vm STATIC
     src/vm/primitive_table.c
     src/vm/interpreter.c
     src/actor/actor.c
+    src/bootstrap/bootstrap.c
 )
 
 target_include_directories(sta_vm

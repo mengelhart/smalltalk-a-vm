@@ -27,8 +27,9 @@ static uint32_t oop_class_index(STA_OOP oop) {
  * chain. Returns the method OOP, or 0 if not found (DNU). */
 static STA_OOP method_lookup(STA_ClassTable *ct, uint32_t class_index,
                               STA_OOP selector) {
+    STA_OOP nil_oop = sta_spc_get(SPC_NIL);
     STA_OOP cls = sta_class_table_get(ct, class_index);
-    while (cls != 0) {
+    while (cls != 0 && cls != nil_oop) {
         STA_OOP md = sta_class_method_dict(cls);
         if (md != 0) {
             STA_OOP method = sta_method_dict_lookup(md, selector);
@@ -230,8 +231,9 @@ STA_OOP sta_interpret(STA_StackSlab *slab, STA_Heap *heap,
                                                         cur_nlits - 1);
                 STA_OOP super_cls = sta_class_superclass(owner_cls);
                 /* Walk from super_cls directly. */
+                STA_OOP nil_oop_ss = sta_spc_get(SPC_NIL);
                 STA_OOP cls = super_cls;
-                while (cls != 0) {
+                while (cls != 0 && cls != nil_oop_ss) {
                     STA_OOP md = sta_class_method_dict(cls);
                     if (md != 0) {
                         found_method = sta_method_dict_lookup(md, selector);
@@ -246,13 +248,25 @@ STA_OOP sta_interpret(STA_StackSlab *slab, STA_Heap *heap,
             }
 
             if (found_method == 0) {
-                /* DNU — abort for Phase 1. */
-                size_t sel_len;
-                const char *sel_str = sta_symbol_get_bytes(selector, &sel_len);
-                fprintf(stderr,
-                    "FATAL: doesNotUnderstand: #%.*s\n",
-                    (int)sel_len, sel_str);
-                abort();
+                /* Try doesNotUnderstand: protocol. */
+                STA_OOP dnu_sel = sta_spc_get(SPC_DOES_NOT_UNDERSTAND);
+                if (dnu_sel != 0) {
+                    uint32_t recv_cls_idx = oop_class_index(send_receiver);
+                    STA_OOP dnu_method = method_lookup(ct, recv_cls_idx, dnu_sel);
+                    if (dnu_method != 0) {
+                        found_method = dnu_method;
+                        send_args[0] = selector;
+                        arity = 1;
+                    }
+                }
+                if (found_method == 0) {
+                    size_t sel_len;
+                    const char *sel_str = sta_symbol_get_bytes(selector, &sel_len);
+                    fprintf(stderr,
+                        "FATAL: doesNotUnderstand: #%.*s\n",
+                        (int)sel_len, sel_str);
+                    abort();
+                }
             }
 
             /* Advance PC past this send instruction. */
@@ -290,6 +304,31 @@ STA_OOP sta_interpret(STA_StackSlab *slab, STA_Heap *heap,
                         prim_idx = callee_bc[1];
                     }
                 }
+                /* Block activation: prims 81-84 (#value, #value:, etc.).
+                 * If the receiver is a BlockClosure, create a block frame
+                 * and enter the block body instead of calling the C prim. */
+                if (prim_idx >= 81 && prim_idx <= 84 &&
+                    STA_IS_HEAP(send_receiver) &&
+                    ((STA_ObjHeader *)(uintptr_t)send_receiver)->class_index
+                        == STA_CLS_BLOCKCLOSURE) {
+                    STA_OOP *bc_slots = sta_payload(
+                        (STA_ObjHeader *)(uintptr_t)send_receiver);
+                    uint32_t start_pc = (uint32_t)STA_SMALLINT_VAL(bc_slots[0]);
+                    STA_OOP home_method = bc_slots[2];
+
+                    STA_Frame *block_frame = sta_frame_push(slab, home_method,
+                        frame->receiver, frame, send_args, arity);
+                    if (!block_frame) {
+                        fprintf(stderr, "FATAL: stack overflow in block activation\n");
+                        abort();
+                    }
+                    block_frame->pc = start_pc;
+                    frame = block_frame;
+                    bytecodes = sta_method_bytecodes(frame->method);
+                    slots = sta_frame_slots(frame);
+                    break;
+                }
+
                 STA_OOP prim_args_buf[257];
                 prim_args_buf[0] = send_receiver;
                 for (uint8_t i = 0; i < arity; i++)

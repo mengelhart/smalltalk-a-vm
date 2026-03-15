@@ -183,6 +183,18 @@ All seven architectural spikes are complete. ADRs 007–014 are accepted.
 - Tests: 19/19 passing (5 new production + 14 existing)
 - Milestone: **"3 + 4 = 7" executes through full send/dispatch/primitive path**
 
+### Epic 4: Bootstrap — Metaclass Circularity and Kernel Wiring — COMPLETE
+- GitHub: Epic #<NUMBER> (closed)
+- Branch: `phase1/epic-4-bootstrap` (ready for merge to main)
+- Production files:
+  - `src/bootstrap/bootstrap.h`, `src/bootstrap/bootstrap.c` — Full bootstrap: nil/true/false allocation, symbol interning, Tier 0 metaclass circularity (10 objects), Tier 1 class creation (26 classes + metaclasses, all 32 reserved indices), character table (256 tagged Character OOPs), SystemDictionary with class bindings, kernel primitive method installation, hand-assembled boolean conditional methods
+- Modified files:
+  - `src/vm/primitive_table.h/c` — Added prims 42 (yourself), 120 (respondsTo:), 121 (doesNotUnderstand:); fixed prim 30 (class) for real class OOPs; added `sta_primitive_set_class_table()`
+  - `src/vm/interpreter.c` — Nil-aware superclass chain walk (terminates on nil_oop), block activation frames for prims 81–84, real DNU protocol (sends #doesNotUnderstand: instead of aborting)
+  - `CMakeLists.txt` — bootstrap.c added to sta_vm library
+- Tests: 20/20 passing (19 existing + 11 new bootstrap tests)
+- Milestone: **Bootstrapped Smalltalk object system — interpreter uses real class objects with method dictionaries through the full dispatch path**
+
 ---
 
 ## ADR index
