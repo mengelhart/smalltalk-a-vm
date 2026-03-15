@@ -156,6 +156,22 @@ target_compile_definitions(test_filein PRIVATE
 target_link_libraries(test_filein PRIVATE sta_vm)
 add_test(NAME filein COMMAND test_filein)
 
+add_executable(test_load_source test_load_source.c)
+target_include_directories(test_load_source PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_compile_definitions(test_load_source PRIVATE
+    FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+target_link_libraries(test_load_source PRIVATE sta_vm)
+add_test(NAME load_source COMMAND test_load_source)
+
+add_executable(test_smoke_filein test_smoke_filein.c)
+target_include_directories(test_smoke_filein PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_compile_definitions(test_smoke_filein PRIVATE
+    FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+target_link_libraries(test_smoke_filein PRIVATE sta_vm)
+add_test(NAME smoke_filein COMMAND test_smoke_filein)
+
 # ── Spike 002: MPSC mailbox — TSan correctness gate ───────────────────────
 find_package(Threads REQUIRED)
 

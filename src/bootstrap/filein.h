@@ -16,6 +16,18 @@
 #include "../vm/symbol_table.h"
 #include "../vm/class_table.h"
 
+/* ── Instvar registry (tracks instvar names for file-in classes) ─────── */
+
+#define STA_FILEIN_MAX_CLASSES  64
+#define STA_FILEIN_MAX_IVARS    32
+
+typedef struct {
+    char class_name[128];
+    char ivar_names[STA_FILEIN_MAX_IVARS][64];
+    uint32_t ivar_count;
+    char super_name[128];
+} STA_FileInClassInfo;
+
 /* ── File-in context ─────────────────────────────────────────────────── */
 
 typedef struct {
@@ -24,6 +36,8 @@ typedef struct {
     STA_SymbolTable    *symbol_table;
     STA_ClassTable     *class_table;
     char                error_msg[512];
+    STA_FileInClassInfo class_info[STA_FILEIN_MAX_CLASSES];
+    uint32_t            class_info_count;
 } STA_FileInContext;
 
 /* ── File-in entry point ─────────────────────────────────────────────── */

@@ -111,6 +111,11 @@ const char *sta_vm_last_error(STA_VM *vm) {
     return STA_ERR_INTERNAL;
 }
 
+/* STUB */ int sta_vm_load_source(STA_VM *vm, const char *path) {
+    (void)vm; (void)path;
+    return STA_ERR_INTERNAL;
+}
+
 /* ── Handle table — internal ──────────────────────────────────────────── */
 
 /*

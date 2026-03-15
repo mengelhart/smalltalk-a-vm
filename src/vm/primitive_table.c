@@ -51,6 +51,22 @@ void sta_primitive_set_immutable_space(STA_ImmutableSpace *sp) {
     g_prim_immutable_space = sp;
 }
 
+STA_ClassTable *sta_primitive_get_class_table(void) {
+    return g_prim_class_table;
+}
+
+STA_Heap *sta_primitive_get_heap(void) {
+    return g_prim_heap;
+}
+
+STA_SymbolTable *sta_primitive_get_symbol_table(void) {
+    return g_prim_symbol_table;
+}
+
+STA_ImmutableSpace *sta_primitive_get_immutable_space(void) {
+    return g_prim_immutable_space;
+}
+
 /* ── SmallInteger arithmetic primitives ────────────────────────────────── */
 
 /* Prim 1: SmallInteger >> #+ */
