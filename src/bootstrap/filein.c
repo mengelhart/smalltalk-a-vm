@@ -152,21 +152,103 @@ static STA_OOP lookup_class(STA_FileInContext *ctx, const char *name) {
     return 0;
 }
 
-/* ── Helper: get instvar names for a class (walk hierarchy) ──────────── */
+/* ── Helper: parse and record instvar names from class definitions ────── */
 
-/* Collect instvar names from a class by reading the class name slot
- * and walking up the superclass chain. For the primitive-created classes,
- * we don't store the instvar name list on the class itself (Phase 1
- * simplification), so we pass NULL/0 for instvar resolution.
- *
- * TODO: Phase 2 — store instvar names on class objects for proper
- * compiler resolution. For now, the compiler resolves instvars by
- * index if instvar_names is NULL. */
+static void record_class_info(STA_FileInContext *ctx, const char *chunk) {
+    if (ctx->class_info_count >= STA_FILEIN_MAX_CLASSES) return;
+
+    STA_FileInClassInfo *info = &ctx->class_info[ctx->class_info_count];
+    memset(info, 0, sizeof(*info));
+
+    const char *sc = strstr(chunk, "subclass:");
+    if (!sc) return;
+    sc += 9;
+    while (*sc == ' ' || *sc == '\t' || *sc == '\n' || *sc == '\r') sc++;
+    if (*sc == '#') sc++;
+    size_t nlen = 0;
+    while (sc[nlen] && sc[nlen] != ' ' && sc[nlen] != '\n' &&
+           sc[nlen] != '\r' && sc[nlen] != '\t') nlen++;
+    if (nlen == 0 || nlen >= sizeof(info->class_name)) return;
+    memcpy(info->class_name, sc, nlen);
+    info->class_name[nlen] = '\0';
+
+    const char *sub = strstr(chunk, " subclass:");
+    if (sub) {
+        const char *p = chunk;
+        while (*p == ' ' || *p == '\n' || *p == '\r' || *p == '\t') p++;
+        size_t slen = (size_t)(sub - p);
+        if (slen > 0 && slen < sizeof(info->super_name)) {
+            memcpy(info->super_name, p, slen);
+            info->super_name[slen] = '\0';
+        }
+    }
+
+    const char *ivn = strstr(chunk, "instanceVariableNames:");
+    if (ivn) {
+        ivn += 22;
+        const char *q = strchr(ivn, '\'');
+        if (q) {
+            q++;
+            const char *end = strchr(q, '\'');
+            if (end) {
+                while (q < end && info->ivar_count < STA_FILEIN_MAX_IVARS) {
+                    while (q < end && (*q == ' ' || *q == '\t')) q++;
+                    if (q >= end) break;
+                    const char *start = q;
+                    while (q < end && *q != ' ' && *q != '\t') q++;
+                    size_t len = (size_t)(q - start);
+                    if (len > 0 && len < 64) {
+                        memcpy(info->ivar_names[info->ivar_count], start, len);
+                        info->ivar_names[info->ivar_count][len] = '\0';
+                        info->ivar_count++;
+                    }
+                }
+            }
+        }
+    }
+
+    ctx->class_info_count++;
+}
+
+static STA_FileInClassInfo *find_class_info(STA_FileInContext *ctx,
+                                              const char *name) {
+    for (uint32_t i = 0; i < ctx->class_info_count; i++) {
+        if (strcmp(ctx->class_info[i].class_name, name) == 0)
+            return &ctx->class_info[i];
+    }
+    return NULL;
+}
+
+static uint32_t collect_instvar_names(STA_FileInContext *ctx,
+                                        const char *class_name,
+                                        const char **out_names,
+                                        uint32_t max_names) {
+    const char *chain[32];
+    uint32_t chain_len = 0;
+    const char *cur = class_name;
+    while (cur && chain_len < 32) {
+        STA_FileInClassInfo *ci = find_class_info(ctx, cur);
+        if (!ci) break;
+        chain[chain_len++] = cur;
+        cur = (ci->super_name[0] != '\0') ? ci->super_name : NULL;
+    }
+    uint32_t count = 0;
+    for (int i = (int)chain_len - 1; i >= 0; i--) {
+        STA_FileInClassInfo *ci = find_class_info(ctx, chain[i]);
+        if (!ci) continue;
+        for (uint32_t j = 0; j < ci->ivar_count && count < max_names; j++) {
+            out_names[count++] = ci->ivar_names[j];
+        }
+    }
+    return count;
+}
 
 /* ── Execute a class definition chunk ─────────────────────────────────── */
 
 static int execute_class_definition(STA_FileInContext *ctx,
                                       const char *chunk, int chunk_num) {
+    /* Record instvar names for later use by the compiler. */
+    record_class_info(ctx, chunk);
     STA_OOP sysdict = sta_spc_get(SPC_SMALLTALK);
 
     /* Compile the class definition as an expression. */
@@ -235,10 +317,15 @@ static int install_method(STA_FileInContext *ctx, const char *class_name,
 
     sta_ast_free(ast);
 
+    /* Collect instvar names for the class (walking superclass chain). */
+    const char *ivar_ptrs[64];
+    uint32_t ivar_count = collect_instvar_names(ctx, class_name,
+                                                  ivar_ptrs, 64);
+
     /* Compile the method. */
     STA_OOP sysdict = sta_spc_get(SPC_SMALLTALK);
     STA_CompileResult cr = sta_compile_method(
-        source, class_oop, NULL, 0,
+        source, class_oop, ivar_ptrs, ivar_count,
         ctx->symbol_table, ctx->immutable_space,
         ctx->heap, sysdict);
 

@@ -40,6 +40,7 @@ typedef uintptr_t         STA_OOP;    /* internal VM use only */
 #define STA_ERR_OOM      (-2)
 #define STA_ERR_IO       (-3)
 #define STA_ERR_INTERNAL (-4)
+#define STA_ERR_COMPILE  (-5)
 
 /* -------------------------------------------------------------------------
  * VM configuration
@@ -60,6 +61,18 @@ void        sta_vm_destroy(STA_VM* vm);
 int         sta_vm_load_image(STA_VM* vm, const char* path);
 int         sta_vm_save_image(STA_VM* vm, const char* path);
 const char* sta_vm_last_error(STA_VM* vm);
+
+/**
+ * Load a Squeak/Pharo chunk-format .st file into the live image.
+ * Creates classes and installs methods.
+ * Files must be loaded in dependency order.
+ *
+ * @param vm   The VM instance
+ * @param path Path to the .st file
+ * @return STA_OK on success, STA_ERR_COMPILE or STA_ERR_IO on failure.
+ *         Call sta_vm_last_error() for details.
+ */
+int sta_vm_load_source(STA_VM* vm, const char* path);
 
 /* -------------------------------------------------------------------------
  * Actor enumeration (Spike 007 — see ADR 013)

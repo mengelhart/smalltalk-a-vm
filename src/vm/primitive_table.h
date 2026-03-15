@@ -70,3 +70,10 @@ void sta_primitive_set_symbol_table(STA_SymbolTable *st);
 /* Set the immutable space used by class-creation primitive.
  * Called by bootstrap after immutable space is ready. */
 void sta_primitive_set_immutable_space(STA_ImmutableSpace *sp);
+
+/* ── Getters for kernel context (used by sta_vm_load_source) ───────────── */
+
+STA_ClassTable     *sta_primitive_get_class_table(void);
+STA_Heap           *sta_primitive_get_heap(void);
+STA_SymbolTable    *sta_primitive_get_symbol_table(void);
+STA_ImmutableSpace *sta_primitive_get_immutable_space(void);
