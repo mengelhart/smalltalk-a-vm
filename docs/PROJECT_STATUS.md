@@ -223,6 +223,16 @@ All seven architectural spikes are complete. ADRs 007–014 are accepted.
 - Tests: 26/26 passing
 - Milestone: **Complete Object protocol (prims 29–42) — all Blue Book §8.5 object/memory primitives implemented**
 
+### Epic 7a: Compiler — Scanner and Parser — COMPLETE
+- GitHub: Epic #153, stories #154–#155 (all closed)
+- Branch: `phase1/epic-7-compiler` (merged to main)
+- New files:
+  - `src/compiler/scanner.h`, `src/compiler/scanner.c` — Pull-model lexer for Smalltalk method source: 22 token types, comment skipping, negative number handling, symbol literals (#foo, #+, #at:put:, #'string'), character literals, literal array start (#(), keyword tokens scanned one piece at a time, peek support
+  - `src/compiler/ast.h`, `src/compiler/ast.c` — 17 AST node types (NODE_METHOD, NODE_RETURN, NODE_ASSIGN, NODE_SEND, NODE_SUPER_SEND, NODE_CASCADE, NODE_VARIABLE, NODE_LITERAL_*, NODE_BLOCK, NODE_SELF), cascade message struct, recursive sta_ast_free()
+  - `src/compiler/parser.h`, `src/compiler/parser.c` — Recursive descent parser: standard Smalltalk precedence (unary > binary > keyword), method header parsing (unary/binary/keyword), temporaries, assignment, cascades, clean blocks with args and temps, non-local return rejection with clear error message
+- Tests: 28/28 passing (34 scanner tests + 27 parser tests)
+- Milestone: **Smalltalk source → AST — parser handles full standard Smalltalk method syntax with correct precedence, cascades, clean blocks, and non-local return rejection**
+
 ---
 
 ## ADR index
@@ -272,6 +282,10 @@ src/scheduler/            ← scheduler_spike.h, scheduler_spike.c
 src/io/                   ← io_spike.h, io_spike.c (Spike 005 complete)
 src/image/                ← image_spike.h, image_spike.c (Spike 006 complete)
 src/bridge/               ← bridge_spike.h, bridge_spike.c (Spike 007 complete)
+src/compiler/             ← scanner, parser, AST, codegen (Epic 7)
+  scanner.h/c                 ← pull-model lexer for method source (production)
+  ast.h, ast.c                ← AST node types and recursive free (production)
+  parser.h/c                  ← recursive descent parser (production)
 docs/decisions/           ← ADRs 001-014
 docs/spikes/              ← spike-001 through spike-007
 ```
@@ -280,7 +294,7 @@ docs/spikes/              ← spike-001 through spike-007
 
 ## How to orient a new chat with Claude
 Paste this file plus `CLAUDE.md` at the start of the session.
-Phase 1 is in progress. Epics 1–6 are complete. Epic 7 (compiler) is next.
+Phase 1 is in progress. Epics 1–6 are complete. Epic 7a (scanner/parser) is complete. Epic 7b (codegen) is next.
 
 Epic ordering (actual):
   1. Object memory  2. Symbols/MethodDict  3. Interpreter  4. Bootstrap
