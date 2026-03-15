@@ -10,30 +10,11 @@
  */
 #pragma once
 #include "../vm/oop.h"
+#include "../vm/format.h"
 #include "../vm/heap.h"
 #include "../vm/immutable_space.h"
 #include "../vm/symbol_table.h"
 #include "../vm/class_table.h"
-
-/* ── Format field encoding (class slot 2) ─────────────────────────────── */
-
-/* Format types — object shape. */
-#define STA_FMT_NORMAL          0u  /* Fixed-size, all OOP slots           */
-#define STA_FMT_VARIABLE_OOP    1u  /* Indexable OOP slots (Array-like)    */
-#define STA_FMT_VARIABLE_BYTE   2u  /* Indexable byte slots (String-like)  */
-#define STA_FMT_VARIABLE_WORD   3u  /* Indexable word slots (future use)   */
-#define STA_FMT_WEAK            4u  /* Weak references (future use)        */
-#define STA_FMT_IMMEDIATE       5u  /* Tagged immediate, no heap instances */
-#define STA_FMT_COMPILED_METHOD 6u  /* Special CompiledMethod layout       */
-
-/* Encode instVarCount (0-255) and formatType (0-7) into a SmallInt OOP.
- * Bits 0-7: instVarCount, bits 8-10: formatType. */
-#define STA_FORMAT_ENCODE(instVars, fmtType) \
-    STA_SMALLINT_OOP((intptr_t)(((uint32_t)(fmtType) << 8) | (uint32_t)(instVars)))
-
-/* Decode helpers. */
-#define STA_FORMAT_INST_VARS(fmt) ((uint8_t)(STA_SMALLINT_VAL(fmt) & 0xFFu))
-#define STA_FORMAT_TYPE(fmt)      ((uint8_t)((STA_SMALLINT_VAL(fmt) >> 8) & 0x7u))
 
 /* ── Bootstrap result ─────────────────────────────────────────────────── */
 

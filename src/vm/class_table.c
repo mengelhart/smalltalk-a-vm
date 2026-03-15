@@ -46,3 +46,12 @@ STA_OOP sta_class_table_get(STA_ClassTable *ct, uint32_t index) {
 uint32_t sta_class_table_capacity(STA_ClassTable *ct) {
     return ct->capacity;
 }
+
+uint32_t sta_class_table_index_of(STA_ClassTable *ct, STA_OOP class_oop) {
+    if (class_oop == 0) return 0;
+    STA_OOP *entries = atomic_load_explicit(&ct->entries, memory_order_relaxed);
+    for (uint32_t i = 1; i < ct->capacity; i++) {
+        if (entries[i] == class_oop) return i;
+    }
+    return 0;
+}

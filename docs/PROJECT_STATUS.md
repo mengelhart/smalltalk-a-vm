@@ -195,6 +195,25 @@ All seven architectural spikes are complete. ADRs 007–014 are accepted.
 - Tests: 20/20 passing (19 existing + 11 new bootstrap tests)
 - Milestone: **Bootstrapped Smalltalk object system — interpreter uses real class objects with method dictionaries through the full dispatch path**
 
+### Epic 5: basicNew / basicNew: — Smalltalk-Level Object Creation — COMPLETE
+- GitHub: Epic #136, stories #137–#141 (all closed)
+- Branch: `phase1/epic-5-object-creation`
+- New files:
+  - `src/vm/format.h` — Class format field encoding/decoding, query helpers (is_indexable, is_bytes, is_instantiable); format type constants extracted from bootstrap.h
+- Modified files:
+  - `src/vm/oop.h` — Added STA_BYTE_PADDING_MASK / STA_BYTE_PADDING() for byte-indexable object size tracking in ObjHeader.reserved bits 2:0
+  - `src/vm/class_table.h/c` — Added sta_class_table_index_of() reverse lookup (OOP → class index)
+  - `src/vm/primitive_table.h/c` — Prims 31 (basicNew) and 32 (basicNew:), sta_primitive_set_heap() for allocation context
+  - `src/bootstrap/bootstrap.h` — Format macros replaced with `#include "format.h"`
+  - `src/bootstrap/bootstrap.c` — Installed Behavior>>basicNew, basicNew:, new, new: and Object>>initialize in step 7
+- Tests: 19/19 Phase 1 tests passing (5 new test files, 47 new tests)
+  - `test_format.c` — format field decode for all 31 kernel classes, encode/decode round-trip (7 types × 256 instVars)
+  - `test_basic_new.c` — prim 31: fixed-size allocation, failure cases, heap exhaustion, class_table_index_of
+  - `test_basic_new_size.c` — prim 32: pointer-indexable, byte-indexable with padding boundary cases, failure cases
+  - `test_new_methods.c` — interpreter-level: Association new, Array new: 10, Object new, class identity, respondsTo:
+  - `test_object_creation.c` — end-to-end: store/retrieve, size check, multi-object arrays, chained creates
+- Milestone: **Smalltalk code can create objects via new/new:/basicNew/basicNew: through normal message dispatch — first time the interpreter reads the class format field to determine allocation shape**
+
 ---
 
 ## ADR index

@@ -78,6 +78,32 @@ target_include_directories(test_bootstrap PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(test_bootstrap PRIVATE sta_vm)
 add_test(NAME bootstrap COMMAND test_bootstrap)
 
+# ── Phase 1 Epic 5: Object Creation ─────────────────────────────────────
+add_executable(test_format test_format.c)
+target_include_directories(test_format PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_format PRIVATE sta_vm)
+add_test(NAME format COMMAND test_format)
+
+add_executable(test_basic_new test_basic_new.c)
+target_include_directories(test_basic_new PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_basic_new PRIVATE sta_vm)
+add_test(NAME basic_new COMMAND test_basic_new)
+
+add_executable(test_basic_new_size test_basic_new_size.c)
+target_include_directories(test_basic_new_size PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_basic_new_size PRIVATE sta_vm)
+add_test(NAME basic_new_size COMMAND test_basic_new_size)
+
+add_executable(test_new_methods test_new_methods.c)
+target_include_directories(test_new_methods PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_new_methods PRIVATE sta_vm)
+add_test(NAME new_methods COMMAND test_new_methods)
+
+add_executable(test_object_creation test_object_creation.c)
+target_include_directories(test_object_creation PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_object_creation PRIVATE sta_vm)
+add_test(NAME object_creation COMMAND test_object_creation)
+
 # ── Spike 002: MPSC mailbox — TSan correctness gate ───────────────────────
 find_package(Threads REQUIRED)
 
