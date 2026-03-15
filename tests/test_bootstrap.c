@@ -14,9 +14,11 @@
 #include "vm/heap.h"
 #include "vm/immutable_space.h"
 #include "bootstrap/bootstrap.h"
+#include "vm/handler.h"
 #include <stdio.h>
 #include <assert.h>
 #include <string.h>
+#include <setjmp.h>
 
 /* ── Shared test infrastructure ────────────────────────────────────────── */
 
@@ -362,7 +364,8 @@ static void test_global_dictionary(void) {
 static void test_dnu_fires(void) {
     printf("  doesNotUnderstand: fires...");
 
-    /* Send #nonexistent to SmallInteger 5 → should hit DNU, return nil. */
+    /* Send #nonexistent to SmallInteger 5 → should signal MNU exception.
+     * Install a C-level handler to catch it. */
     STA_OOP nonexist_sel = sym("nonexistent");
     STA_OOP lits[] = { nonexist_sel, STA_SMALLINT_OOP(0) };
     uint8_t bc[] = {
@@ -375,10 +378,34 @@ static void test_dnu_fires(void) {
     assert(method);
 
     STA_StackSlab *slab = sta_stack_slab_create(65536);
-    STA_OOP result = sta_interpret(slab, g_heap, g_ct, method,
-                                    STA_SMALLINT_OOP(0), NULL, 0);
-    /* DNU handler (prim 121) returns nil. */
-    assert(result == sta_spc_get(SPC_NIL));
+
+    /* Install a handler to catch the MessageNotUnderstood exception. */
+    STA_HandlerEntry entry;
+    memset(&entry, 0, sizeof(entry));
+    entry.exception_class = sta_class_table_get(g_ct, STA_CLS_MESSAGENOTUNDERSTOOD);
+    entry.handler_block = 0; /* unused — we handle in C */
+    entry.saved_slab_top = slab->top;
+    entry.saved_slab_sp  = slab->sp;
+    sta_handler_set_top(NULL);
+
+    int caught = 0;
+    if (setjmp(entry.jmp) == 0) {
+        sta_handler_push(&entry);
+        sta_primitive_set_slab(slab);
+        (void)sta_interpret(slab, g_heap, g_ct, method,
+                            STA_SMALLINT_OOP(0), NULL, 0);
+    } else {
+        /* Exception was caught via longjmp. */
+        caught = 1;
+        slab->top = entry.saved_slab_top;
+        slab->sp  = entry.saved_slab_sp;
+    }
+    sta_handler_set_top(NULL);
+    assert(caught);
+
+    /* Verify the signaled exception is a MessageNotUnderstood. */
+    STA_OOP exc = sta_handler_get_signaled_exception();
+    assert(STA_IS_HEAP(exc));
 
     sta_stack_slab_destroy(slab);
     printf(" ok\n");

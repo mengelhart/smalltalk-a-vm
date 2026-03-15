@@ -65,6 +65,11 @@
 #define OP_ACTOR_SPAWN      0x72u
 #define OP_SELF_ADDRESS     0x73u
 
+/* ── Frame flag bits ───────────────────────────────────────────────────── */
+
+#define STA_FRAME_FLAG_MARKER    0x01u  /* live/dead marker (Phase 2 NLR) */
+#define STA_FRAME_FLAG_UNWIND    0x02u  /* unwind handler present (§7.7)  */
+
 /* ── Reduction quota ───────────────────────────────────────────────────── */
 
 #define STA_REDUCTION_QUOTA 1000u
@@ -102,3 +107,15 @@ STA_OOP sta_interpret(STA_StackSlab *slab, STA_Heap *heap,
                       STA_ClassTable *ct,
                       STA_OOP method, STA_OOP receiver,
                       STA_OOP *args, uint8_t nargs);
+
+/* Evaluate a BlockClosure by creating a block activation frame and
+ * running the dispatch loop. Used by on:do: and ensure: primitives
+ * to invoke blocks from C.
+ *
+ * Reads startPC, homeMethod, receiver from the closure's slots.
+ * Pushes a frame with sender = NULL, runs until the block returns.
+ * Returns the block's result OOP. */
+STA_OOP sta_eval_block(STA_StackSlab *slab, STA_Heap *heap,
+                        STA_ClassTable *ct,
+                        STA_OOP block_closure,
+                        STA_OOP *args, uint8_t nargs);

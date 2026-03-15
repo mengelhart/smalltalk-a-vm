@@ -102,11 +102,11 @@ static void test_blockclosure_basic_new(void) {
 
     STA_ObjHeader *h = (STA_ObjHeader *)(uintptr_t)result;
     assert(h->class_index == STA_CLS_BLOCKCLOSURE);
-    assert(h->size == 4);
+    assert(h->size == 5);
 
     STA_OOP nil_oop = sta_spc_get(SPC_NIL);
     STA_OOP *slots = sta_payload(h);
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < 5; i++) {
         assert(slots[i] == nil_oop);
     }
 

@@ -84,8 +84,8 @@ static const FormatExpectation expectations[] = {
     { STA_CLS_ASSOCIATION,         "Association",            2, false, false, true  },
     { STA_CLS_COMPILEDMETHOD,      "CompiledMethod",         0, false, false, false },
     { STA_CLS_METHODDICTIONARY,    "MethodDictionary",       2, false, false, true  },
-    { STA_CLS_BLOCKCLOSURE,        "BlockClosure",           4, false, false, true  },
-    { STA_CLS_BLOCKDESCRIPTOR,     "BlockDescriptor",        3, false, false, true  },
+    { STA_CLS_BLOCKCLOSURE,        "BlockClosure",           5, false, false, true  },
+    { STA_CLS_BLOCKDESCRIPTOR,     "BlockDescriptor",        4, false, false, true  },
     { STA_CLS_MESSAGE,             "Message",                3, false, false, true  },
 
     /* Exception hierarchy */

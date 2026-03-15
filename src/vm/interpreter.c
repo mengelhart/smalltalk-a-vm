@@ -46,20 +46,13 @@ static size_t frame_byte_size(uint16_t arg_count, uint16_t local_count) {
            ((size_t)arg_count + (size_t)local_count) * sizeof(STA_OOP);
 }
 
-/* ── Interpreter ───────────────────────────────────────────────────────── */
+/* ── Dispatch loop (extracted for reuse by sta_eval_block) ─────────────── */
 
-STA_OOP sta_interpret(STA_StackSlab *slab, STA_Heap *heap,
-                      STA_ClassTable *ct,
-                      STA_OOP method, STA_OOP receiver,
-                      STA_OOP *args, uint8_t nargs)
+static STA_OOP interpret_loop(STA_StackSlab *slab, STA_Heap *heap,
+                                STA_ClassTable *ct, STA_Frame *frame)
 {
-    /* Push the initial frame. */
-    STA_Frame *frame = sta_frame_push(slab, method, receiver, NULL,
-                                       args, nargs);
-    if (!frame) {
-        fprintf(stderr, "sta_interpret: failed to push initial frame\n");
-        abort();
-    }
+    /* Set slab for primitives that need it (on:do:, ensure:). */
+    sta_primitive_set_slab(slab);
 
     uint32_t reductions = 0;
     STA_OOP result = 0;
@@ -248,14 +241,41 @@ STA_OOP sta_interpret(STA_StackSlab *slab, STA_Heap *heap,
             }
 
             if (found_method == 0) {
-                /* Try doesNotUnderstand: protocol. */
+                /* doesNotUnderstand: protocol (§10.9).
+                 * Create a Message object and send #doesNotUnderstand:. */
                 STA_OOP dnu_sel = sta_spc_get(SPC_DOES_NOT_UNDERSTAND);
                 if (dnu_sel != 0) {
                     uint32_t recv_cls_idx = oop_class_index(send_receiver);
                     STA_OOP dnu_method = method_lookup(ct, recv_cls_idx, dnu_sel);
                     if (dnu_method != 0) {
                         found_method = dnu_method;
-                        send_args[0] = selector;
+
+                        /* Build a Message object: selector, args, lookupClass. */
+                        STA_ObjHeader *msg_h = sta_heap_alloc(heap,
+                            STA_CLS_MESSAGE, 3);
+                        if (msg_h) {
+                            STA_OOP *msg_slots = sta_payload(msg_h);
+                            msg_slots[0] = selector;
+
+                            /* Create args Array. */
+                            STA_ObjHeader *arr_h = sta_heap_alloc(heap,
+                                STA_CLS_ARRAY, arity);
+                            if (arr_h) {
+                                STA_OOP *arr_slots = sta_payload(arr_h);
+                                for (uint8_t i = 0; i < arity; i++)
+                                    arr_slots[i] = send_args[i];
+                                msg_slots[1] = (STA_OOP)(uintptr_t)arr_h;
+                            } else {
+                                msg_slots[1] = sta_spc_get(SPC_NIL);
+                            }
+
+                            msg_slots[2] = sta_class_table_get(ct,
+                                recv_cls_idx);
+                            send_args[0] = (STA_OOP)(uintptr_t)msg_h;
+                        } else {
+                            /* Fallback: pass selector if allocation fails. */
+                            send_args[0] = selector;
+                        }
                         arity = 1;
                     }
                 }
@@ -315,14 +335,21 @@ STA_OOP sta_interpret(STA_StackSlab *slab, STA_Heap *heap,
                         (STA_ObjHeader *)(uintptr_t)send_receiver);
                     uint32_t start_pc = (uint32_t)STA_SMALLINT_VAL(bc_slots[0]);
                     STA_OOP home_method = bc_slots[2];
+                    uint32_t temp_off = (uint32_t)STA_SMALLINT_VAL(bc_slots[4]);
 
+                    /* Push frame with 0 args so all numTemps become locals
+                     * (initialized to nil), then place block args at offset. */
                     STA_Frame *block_frame = sta_frame_push(slab, home_method,
-                        frame->receiver, frame, send_args, arity);
+                        frame->receiver, frame, NULL, 0);
                     if (!block_frame) {
                         fprintf(stderr, "FATAL: stack overflow in block activation\n");
                         abort();
                     }
                     block_frame->pc = start_pc;
+                    /* Place block args at the correct temp offset. */
+                    STA_OOP *blk_slots = sta_frame_slots(block_frame);
+                    for (uint8_t i = 0; i < arity; i++)
+                        blk_slots[temp_off + i] = send_args[i];
                     frame = block_frame;
                     bytecodes = sta_method_bytecodes(frame->method);
                     slots = sta_frame_slots(frame);
@@ -533,12 +560,13 @@ STA_OOP sta_interpret(STA_StackSlab *slab, STA_Heap *heap,
         /* ── Block / closure — Phase 1 ─────────────────────────────────── */
         case OP_BLOCK_COPY: {
             /* operand = literal index of BlockDescriptor.
-             * BlockDescriptor slots: [startPC, bodyLength, numArgs].
+             * BlockDescriptor slots: [startPC, bodyLength, numArgs, tempOffset].
              * Create a BlockClosure object on the heap:
              *   slot 0: startPC (SmallInt)
              *   slot 1: numArgs (SmallInt)
              *   slot 2: homeMethod (OOP)
              *   slot 3: receiver (OOP)
+             *   slot 4: tempOffset (SmallInt) — temp index for first block arg
              * Then jump past the block body. */
             STA_OOP desc = sta_method_literal(frame->method, (uint8_t)operand);
             STA_ObjHeader *dh = (STA_ObjHeader *)(uintptr_t)desc;
@@ -546,10 +574,11 @@ STA_OOP sta_interpret(STA_StackSlab *slab, STA_Heap *heap,
             STA_OOP start_pc_oop  = dp[0];
             STA_OOP body_len_oop  = dp[1];
             STA_OOP num_args_oop  = dp[2];
+            STA_OOP temp_off_oop  = dp[3];
             uint32_t blk_start  = (uint32_t)STA_SMALLINT_VAL(start_pc_oop);
             uint32_t blk_length = (uint32_t)STA_SMALLINT_VAL(body_len_oop);
 
-            STA_ObjHeader *bc_h = sta_heap_alloc(heap, STA_CLS_BLOCKCLOSURE, 4);
+            STA_ObjHeader *bc_h = sta_heap_alloc(heap, STA_CLS_BLOCKCLOSURE, 5);
             if (!bc_h) {
                 fprintf(stderr, "FATAL: failed to allocate BlockClosure\n");
                 abort();
@@ -559,6 +588,7 @@ STA_OOP sta_interpret(STA_StackSlab *slab, STA_Heap *heap,
             bc_slots[1] = num_args_oop;         /* numArgs */
             bc_slots[2] = frame->method;        /* homeMethod */
             bc_slots[3] = frame->receiver;      /* receiver */
+            bc_slots[4] = temp_off_oop;         /* tempOffset */
 
             sta_stack_push(slab, (STA_OOP)(uintptr_t)bc_h);
 
@@ -596,4 +626,53 @@ STA_OOP sta_interpret(STA_StackSlab *slab, STA_Heap *heap,
     }
 
     return result;
+}
+
+/* ── Public entry points ──────────────────────────────────────────────── */
+
+STA_OOP sta_interpret(STA_StackSlab *slab, STA_Heap *heap,
+                      STA_ClassTable *ct,
+                      STA_OOP method, STA_OOP receiver,
+                      STA_OOP *args, uint8_t nargs)
+{
+    /* Push the initial frame. */
+    STA_Frame *frame = sta_frame_push(slab, method, receiver, NULL,
+                                       args, nargs);
+    if (!frame) {
+        fprintf(stderr, "sta_interpret: failed to push initial frame\n");
+        abort();
+    }
+
+    return interpret_loop(slab, heap, ct, frame);
+}
+
+STA_OOP sta_eval_block(STA_StackSlab *slab, STA_Heap *heap,
+                        STA_ClassTable *ct,
+                        STA_OOP block_closure,
+                        STA_OOP *args, uint8_t nargs)
+{
+    STA_OOP *bc_slots = sta_payload(
+        (STA_ObjHeader *)(uintptr_t)block_closure);
+    uint32_t start_pc = (uint32_t)STA_SMALLINT_VAL(bc_slots[0]);
+    STA_OOP home_method = bc_slots[2];
+    STA_OOP receiver = bc_slots[3];
+    uint32_t temp_off = (uint32_t)STA_SMALLINT_VAL(bc_slots[4]);
+
+    /* Push frame with 0 args so all numTemps become locals (nil-filled),
+     * then place block args at the correct temp offset. */
+    STA_Frame *frame = sta_frame_push(slab, home_method, receiver, NULL,
+                                       NULL, 0);
+    if (!frame) {
+        fprintf(stderr, "sta_eval_block: stack overflow\n");
+        abort();
+    }
+    /* Place block args at the correct temp offset. */
+    if (nargs > 0 && args) {
+        STA_OOP *blk_slots = sta_frame_slots(frame);
+        for (uint8_t i = 0; i < nargs; i++)
+            blk_slots[temp_off + i] = args[i];
+    }
+    frame->pc = start_pc;
+
+    return interpret_loop(slab, heap, ct, frame);
 }
