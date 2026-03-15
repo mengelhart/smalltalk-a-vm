@@ -529,6 +529,59 @@ static int step7_methods(BS *bs) {
     if (install_prim_method(bs, bc_cls, "value",  81, 0) != 0) return -1;
     if (install_prim_method(bs, bc_cls, "value:", 82, 1) != 0) return -1;
 
+    /* ── Object >> initialize (default — returns self) ──────────────── */
+    {
+        uint8_t bc[] = { OP_RETURN_SELF, 0x00 };
+        if (install_bc_method(bs, obj_cls, "initialize",
+                              0, 0, &obj_cls, 1, bc, 2) != 0) return -1;
+    }
+
+    /* ── Behavior methods (basicNew, basicNew:, new, new:) ───────────── */
+    STA_OOP beh_cls = bs->cls_behavior;
+
+    /* Behavior >> basicNew — primitive 31 */
+    if (install_prim_method(bs, beh_cls, "basicNew",  31, 0) != 0) return -1;
+
+    /* Behavior >> basicNew: — primitive 32 */
+    if (install_prim_method(bs, beh_cls, "basicNew:", 32, 1) != 0) return -1;
+
+    /* Shared selector for Behavior>>new and new: */
+    STA_OOP init_sel = bs_intern(bs, "initialize");
+    if (init_sel == 0) return -1;
+
+    /* Behavior >> new — self basicNew initialize */
+    {
+        STA_OOP basicNew_sel = bs_intern(bs, "basicNew");
+        if (basicNew_sel == 0) return -1;
+
+        STA_OOP lits[] = { basicNew_sel, init_sel, beh_cls };
+        uint8_t bc[] = {
+            OP_PUSH_RECEIVER,  0x00,   /* push self (the class)         */
+            OP_SEND,           0x00,   /* send #basicNew (lit 0)        */
+            OP_SEND,           0x01,   /* send #initialize (lit 1)      */
+            OP_RETURN_TOP,     0x00,   /* return the initialized object */
+        };
+        if (install_bc_method(bs, beh_cls, "new",
+                              0, 0, lits, 3, bc, 8) != 0) return -1;
+    }
+
+    /* Behavior >> new: — (self basicNew: anInteger) initialize */
+    {
+        STA_OOP basicNewSize_sel = bs_intern(bs, "basicNew:");
+        if (basicNewSize_sel == 0) return -1;
+
+        STA_OOP lits[] = { basicNewSize_sel, init_sel, beh_cls };
+        uint8_t bc[] = {
+            OP_PUSH_RECEIVER,  0x00,   /* push self (the class)         */
+            OP_PUSH_TEMP,      0x00,   /* push argument (the size)      */
+            OP_SEND,           0x00,   /* send #basicNew: (lit 0)       */
+            OP_SEND,           0x01,   /* send #initialize (lit 1)      */
+            OP_RETURN_TOP,     0x00,   /* return the initialized object */
+        };
+        if (install_bc_method(bs, beh_cls, "new:",
+                              1, 1, lits, 3, bc, 10) != 0) return -1;
+    }
+
     /* ── Boolean conditional methods (hand-assembled bytecodes) ───────── */
     STA_OOP value_sel = bs_intern(bs, "value");
     if (value_sel == 0) return -1;
@@ -612,8 +665,9 @@ STA_BootstrapResult sta_bootstrap(
     if (step7_methods(&bs) != 0)
         return (STA_BootstrapResult){ -1, "step 7: failed to install kernel methods" };
 
-    /* Set the class table for primitives that need it. */
+    /* Set the class table and heap for primitives that need them. */
     sta_primitive_set_class_table(class_table);
+    sta_primitive_set_heap(heap);
 
     return (STA_BootstrapResult){ 0, NULL };
 }

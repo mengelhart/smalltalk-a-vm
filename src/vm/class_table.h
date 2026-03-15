@@ -78,3 +78,8 @@ STA_OOP sta_class_table_get(STA_ClassTable *ct, uint32_t index);
 
 /* Return the current capacity. */
 uint32_t sta_class_table_capacity(STA_ClassTable *ct);
+
+/* Reverse lookup: find the class table index for a given class OOP.
+ * Returns the index (1..capacity-1) on success, 0 if not found.
+ * Linear scan — O(capacity). Fine for Phase 1 class counts. */
+uint32_t sta_class_table_index_of(STA_ClassTable *ct, STA_OOP class_oop);

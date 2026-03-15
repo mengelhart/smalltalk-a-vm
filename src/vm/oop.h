@@ -57,6 +57,14 @@ typedef struct {
     uint16_t reserved;     /* must be zero; available for future use     */
 } STA_ObjHeader;           /* sizeof = 12; allocation unit = 16          */
 
+/* ── reserved field: byte-padding for byte-indexable objects ──────────────── */
+/* Bits 2:0 of reserved store the number of unused trailing bytes (0-7) in
+ * byte-indexable objects (ByteArray, String). This lets the runtime recover
+ * the exact byte count: exact_bytes = (size - instSize) * 8 - padding.
+ * Bits 15:3 remain zero and available for future use. */
+#define STA_BYTE_PADDING_MASK   0x07u
+#define STA_BYTE_PADDING(h)     ((h)->reserved & STA_BYTE_PADDING_MASK)
+
 /* ── Allocation constants ────────────────────────────────────────────────── */
 #define STA_HEADER_SIZE   12u   /* sizeof(STA_ObjHeader)                  */
 #define STA_ALLOC_UNIT    16u   /* allocation unit; payload starts here   */

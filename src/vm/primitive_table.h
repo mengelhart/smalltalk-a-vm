@@ -51,3 +51,7 @@ void sta_primitive_table_init(void);
 /* Set the class table used by primitives that need class lookup
  * (e.g. #class, #respondsTo:). Called by bootstrap. */
 void sta_primitive_set_class_table(STA_ClassTable *ct);
+
+/* Set the heap used by allocation primitives (e.g. #basicNew, #basicNew:).
+ * Called by bootstrap after heap is ready. */
+void sta_primitive_set_heap(STA_Heap *heap);

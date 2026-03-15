@@ -2,6 +2,7 @@
  * Primitive function table — see primitive_table.h for documentation.
  */
 #include "primitive_table.h"
+#include "format.h"
 #include "interpreter.h"
 #include "method_dict.h"
 #include "special_objects.h"
@@ -14,6 +15,13 @@ static STA_ClassTable *g_prim_class_table;
 
 void sta_primitive_set_class_table(STA_ClassTable *ct) {
     g_prim_class_table = ct;
+}
+
+/* Heap pointer for allocation primitives. */
+static STA_Heap *g_prim_heap;
+
+void sta_primitive_set_heap(STA_Heap *heap) {
+    g_prim_heap = heap;
 }
 
 /* ── SmallInteger arithmetic primitives ────────────────────────────────── */
@@ -151,6 +159,107 @@ static int prim_dnu(STA_OOP *args, uint8_t nargs, STA_OOP *result) {
     return STA_PRIM_SUCCESS;
 }
 
+/* ── Object creation primitives ────────────────────────────────────────── */
+
+/* Prim 31: Behavior >> #basicNew (fixed-size instance allocation) */
+static int prim_basic_new(STA_OOP *args, uint8_t nargs, STA_OOP *result) {
+    (void)nargs;
+    if (!g_prim_class_table || !g_prim_heap) return STA_PRIM_NOT_AVAILABLE;
+    if (STA_IS_IMMEDIATE(args[0])) return STA_PRIM_BAD_RECEIVER;
+
+    /* Read the class's format field (slot 2). */
+    STA_ObjHeader *cls_h = (STA_ObjHeader *)(uintptr_t)args[0];
+    STA_OOP fmt = sta_payload(cls_h)[STA_CLASS_SLOT_FORMAT];
+
+    /* Reject non-instantiable classes (immediate, compiled method). */
+    if (!sta_format_is_instantiable(fmt)) return STA_PRIM_BAD_RECEIVER;
+
+    /* Reject indexable classes — must use basicNew: instead. */
+    if (sta_format_is_indexable(fmt)) return STA_PRIM_BAD_RECEIVER;
+
+    /* Find this class's class table index. */
+    uint32_t cls_idx = sta_class_table_index_of(g_prim_class_table, args[0]);
+    if (cls_idx == 0) return STA_PRIM_BAD_RECEIVER;
+
+    /* Allocate: header + instSize OOP-sized slots, all zeroed. */
+    uint8_t inst_size = STA_FORMAT_INST_VARS(fmt);
+    STA_ObjHeader *obj = sta_heap_alloc(g_prim_heap, cls_idx, inst_size);
+    if (!obj) return STA_PRIM_NO_MEMORY;
+
+    /* Initialize all slots to nil. */
+    STA_OOP nil_oop = sta_spc_get(SPC_NIL);
+    STA_OOP *slots = sta_payload(obj);
+    for (uint8_t i = 0; i < inst_size; i++) {
+        slots[i] = nil_oop;
+    }
+
+    *result = (STA_OOP)(uintptr_t)obj;
+    return STA_PRIM_SUCCESS;
+}
+
+/* Prim 32: Behavior >> #basicNew: (variable-size instance allocation) */
+static int prim_basic_new_size(STA_OOP *args, uint8_t nargs, STA_OOP *result) {
+    (void)nargs;
+    if (!g_prim_class_table || !g_prim_heap) return STA_PRIM_NOT_AVAILABLE;
+    if (STA_IS_IMMEDIATE(args[0])) return STA_PRIM_BAD_RECEIVER;
+    if (!STA_IS_SMALLINT(args[1])) return STA_PRIM_BAD_ARGUMENT;
+
+    intptr_t requested = STA_SMALLINT_VAL(args[1]);
+    if (requested < 0) return STA_PRIM_OUT_OF_RANGE;
+
+    /* Read the class's format field (slot 2). */
+    STA_ObjHeader *cls_h = (STA_ObjHeader *)(uintptr_t)args[0];
+    STA_OOP fmt = sta_payload(cls_h)[STA_CLASS_SLOT_FORMAT];
+
+    /* Must be indexable and instantiable. */
+    if (!sta_format_is_instantiable(fmt)) return STA_PRIM_BAD_RECEIVER;
+    if (!sta_format_is_indexable(fmt)) return STA_PRIM_BAD_RECEIVER;
+
+    /* Find this class's class table index. */
+    uint32_t cls_idx = sta_class_table_index_of(g_prim_class_table, args[0]);
+    if (cls_idx == 0) return STA_PRIM_BAD_RECEIVER;
+
+    uint8_t inst_size = STA_FORMAT_INST_VARS(fmt);
+    bool is_bytes = sta_format_is_bytes(fmt);
+    uint32_t var_words;
+    uint8_t byte_padding = 0;
+
+    if (is_bytes) {
+        /* Byte-indexable: round up to OOP-sized words. */
+        var_words = ((uint32_t)requested + (uint32_t)(sizeof(STA_OOP) - 1))
+                    / (uint32_t)sizeof(STA_OOP);
+        byte_padding = (uint8_t)(var_words * sizeof(STA_OOP) - (uint32_t)requested);
+    } else {
+        /* Pointer-indexable: one word per element. */
+        var_words = (uint32_t)requested;
+    }
+
+    uint32_t total_words = (uint32_t)inst_size + var_words;
+    STA_ObjHeader *obj = sta_heap_alloc(g_prim_heap, cls_idx, total_words);
+    if (!obj) return STA_PRIM_NO_MEMORY;
+
+    /* Store byte padding in reserved field. */
+    if (is_bytes) {
+        obj->reserved = byte_padding;
+    }
+
+    /* Initialize all OOP-sized slots to nil. */
+    STA_OOP nil_oop = sta_spc_get(SPC_NIL);
+    STA_OOP *slots = sta_payload(obj);
+    for (uint32_t i = 0; i < total_words; i++) {
+        slots[i] = nil_oop;
+    }
+
+    /* For byte-indexable objects, zero the byte region instead of nil.
+     * The slots after inst_size hold raw bytes, not OOP values. */
+    if (is_bytes && var_words > 0) {
+        memset(&slots[inst_size], 0, var_words * sizeof(STA_OOP));
+    }
+
+    *result = (STA_OOP)(uintptr_t)obj;
+    return STA_PRIM_SUCCESS;
+}
+
 /* ── Array primitives ──────────────────────────────────────────────────── */
 
 /* Prim 51: Array >> #at: */
@@ -212,6 +321,10 @@ void sta_primitive_table_init(void) {
     /* Object identity and class (§8.4) */
     sta_primitives[29] = prim_identity;        /* #== */
     sta_primitives[30] = prim_class;           /* #class */
+
+    /* Object creation (§8.5) */
+    sta_primitives[31] = prim_basic_new;       /* #basicNew */
+    sta_primitives[32] = prim_basic_new_size;  /* #basicNew: */
 
     /* Object (§8.4) */
     sta_primitives[42]  = prim_yourself;       /* #yourself */
