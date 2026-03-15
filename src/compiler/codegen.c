@@ -17,12 +17,14 @@ typedef struct {
     uint8_t *bytes;
     uint32_t count;
     uint32_t capacity;
+    bool     oom;       /* set on realloc failure; suppresses further writes */
 } ByteBuf;
 
 static void bb_init(ByteBuf *b) {
     b->bytes = NULL;
     b->count = 0;
     b->capacity = 0;
+    b->oom = false;
 }
 
 static void bb_free(ByteBuf *b) {
@@ -44,16 +46,18 @@ static bool bb_ensure(ByteBuf *b, uint32_t extra) {
 }
 
 static void bb_emit(ByteBuf *b, uint8_t opcode, uint8_t operand) {
-    bb_ensure(b, 2);
+    if (b->oom) return;
+    if (!bb_ensure(b, 2)) { b->oom = true; return; }
     b->bytes[b->count++] = opcode;
     b->bytes[b->count++] = operand;
 }
 
 static void bb_emit_wide(ByteBuf *b, uint8_t opcode, uint16_t operand) {
+    if (b->oom) return;
     if (operand <= 255) {
         bb_emit(b, opcode, (uint8_t)operand);
     } else {
-        bb_ensure(b, 4);
+        if (!bb_ensure(b, 4)) { b->oom = true; return; }
         b->bytes[b->count++] = OP_WIDE;
         b->bytes[b->count++] = (uint8_t)(operand >> 8);
         b->bytes[b->count++] = opcode;
@@ -103,7 +107,7 @@ static uint16_t lb_add(LitBuf *l, STA_OOP oop) {
     if (l->count == l->capacity) {
         uint32_t cap = l->capacity ? l->capacity * 2 : 16;
         STA_OOP *p = realloc(l->items, cap * sizeof(STA_OOP));
-        if (!p) return 0;
+        if (!p) return UINT16_MAX;
         l->items = p;
         l->capacity = cap;
     }
@@ -117,7 +121,7 @@ static uint16_t lb_add_unique(LitBuf *l, STA_OOP oop) {
     if (l->count == l->capacity) {
         uint32_t cap = l->capacity ? l->capacity * 2 : 16;
         STA_OOP *p = realloc(l->items, cap * sizeof(STA_OOP));
-        if (!p) return 0;
+        if (!p) return UINT16_MAX;
         l->items = p;
         l->capacity = cap;
     }
@@ -208,9 +212,13 @@ static uint16_t cg_intern_selector(Codegen *cg, const char *sel) {
                                      sel, strlen(sel));
     if (sym == 0) {
         cg_error(cg, "failed to intern selector");
-        return 0;
+        return UINT16_MAX;
     }
-    return lb_add(&cg->literals, sym);
+    uint16_t idx = lb_add(&cg->literals, sym);
+    if (idx == UINT16_MAX) {
+        cg_error(cg, "out of memory adding literal");
+    }
+    return idx;
 }
 
 /* Look up a global Association from the SystemDictionary. */
@@ -888,6 +896,8 @@ static void emit_node(Codegen *cg, STA_AstNode *node, bool for_value) {
             /* Create a String object. For Phase 1, allocate in heap
              * as a byte-indexable object. For simplicity, store as
              * a symbol (since all String literals are immutable). */
+            // FIXME Phase 2: String literals must be distinct from Symbol
+            // objects — currently interned as symbols for Phase 1 simplicity.
             STA_OOP sym = sta_symbol_intern(cg->ctx->immutable_space,
                                              cg->ctx->symbol_table,
                                              str, len);
@@ -1094,6 +1104,10 @@ STA_OOP sta_codegen(STA_AstNode *method_ast, STA_CodegenContext *ctx) {
         }
     }
 
+    if (cg.code.oom) {
+        cg_error(&cg, "out of memory emitting bytecodes");
+    }
+
     if (ctx->had_error) {
         cg_free(&cg);
         return 0;
@@ -1103,8 +1117,11 @@ STA_OOP sta_codegen(STA_AstNode *method_ast, STA_CodegenContext *ctx) {
     lb_add_unique(&cg.literals, ctx->class_oop);
 
     /* numTemps = peak temp count seen during codegen (includes args).
-     * This accounts for inline block temps that briefly extended
-     * the temp index space. */
+     * The interpreter expects numTemps to include args: it computes
+     * locals = numTemps - numArgs (see interpreter.c OP_SEND handler).
+     * peak_temp_count includes args because cg_add_temp is called for
+     * args first (lines above), then method temps, then inline block
+     * temps — and the peak tracks the high-water mark. */
     uint32_t num_temps = cg.peak_temp_count;
 
     /* Build the CompiledMethod. */
