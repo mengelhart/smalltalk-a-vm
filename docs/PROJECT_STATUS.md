@@ -184,8 +184,8 @@ All seven architectural spikes are complete. ADRs 007–014 are accepted.
 - Milestone: **"3 + 4 = 7" executes through full send/dispatch/primitive path**
 
 ### Epic 4: Bootstrap — Metaclass Circularity and Kernel Wiring — COMPLETE
-- GitHub: Epic #<NUMBER> (closed)
-- Branch: `phase1/epic-4-bootstrap` (ready for merge to main)
+- GitHub: Epic #98 (closed)
+- Branch: `phase1/epic-4-bootstrap` (merged to main)
 - Production files:
   - `src/bootstrap/bootstrap.h`, `src/bootstrap/bootstrap.c` — Full bootstrap: nil/true/false allocation, symbol interning, Tier 0 metaclass circularity (10 objects), Tier 1 class creation (26 classes + metaclasses, all 32 reserved indices), character table (256 tagged Character OOPs), SystemDictionary with class bindings, kernel primitive method installation, hand-assembled boolean conditional methods
 - Modified files:
@@ -197,7 +197,7 @@ All seven architectural spikes are complete. ADRs 007–014 are accepted.
 
 ### Epic 5: basicNew / basicNew: — Smalltalk-Level Object Creation — COMPLETE
 - GitHub: Epic #136, stories #137–#141 (all closed)
-- Branch: `phase1/epic-5-object-creation`
+- Branch: `phase1/epic-5-object-creation` (merged to main)
 - New files:
   - `src/vm/format.h` — Class format field encoding/decoding, query helpers (is_indexable, is_bytes, is_instantiable); format type constants extracted from bootstrap.h
 - Modified files:
@@ -246,6 +246,7 @@ src/vm/                   ← Phase 1 production code + Phase 0 spike code
   heap.h/c                    ← actor-local heap allocator (production)
   special_objects.h/c         ← 32-entry special object table (production)
   class_table.h/c             ← class table with reserved indices (production)
+  format.h                    ← class format field encoding/decoding (production)
   symbol_table.h/c            ← symbol interning and FNV-1a hash (production)
   method_dict.h/c             ← method dictionary with backing Array (production)
   special_selectors.h/c       ← bootstrap interning of 32 special selectors (production)
@@ -270,7 +271,13 @@ docs/spikes/              ← spike-001 through spike-007
 
 ## How to orient a new chat with Claude
 Paste this file plus `CLAUDE.md` at the start of the session.
-Phase 1 is in progress. Epics 1 (object memory), 2 (symbols/method dict), and 3 (bytecode interpreter) are complete.
+Phase 1 is in progress. Epics 1–5 are complete (object memory, symbols/method dict, bytecode interpreter, bootstrap, object creation). Epic 6 (object/memory primitives) is next.
+
+Epic ordering (actual):
+  1. Object memory  2. Symbols/MethodDict  3. Interpreter  4. Bootstrap
+  5. Object creation (basicNew/basicNew:)  6. Object/memory prims (33–41)
+  7. Compiler  8. Exceptions  9. Kernel source loading  10. Image save/load
+  11. Eval loop
 For Phase 1 work: paste `CLAUDE.md` + this file + the relevant ADRs for the
 component being built (ADR 007 for object memory, ADR 008 for mailbox,
 ADR 009 for scheduler, ADR 010 for frames, ADR 013 for public API).
