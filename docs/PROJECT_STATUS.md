@@ -238,6 +238,22 @@ All seven architectural spikes are complete. ADRs 007–014 are accepted.
 - Tests: 30/30 passing (61 scanner/parser + 40 codegen + 10 integration)
 - Milestone: **Smalltalk source compiles to bytecode and executes through the interpreter — `^3 + 4` compiles and returns 7**
 
+### Epic 8: Exception Handling — COMPLETE
+- GitHub: Epic #160, stories #161–#167 (all closed)
+- Branch: `phase1/epic-8-exceptions`
+- New files:
+  - `src/vm/handler.h`, `src/vm/handler.c` — Actor-local handler stack (linked list of STA_HandlerEntry), push/pop/walk/find operations, isKindOf: superclass chain match, signaled exception global storage for setjmp/longjmp safety
+- Modified files:
+  - `src/vm/primitive_table.h/c` — Added prims 88 (BlockClosure>>on:do: — setjmp/longjmp handler install, body eval, signal transfer), 89 (Exception>>signal — handler chain walk, longjmp to matching on:do:), 90 (BlockClosure>>ensure: — body eval, ensure block eval, body result return; Phase 1: normal completion only)
+  - `src/vm/interpreter.c` — Block arg tempOffset fix (BlockClosure slot 4, BlockDescriptor slot 3), sta_eval_block uses tempOffset for correct arg placement
+  - `src/compiler/codegen.c` — BlockDescriptor 4th slot emits tempOffset for block arg indexing
+  - `src/bootstrap/bootstrap.c` — Exception hierarchy classes (Exception, Error, MessageNotUnderstood, BlockCannotReturn) created in step 4 with instance variables; step 8: Exception accessors (messageText, messageText:, signal), MNU accessors (message, message:, receiver, receiver:), Object>>doesNotUnderstand: compiled from Smalltalk source (replaces prim 121 stub), BlockClosure>>on:do: and ensure: installed
+- Tests: 32/32 passing (12 new exception tests + 2 handler unit tests)
+  - `test_handler.c` — handler stack push/pop/walk, isKindOf: matching
+  - `test_exceptions.c` — on:do: normal completion, signal caught, superclass match, messageText access, exception accessors, DNU creates MNU (receiver + message accessible), ensure: normal + body result preserved, nested handlers (inner catches), ensure+on:do: Phase 1 limitation documented
+- Phase 1 limitation: ensure: block does NOT fire during exception unwinding (longjmp bypasses it). Phase 2 will fix this.
+- Milestone: **Full exception handling — on:do:, signal, ensure:, doesNotUnderstand: with real Smalltalk MessageNotUnderstood objects**
+
 ---
 
 ## ADR index
@@ -279,6 +295,7 @@ src/vm/                   ← Phase 1 production code + Phase 0 spike code
   selector.h/c                ← selector arity helper (production)
   primitive_table.h/c         ← 256-entry primitive table, kernel primitives (production)
   interpreter.h/c             ← bytecode dispatch loop, message send, TCO (production)
+  handler.h/c                 ← exception handler stack, setjmp/longjmp support (production)
   oop_spike.h, actor_spike.h  ← Phase 0 spike code (exploratory, not promoted)
   frame_spike.h/c             ← Phase 0 spike code
 src/actor/                ← mailbox, lifecycle stubs
@@ -301,7 +318,7 @@ docs/spikes/              ← spike-001 through spike-007
 
 ## How to orient a new chat with Claude
 Paste this file plus `CLAUDE.md` at the start of the session.
-Phase 1 is in progress. Epics 1–7 are complete. Epic 8 (exceptions) is next.
+Phase 1 is in progress. Epics 1–8 are complete. Epic 9 (kernel source loading) is next.
 
 Epic ordering (actual):
   1. Object memory  2. Symbols/MethodDict  3. Interpreter  4. Bootstrap
