@@ -121,6 +121,17 @@ target_include_directories(test_parser PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(test_parser PRIVATE sta_vm)
 add_test(NAME parser COMMAND test_parser)
 
+# ── Phase 1 Epic 7b: Compiler — Codegen and Integration ───────────────
+add_executable(test_codegen test_codegen.c)
+target_include_directories(test_codegen PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_codegen PRIVATE sta_vm)
+add_test(NAME codegen COMMAND test_codegen)
+
+add_executable(test_compiler_integration test_compiler_integration.c)
+target_include_directories(test_compiler_integration PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_compiler_integration PRIVATE sta_vm)
+add_test(NAME compiler_integration COMMAND test_compiler_integration)
+
 # ── Spike 002: MPSC mailbox — TSan correctness gate ───────────────────────
 find_package(Threads REQUIRED)
 

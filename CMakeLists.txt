@@ -28,6 +28,8 @@ add_library(sta_vm STATIC
     src/compiler/scanner.c
     src/compiler/ast.c
     src/compiler/parser.c
+    src/compiler/codegen.c
+    src/compiler/compiler.c
 )
 
 target_include_directories(sta_vm
