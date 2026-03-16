@@ -509,7 +509,11 @@ static STA_AstNode *parse_binary_expr(STA_Parser *p) {
     STA_AstNode *left = parse_unary_expr(p);
     if (!left || p->had_error) return left;
 
-    while (check(p, TOKEN_BINARY_SELECTOR)) {
+    while (check(p, TOKEN_BINARY_SELECTOR) || check(p, TOKEN_VBAR)) {
+        /* TOKEN_VBAR (|) is also a valid binary selector in expression
+         * context. Temp declarations are already consumed before we
+         * reach expression parsing. */
+
         /* Check if left is a super variable for super sends. */
         bool is_super = (left->type == NODE_VARIABLE &&
                          left->as.variable.name &&
@@ -822,8 +826,9 @@ static STA_AstNode *parse_method_header(STA_Parser *p) {
         return method;
     }
 
-    /* Binary method header: BINARY_SELECTOR IDENTIFIER */
-    if (check(p, TOKEN_BINARY_SELECTOR)) {
+    /* Binary method header: BINARY_SELECTOR IDENTIFIER
+     * Also accept TOKEN_VBAR as a binary selector (|). */
+    if (check(p, TOKEN_BINARY_SELECTOR) || check(p, TOKEN_VBAR)) {
         advance_token(p);
         char *selector = token_str(&p->previous);
 

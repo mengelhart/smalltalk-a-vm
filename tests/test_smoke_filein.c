@@ -14,6 +14,7 @@
 #include "vm/frame.h"
 #include "vm/format.h"
 #include "bootstrap/bootstrap.h"
+#include "compiler/compiler.h"
 #include <stdio.h>
 #include <assert.h>
 #include <string.h>
@@ -141,9 +142,40 @@ static void test_setter_getter(void) {
     assert(STA_SMALLINT_VAL(ry) == 7);
 }
 
-/* TODO: test_accessors_via_eval and test_distance_squared deferred
- * to next session — requires fixing compile_expression handling of
- * multi-statement keyword sends via the DNU/eval path. */
+/* ── Eval-path tests (Story 5 investigation) ──────────────────────────── */
+
+static void test_eval_simple(void) {
+    /* Single expression: 3 + 4 */
+    STA_OOP sysdict = sta_spc_get(SPC_SMALLTALK);
+    STA_CompileResult cr = sta_compile_expression(
+        "3 + 4", syms, imm, heap, sysdict);
+    if (cr.had_error) {
+        fprintf(stderr, "compile error: %s\n", cr.error_msg);
+    }
+    assert(!cr.had_error);
+
+    STA_OOP nil_oop = sta_spc_get(SPC_NIL);
+    STA_OOP result = sta_interpret(slab, heap, ct, cr.method, nil_oop, NULL, 0);
+    assert(STA_IS_SMALLINT(result));
+    assert(STA_SMALLINT_VAL(result) == 7);
+}
+
+static void test_eval_multi_statement(void) {
+    /* Multi-statement with temps and keyword sends. */
+    STA_OOP sysdict = sta_spc_get(SPC_SMALLTALK);
+    STA_CompileResult cr = sta_compile_expression(
+        "| p | p := TestPoint new. p x: 3. p x",
+        syms, imm, heap, sysdict);
+    if (cr.had_error) {
+        fprintf(stderr, "compile error: %s\n", cr.error_msg);
+    }
+    assert(!cr.had_error);
+
+    STA_OOP nil_oop = sta_spc_get(SPC_NIL);
+    STA_OOP result = sta_interpret(slab, heap, ct, cr.method, nil_oop, NULL, 0);
+    assert(STA_IS_SMALLINT(result));
+    assert(STA_SMALLINT_VAL(result) == 3);
+}
 
 static void test_class_in_sysdict(void) {
     STA_OOP cls = sysdict_lookup("TestPoint");
@@ -160,6 +192,8 @@ int main(void) {
     RUN(test_load_smoke);
     RUN(test_create_instance);
     RUN(test_setter_getter);
+    RUN(test_eval_simple);
+    RUN(test_eval_multi_statement);
     RUN(test_class_in_sysdict);
 
     printf("\n%d / %d tests passed\n", tests_passed, tests_run);
