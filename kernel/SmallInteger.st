@@ -1,8 +1,8 @@
 "Kernel methods for SmallInteger.
  Do NOT duplicate primitive methods installed by bootstrap.c step 7:
-   +, -, *, <, >, =, basicNew, basicNew:
- SKIPPED for Phase 1: //, \\ (no primitives), printString (needs String),
-   @ (no Point class)."
+   +, -, *, <, >, =, <=, >=, ~=, /, \\, //, quo:,
+   bitAnd:, bitOr:, bitXor:, bitShift:, printString, basicNew, basicNew:
+ SKIPPED: @ (no Point class)."
 
 !SmallInteger methodsFor: 'mathematical functions'!
 
@@ -11,6 +11,28 @@ factorial
     self = 0
         ifTrue: [result := 1]
         ifFalse: [result := self * (self - 1) factorial].
-    ^ result
-! !
+    ^ result!
 
+even
+    ^ (self \\ 2) = 0!
+
+odd
+    ^ self even not!
+
+gcd: anInteger
+    "Euclidean algorithm. Tail-recursive — TCO should fire."
+    | result |
+    anInteger = 0
+        ifTrue: [result := self abs]
+        ifFalse: [result := anInteger gcd: (self \\ anInteger)].
+    ^ result!
+
+lcm: anInteger
+    "Least common multiple."
+    | result |
+    self = 0
+        ifTrue: [result := 0]
+        ifFalse: [anInteger = 0
+            ifTrue: [result := 0]
+            ifFalse: [result := (self * anInteger) abs // (self gcd: anInteger)]].
+    ^ result! !

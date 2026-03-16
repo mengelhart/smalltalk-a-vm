@@ -31,7 +31,7 @@ static int is_binary_char(char c) {
     return c == '+' || c == '-' || c == '*' || c == '/' ||
            c == '<' || c == '>' || c == '=' || c == '~' ||
            c == '&' || c == '@' || c == '%' || c == ',' ||
-           c == '?' || c == '!';
+           c == '?' || c == '!' || c == '\\';
 }
 
 static int is_letter(char c) {

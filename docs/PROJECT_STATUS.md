@@ -455,6 +455,27 @@ The VM can: bootstrap from scratch, load kernel source, compile and execute Smal
 
 ---
 
+## Phase 1.5 progress
+
+### Phase 1.5 Batch 1: Arithmetic Completion — COMPLETE
+- Branch: phase1.5/batch-1-arithmetic
+- New primitives: 5 (<=), 6 (>=), 8 (~=), 10 (/), 11 (\\\\), 12 (//),
+  13 (quo:), 14 (bitAnd:), 15 (bitOr:), 16 (bitXor:), 17 (bitShift:),
+  200 (SmallInteger>>printString)
+- Scanner fix: backslash added to binary character set for \\\\ selector
+- New/expanded kernel .st: SmallInteger (even, odd, gcd:, lcm:),
+  Number (to:do:, to:by:do:, timesRepeat:)
+- Tests: test_arithmetic_prims (30 tests), test_batch1_integration (18 tests)
+- Key validations:
+  - Blue Book floor division semantics (// and \\\\) correct
+  - Bit operations with sign extension correct
+  - SmallInteger printString works end-to-end via C primitive (prim 200)
+  - gcd: tail recursion exercises TCO on real algorithm (46368 gcd: 28657 = 1, ~24 tail calls)
+  - to:do: and timesRepeat: run with real block value: dispatch under iteration
+  - to:do: mutable capture limitation documented (requires Phase 2 closures)
+
+---
+
 ## Current phase
 **Phase 2 — Actor Runtime and Headless**
 Scheduler, supervision, async I/O, headless lifecycle.

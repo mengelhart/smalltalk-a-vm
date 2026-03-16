@@ -528,8 +528,20 @@ static int step7_methods(BS *bs) {
     if (install_prim_method(bs, si_cls, "-", 2, 1) != 0) return -1;
     if (install_prim_method(bs, si_cls, "<", 3, 1) != 0) return -1;
     if (install_prim_method(bs, si_cls, ">", 4, 1) != 0) return -1;
+    if (install_prim_method(bs, si_cls, "<=", 5, 1) != 0) return -1;
+    if (install_prim_method(bs, si_cls, ">=", 6, 1) != 0) return -1;
     if (install_prim_method(bs, si_cls, "=", 7, 1) != 0) return -1;
+    if (install_prim_method(bs, si_cls, "~=", 8, 1) != 0) return -1;
     if (install_prim_method(bs, si_cls, "*", 9, 1) != 0) return -1;
+    if (install_prim_method(bs, si_cls, "/", 10, 1) != 0) return -1;
+    if (install_prim_method(bs, si_cls, "\\\\", 11, 1) != 0) return -1;
+    if (install_prim_method(bs, si_cls, "//", 12, 1) != 0) return -1;
+    if (install_prim_method(bs, si_cls, "quo:", 13, 1) != 0) return -1;
+    if (install_prim_method(bs, si_cls, "bitAnd:", 14, 1) != 0) return -1;
+    if (install_prim_method(bs, si_cls, "bitOr:", 15, 1) != 0) return -1;
+    if (install_prim_method(bs, si_cls, "bitXor:", 16, 1) != 0) return -1;
+    if (install_prim_method(bs, si_cls, "bitShift:", 17, 1) != 0) return -1;
+    if (install_prim_method(bs, si_cls, "printString", 200, 0) != 0) return -1;
 
     /* ── ArrayedCollection methods ───────────────────────────────────── */
     STA_OOP ac_cls = sta_class_table_get(bs->ct, STA_CLS_ARRAYEDCOLLECTION);

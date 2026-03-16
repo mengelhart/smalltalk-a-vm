@@ -1,7 +1,6 @@
 "Kernel methods for Number.
  Number adds arithmetic protocol on top of Magnitude.
- SKIPPED for Phase 1: to:do:, to:by:do:, timesRepeat: (need mutable closures).
- SKIPPED: reciprocal (no / primitive for SmallInteger yet)."
+ SKIPPED: reciprocal (no Fraction class yet)."
 
 !Number methodsFor: 'testing'!
 isZero
@@ -28,3 +27,27 @@ sign
 			ifTrue: [result := -1]
 			ifFalse: [result := 0]].
 	^ result! !
+
+!Number methodsFor: 'enumerating'!
+to: stop do: aBlock
+	| i |
+	i := self.
+	[i <= stop] whileTrue: [
+		aBlock value: i.
+		i := i + 1]!
+to: stop by: step do: aBlock
+	| i |
+	i := self.
+	step > 0
+		ifTrue: [[i <= stop] whileTrue: [
+			aBlock value: i.
+			i := i + step]]
+		ifFalse: [[i >= stop] whileTrue: [
+			aBlock value: i.
+			i := i + step]]!
+timesRepeat: aBlock
+	| i |
+	i := 1.
+	[i <= self] whileTrue: [
+		aBlock value.
+		i := i + 1]! !

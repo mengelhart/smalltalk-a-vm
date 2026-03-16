@@ -196,6 +196,15 @@ target_compile_definitions(test_kernel_collections PRIVATE
 target_link_libraries(test_kernel_collections PRIVATE sta_vm)
 add_test(NAME kernel_collections COMMAND test_kernel_collections)
 
+# ── Phase 1.5 Batch 1: Arithmetic Completion ───────────────────────────
+add_executable(test_arithmetic_prims test_arithmetic_prims.c)
+target_link_libraries(test_arithmetic_prims PRIVATE sta_vm)
+add_test(NAME arithmetic_prims COMMAND test_arithmetic_prims)
+
+add_executable(test_batch1_integration test_batch1_integration.c)
+target_link_libraries(test_batch1_integration PRIVATE sta_vm)
+add_test(NAME batch1_integration COMMAND test_batch1_integration)
+
 # ── Phase 1 Epic 10: Image Save/Load ────────────────────────────────────
 add_executable(test_image_format test_image_format.c)
 target_include_directories(test_image_format PRIVATE ${CMAKE_SOURCE_DIR}/src)
