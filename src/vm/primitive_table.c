@@ -139,6 +139,306 @@ static int prim_smallint_mul(STA_OOP *args, uint8_t nargs, STA_OOP *result) {
     return STA_PRIM_SUCCESS;
 }
 
+/* Prim 5: SmallInteger >> #<= */
+static int prim_smallint_le(STA_OOP *args, uint8_t nargs, STA_OOP *result) {
+    (void)nargs;
+    if (!STA_IS_SMALLINT(args[0])) return STA_PRIM_BAD_RECEIVER;
+    if (!STA_IS_SMALLINT(args[1])) return STA_PRIM_BAD_ARGUMENT;
+    intptr_t a = STA_SMALLINT_VAL(args[0]);
+    intptr_t b = STA_SMALLINT_VAL(args[1]);
+    *result = (a <= b) ? sta_spc_get(SPC_TRUE) : sta_spc_get(SPC_FALSE);
+    return STA_PRIM_SUCCESS;
+}
+
+/* Prim 6: SmallInteger >> #>= */
+static int prim_smallint_ge(STA_OOP *args, uint8_t nargs, STA_OOP *result) {
+    (void)nargs;
+    if (!STA_IS_SMALLINT(args[0])) return STA_PRIM_BAD_RECEIVER;
+    if (!STA_IS_SMALLINT(args[1])) return STA_PRIM_BAD_ARGUMENT;
+    intptr_t a = STA_SMALLINT_VAL(args[0]);
+    intptr_t b = STA_SMALLINT_VAL(args[1]);
+    *result = (a >= b) ? sta_spc_get(SPC_TRUE) : sta_spc_get(SPC_FALSE);
+    return STA_PRIM_SUCCESS;
+}
+
+/* Prim 8: SmallInteger >> #~= */
+static int prim_smallint_ne(STA_OOP *args, uint8_t nargs, STA_OOP *result) {
+    (void)nargs;
+    if (!STA_IS_SMALLINT(args[0])) return STA_PRIM_BAD_RECEIVER;
+    if (!STA_IS_SMALLINT(args[1])) return STA_PRIM_BAD_ARGUMENT;
+    *result = (args[0] != args[1]) ? sta_spc_get(SPC_TRUE) : sta_spc_get(SPC_FALSE);
+    return STA_PRIM_SUCCESS;
+}
+
+/* Prim 10: SmallInteger >> #/ (exact division) */
+static int prim_smallint_div_exact(STA_OOP *args, uint8_t nargs, STA_OOP *result) {
+    (void)nargs;
+    if (!STA_IS_SMALLINT(args[0])) return STA_PRIM_BAD_RECEIVER;
+    if (!STA_IS_SMALLINT(args[1])) return STA_PRIM_BAD_ARGUMENT;
+    intptr_t a = STA_SMALLINT_VAL(args[0]);
+    intptr_t b = STA_SMALLINT_VAL(args[1]);
+    if (b == 0) return STA_PRIM_OUT_OF_RANGE;
+    if (a % b != 0) return STA_PRIM_OUT_OF_RANGE; /* not evenly divisible */
+    *result = STA_SMALLINT_OOP(a / b);
+    return STA_PRIM_SUCCESS;
+}
+
+/* Prim 11: SmallInteger >> #\\ (modulo — Blue Book floor semantics) */
+static int prim_smallint_mod(STA_OOP *args, uint8_t nargs, STA_OOP *result) {
+    (void)nargs;
+    if (!STA_IS_SMALLINT(args[0])) return STA_PRIM_BAD_RECEIVER;
+    if (!STA_IS_SMALLINT(args[1])) return STA_PRIM_BAD_ARGUMENT;
+    intptr_t a = STA_SMALLINT_VAL(args[0]);
+    intptr_t b = STA_SMALLINT_VAL(args[1]);
+    if (b == 0) return STA_PRIM_OUT_OF_RANGE;
+    intptr_t r = a % b;
+    if (r != 0 && ((r ^ b) < 0)) r += b;
+    *result = STA_SMALLINT_OOP(r);
+    return STA_PRIM_SUCCESS;
+}
+
+/* Prim 12: SmallInteger >> #// (floor division towards negative infinity) */
+static int prim_smallint_div_floor(STA_OOP *args, uint8_t nargs, STA_OOP *result) {
+    (void)nargs;
+    if (!STA_IS_SMALLINT(args[0])) return STA_PRIM_BAD_RECEIVER;
+    if (!STA_IS_SMALLINT(args[1])) return STA_PRIM_BAD_ARGUMENT;
+    intptr_t a = STA_SMALLINT_VAL(args[0]);
+    intptr_t b = STA_SMALLINT_VAL(args[1]);
+    if (b == 0) return STA_PRIM_OUT_OF_RANGE;
+    intptr_t q = a / b;
+    intptr_t r = a % b;
+    if (r != 0 && ((a ^ b) < 0)) q -= 1;
+    *result = STA_SMALLINT_OOP(q);
+    return STA_PRIM_SUCCESS;
+}
+
+/* Prim 13: SmallInteger >> #quo: (truncated division — C semantics) */
+static int prim_smallint_quo(STA_OOP *args, uint8_t nargs, STA_OOP *result) {
+    (void)nargs;
+    if (!STA_IS_SMALLINT(args[0])) return STA_PRIM_BAD_RECEIVER;
+    if (!STA_IS_SMALLINT(args[1])) return STA_PRIM_BAD_ARGUMENT;
+    intptr_t a = STA_SMALLINT_VAL(args[0]);
+    intptr_t b = STA_SMALLINT_VAL(args[1]);
+    if (b == 0) return STA_PRIM_OUT_OF_RANGE;
+    *result = STA_SMALLINT_OOP(a / b);
+    return STA_PRIM_SUCCESS;
+}
+
+/* Prim 14: SmallInteger >> #bitAnd: */
+static int prim_smallint_bitand(STA_OOP *args, uint8_t nargs, STA_OOP *result) {
+    (void)nargs;
+    if (!STA_IS_SMALLINT(args[0])) return STA_PRIM_BAD_RECEIVER;
+    if (!STA_IS_SMALLINT(args[1])) return STA_PRIM_BAD_ARGUMENT;
+    intptr_t a = STA_SMALLINT_VAL(args[0]);
+    intptr_t b = STA_SMALLINT_VAL(args[1]);
+    *result = STA_SMALLINT_OOP(a & b);
+    return STA_PRIM_SUCCESS;
+}
+
+/* Prim 15: SmallInteger >> #bitOr: */
+static int prim_smallint_bitor(STA_OOP *args, uint8_t nargs, STA_OOP *result) {
+    (void)nargs;
+    if (!STA_IS_SMALLINT(args[0])) return STA_PRIM_BAD_RECEIVER;
+    if (!STA_IS_SMALLINT(args[1])) return STA_PRIM_BAD_ARGUMENT;
+    intptr_t a = STA_SMALLINT_VAL(args[0]);
+    intptr_t b = STA_SMALLINT_VAL(args[1]);
+    *result = STA_SMALLINT_OOP(a | b);
+    return STA_PRIM_SUCCESS;
+}
+
+/* Prim 16: SmallInteger >> #bitXor: */
+static int prim_smallint_bitxor(STA_OOP *args, uint8_t nargs, STA_OOP *result) {
+    (void)nargs;
+    if (!STA_IS_SMALLINT(args[0])) return STA_PRIM_BAD_RECEIVER;
+    if (!STA_IS_SMALLINT(args[1])) return STA_PRIM_BAD_ARGUMENT;
+    intptr_t a = STA_SMALLINT_VAL(args[0]);
+    intptr_t b = STA_SMALLINT_VAL(args[1]);
+    *result = STA_SMALLINT_OOP(a ^ b);
+    return STA_PRIM_SUCCESS;
+}
+
+/* Prim 17: SmallInteger >> #bitShift: */
+static int prim_smallint_bitshift(STA_OOP *args, uint8_t nargs, STA_OOP *result) {
+    (void)nargs;
+    if (!STA_IS_SMALLINT(args[0])) return STA_PRIM_BAD_RECEIVER;
+    if (!STA_IS_SMALLINT(args[1])) return STA_PRIM_BAD_ARGUMENT;
+    intptr_t a = STA_SMALLINT_VAL(args[0]);
+    intptr_t shift = STA_SMALLINT_VAL(args[1]);
+    if (shift >= 63 || shift <= -63) return STA_PRIM_OUT_OF_RANGE;
+    intptr_t r;
+    if (shift >= 0) {
+        /* Left shift — check for overflow. */
+        uintptr_t ua = (uintptr_t)a;
+        uintptr_t shifted = ua << shift;
+        r = (intptr_t)shifted;
+        /* Verify no bits lost: shift back must give original. */
+        if ((r >> shift) != a) return STA_PRIM_OUT_OF_RANGE;
+    } else {
+        /* Arithmetic right shift. */
+        r = a >> (-shift);
+    }
+    *result = STA_SMALLINT_OOP(r);
+    return STA_PRIM_SUCCESS;
+}
+
+/* Prim 200: SmallInteger >> #printString (C-level formatting) */
+static int prim_smallint_printstring(STA_OOP *args, uint8_t nargs, STA_OOP *result) {
+    (void)nargs;
+    if (!STA_IS_SMALLINT(args[0])) return STA_PRIM_BAD_RECEIVER;
+    if (!g_prim_heap) return STA_PRIM_NOT_AVAILABLE;
+    if (!g_prim_class_table) return STA_PRIM_NOT_AVAILABLE;
+
+    intptr_t val = STA_SMALLINT_VAL(args[0]);
+    char buf[32];
+    int len = snprintf(buf, sizeof(buf), "%ld", (long)val);
+    if (len <= 0) return STA_PRIM_OUT_OF_RANGE;
+
+    /* Allocate a String object with the right byte count. */
+    uint32_t var_words = ((uint32_t)len + (uint32_t)(sizeof(STA_OOP) - 1))
+                         / (uint32_t)sizeof(STA_OOP);
+    STA_ObjHeader *str_h = sta_heap_alloc(g_prim_heap, STA_CLS_STRING, var_words);
+    if (!str_h) return STA_PRIM_NO_MEMORY;
+
+    /* Set byte padding. */
+    uint8_t padding = (uint8_t)(var_words * sizeof(STA_OOP) - (uint32_t)len);
+    str_h->reserved = padding;
+
+    /* Zero-fill then copy bytes. */
+    memset(sta_payload(str_h), 0, var_words * sizeof(STA_OOP));
+    memcpy(sta_payload(str_h), buf, (size_t)len);
+
+    *result = (STA_OOP)(uintptr_t)str_h;
+    return STA_PRIM_SUCCESS;
+}
+
+/* Forward declaration — defined later in this file. */
+static STA_OOP get_receiver_format(STA_ObjHeader *h);
+
+/* ── Byte-indexable primitives ──────────────────────────────────────────── */
+
+/* Helper: compute byte pointer and byte count for a byte-indexable object. */
+static int byte_access_setup(STA_OOP receiver, uint8_t **out_bytes,
+                              uint32_t *out_byte_count) {
+    if (STA_IS_IMMEDIATE(receiver)) return STA_PRIM_BAD_RECEIVER;
+    STA_ObjHeader *h = (STA_ObjHeader *)(uintptr_t)receiver;
+    STA_OOP fmt = get_receiver_format(h);
+    if (fmt == 0) return STA_PRIM_BAD_RECEIVER;
+    if (!sta_format_is_bytes(fmt)) return STA_PRIM_BAD_RECEIVER;
+
+    uint8_t inst_vars = STA_FORMAT_INST_VARS(fmt);
+    uint32_t var_words = h->size - inst_vars;
+    uint32_t byte_count = var_words * (uint32_t)sizeof(STA_OOP)
+                          - STA_BYTE_PADDING(h);
+    *out_bytes = (uint8_t *)&sta_payload(h)[inst_vars];
+    *out_byte_count = byte_count;
+    return STA_PRIM_SUCCESS;
+}
+
+/* Prim 60: ByteArray >> #at: (byte access — returns SmallInteger 0-255) */
+static int prim_byte_at(STA_OOP *args, uint8_t nargs, STA_OOP *result) {
+    (void)nargs;
+    uint8_t *bytes; uint32_t byte_count;
+    int rc = byte_access_setup(args[0], &bytes, &byte_count);
+    if (rc != STA_PRIM_SUCCESS) return rc;
+    if (!STA_IS_SMALLINT(args[1])) return STA_PRIM_BAD_ARGUMENT;
+    intptr_t idx = STA_SMALLINT_VAL(args[1]);
+    if (idx < 1 || (uint32_t)idx > byte_count) return STA_PRIM_OUT_OF_RANGE;
+    *result = STA_SMALLINT_OOP(bytes[idx - 1]);
+    return STA_PRIM_SUCCESS;
+}
+
+/* Prim 61: ByteArray >> #at:put: (byte store — value must be 0-255) */
+static int prim_byte_at_put(STA_OOP *args, uint8_t nargs, STA_OOP *result) {
+    (void)nargs;
+    STA_ObjHeader *h = (STA_ObjHeader *)(uintptr_t)args[0];
+    if (STA_IS_IMMEDIATE(args[0])) return STA_PRIM_BAD_RECEIVER;
+    if (h->obj_flags & STA_OBJ_IMMUTABLE) return STA_PRIM_BAD_RECEIVER;
+    uint8_t *bytes; uint32_t byte_count;
+    int rc = byte_access_setup(args[0], &bytes, &byte_count);
+    if (rc != STA_PRIM_SUCCESS) return rc;
+    if (!STA_IS_SMALLINT(args[1])) return STA_PRIM_BAD_ARGUMENT;
+    if (!STA_IS_SMALLINT(args[2])) return STA_PRIM_BAD_ARGUMENT;
+    intptr_t idx = STA_SMALLINT_VAL(args[1]);
+    intptr_t val = STA_SMALLINT_VAL(args[2]);
+    if (idx < 1 || (uint32_t)idx > byte_count) return STA_PRIM_OUT_OF_RANGE;
+    if (val < 0 || val > 255) return STA_PRIM_OUT_OF_RANGE;
+    bytes[idx - 1] = (uint8_t)val;
+    *result = args[2];
+    return STA_PRIM_SUCCESS;
+}
+
+/* Prim 62: ByteArray >> #basicSize (byte count) */
+static int prim_byte_size(STA_OOP *args, uint8_t nargs, STA_OOP *result) {
+    (void)nargs;
+    uint8_t *bytes; uint32_t byte_count;
+    int rc = byte_access_setup(args[0], &bytes, &byte_count);
+    if (rc != STA_PRIM_SUCCESS) return rc;
+    *result = STA_SMALLINT_OOP((intptr_t)byte_count);
+    return STA_PRIM_SUCCESS;
+}
+
+/* Prim 63: String >> #at: (returns Character) */
+static int prim_string_at(STA_OOP *args, uint8_t nargs, STA_OOP *result) {
+    (void)nargs;
+    uint8_t *bytes; uint32_t byte_count;
+    int rc = byte_access_setup(args[0], &bytes, &byte_count);
+    if (rc != STA_PRIM_SUCCESS) return rc;
+    if (!STA_IS_SMALLINT(args[1])) return STA_PRIM_BAD_ARGUMENT;
+    intptr_t idx = STA_SMALLINT_VAL(args[1]);
+    if (idx < 1 || (uint32_t)idx > byte_count) return STA_PRIM_OUT_OF_RANGE;
+    *result = STA_CHAR_OOP(bytes[idx - 1]);
+    return STA_PRIM_SUCCESS;
+}
+
+/* Prim 64: String >> #at:put: (takes Character) */
+static int prim_string_at_put(STA_OOP *args, uint8_t nargs, STA_OOP *result) {
+    (void)nargs;
+    if (STA_IS_IMMEDIATE(args[0])) return STA_PRIM_BAD_RECEIVER;
+    STA_ObjHeader *h = (STA_ObjHeader *)(uintptr_t)args[0];
+    if (h->obj_flags & STA_OBJ_IMMUTABLE) return STA_PRIM_BAD_RECEIVER;
+    uint8_t *bytes; uint32_t byte_count;
+    int rc = byte_access_setup(args[0], &bytes, &byte_count);
+    if (rc != STA_PRIM_SUCCESS) return rc;
+    if (!STA_IS_SMALLINT(args[1])) return STA_PRIM_BAD_ARGUMENT;
+    if (!STA_IS_CHAR(args[2])) return STA_PRIM_BAD_ARGUMENT;
+    intptr_t idx = STA_SMALLINT_VAL(args[1]);
+    uint32_t cp = STA_CHAR_VAL(args[2]);
+    if (idx < 1 || (uint32_t)idx > byte_count) return STA_PRIM_OUT_OF_RANGE;
+    if (cp > 255) return STA_PRIM_OUT_OF_RANGE;
+    bytes[idx - 1] = (uint8_t)cp;
+    *result = args[2];
+    return STA_PRIM_SUCCESS;
+}
+
+/* ── Character primitives ──────────────────────────────────────────────── */
+
+/* Prim 94: Character >> #value (extract code point) */
+static int prim_char_value(STA_OOP *args, uint8_t nargs, STA_OOP *result) {
+    (void)nargs;
+    if (!STA_IS_CHAR(args[0])) return STA_PRIM_BAD_RECEIVER;
+    *result = STA_SMALLINT_OOP((intptr_t)STA_CHAR_VAL(args[0]));
+    return STA_PRIM_SUCCESS;
+}
+
+/* Prim 95: Character class >> #value: (create Character from code point) */
+static int prim_char_for(STA_OOP *args, uint8_t nargs, STA_OOP *result) {
+    (void)nargs;
+    if (!STA_IS_SMALLINT(args[1])) return STA_PRIM_BAD_ARGUMENT;
+    intptr_t cp = STA_SMALLINT_VAL(args[1]);
+    if (cp < 0) return STA_PRIM_OUT_OF_RANGE;
+    if (cp <= 255) {
+        /* Use canonical Characters from the character table. */
+        STA_OOP table = sta_spc_get(SPC_CHARACTER_TABLE);
+        if (table != 0) {
+            STA_ObjHeader *arr_h = (STA_ObjHeader *)(uintptr_t)table;
+            *result = sta_payload(arr_h)[cp];
+            return STA_PRIM_SUCCESS;
+        }
+    }
+    *result = STA_CHAR_OOP((uint32_t)cp);
+    return STA_PRIM_SUCCESS;
+}
+
 /* ── Object primitives ─────────────────────────────────────────────────── */
 
 /* Prim 29: Object >> #== (identity) */
@@ -945,8 +1245,22 @@ void sta_primitive_table_init(void) {
     sta_primitives[2]  = prim_smallint_sub;    /* #- */
     sta_primitives[3]  = prim_smallint_lt;     /* #< */
     sta_primitives[4]  = prim_smallint_gt;     /* #> */
+    sta_primitives[5]  = prim_smallint_le;     /* #<= */
+    sta_primitives[6]  = prim_smallint_ge;     /* #>= */
     sta_primitives[7]  = prim_smallint_eq;     /* #= */
+    sta_primitives[8]  = prim_smallint_ne;     /* #~= */
     sta_primitives[9]  = prim_smallint_mul;    /* #* */
+    sta_primitives[10] = prim_smallint_div_exact;  /* #/ */
+    sta_primitives[11] = prim_smallint_mod;    /* #\\ */
+    sta_primitives[12] = prim_smallint_div_floor;  /* #// */
+    sta_primitives[13] = prim_smallint_quo;    /* #quo: */
+    sta_primitives[14] = prim_smallint_bitand; /* #bitAnd: */
+    sta_primitives[15] = prim_smallint_bitor;  /* #bitOr: */
+    sta_primitives[16] = prim_smallint_bitxor; /* #bitXor: */
+    sta_primitives[17] = prim_smallint_bitshift; /* #bitShift: */
+
+    /* SmallInteger extension primitives */
+    sta_primitives[200] = prim_smallint_printstring; /* #printString */
 
     /* Object identity and class (§8.4) */
     sta_primitives[29] = prim_identity;        /* #== */
@@ -974,6 +1288,17 @@ void sta_primitive_table_init(void) {
     sta_primitives[51] = prim_array_at;        /* #at: */
     sta_primitives[52] = prim_array_at_put;    /* #at:put: */
     sta_primitives[53] = prim_array_size;      /* #size */
+
+    /* Byte-indexable access (§8.6) */
+    sta_primitives[60] = prim_byte_at;         /* ByteArray >> #at: */
+    sta_primitives[61] = prim_byte_at_put;     /* ByteArray >> #at:put: */
+    sta_primitives[62] = prim_byte_size;       /* ByteArray >> #basicSize */
+    sta_primitives[63] = prim_string_at;       /* String >> #at: */
+    sta_primitives[64] = prim_string_at_put;   /* String >> #at:put: */
+
+    /* Character (§8.7) */
+    sta_primitives[94] = prim_char_value;      /* Character >> #value */
+    sta_primitives[95] = prim_char_for;        /* Character class >> #value: */
 
     /* Exception handling (§7.8, §8.8) */
     sta_primitives[88]  = prim_on_do;          /* BlockClosure >> #on:do: */

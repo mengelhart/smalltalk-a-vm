@@ -455,6 +455,44 @@ The VM can: bootstrap from scratch, load kernel source, compile and execute Smal
 
 ---
 
+## Phase 1.5 progress
+
+### Phase 1.5 Batch 1: Arithmetic Completion — COMPLETE
+- Branch: phase1.5/batch-1-arithmetic
+- New primitives: 5 (<=), 6 (>=), 8 (~=), 10 (/), 11 (\\\\), 12 (//),
+  13 (quo:), 14 (bitAnd:), 15 (bitOr:), 16 (bitXor:), 17 (bitShift:),
+  200 (SmallInteger>>printString)
+- Scanner fix: backslash added to binary character set for \\\\ selector
+- New/expanded kernel .st: SmallInteger (even, odd, gcd:, lcm:),
+  Number (to:do:, to:by:do:, timesRepeat:)
+- Tests: test_arithmetic_prims (30 tests), test_batch1_integration (18 tests)
+- Key validations:
+  - Blue Book floor division semantics (// and \\\\) correct
+  - Bit operations with sign extension correct
+  - SmallInteger printString works end-to-end via C primitive (prim 200)
+  - gcd: Euclidean algorithm works (46368 gcd: 28657 = 1, ~24 recursive calls; not tail-recursive due to temp pattern)
+  - to:do: and timesRepeat: run with real block value: dispatch under iteration
+  - to:do: mutable capture limitation documented (requires Phase 2 closures)
+
+### Phase 1.5 Batch 2: Byte-Indexable Primitives, Character, String — COMPLETE
+- Branch: phase1.5/batch-2-byte-char-string
+- New primitives: 60 (basicAt:), 61 (basicAt:put:), 62 (basicSize),
+  63 (stringAt:), 64 (stringAt:put:), 94 (Character>>value),
+  95 (Character class>>value:)
+- Closes: GitHub issue #188 (byte-aware at:/at:put:)
+- New kernel .st: Character.st, ByteArray.st
+- Expanded: String.st (concatenation, reversed, asUppercase,
+  asLowercase, copyFrom:to:, includes:, =, <, printString)
+- Tests: test_byte_prims (15 tests), test_batch2_integration (25 tests)
+- Key validations:
+  - Byte-indexable at:/at:put: works end-to-end
+  - Character immediates extract and create correctly
+  - String concatenation allocates new byte-indexable objects
+  - Polymorphic at: (Array→OOP, String→Character, ByteArray→SmallInt)
+  - Polymorphic printString across SmallInteger/String/Character/ByteArray
+
+---
+
 ## Current phase
 **Phase 2 — Actor Runtime and Headless**
 Scheduler, supervision, async I/O, headless lifecycle.

@@ -528,8 +528,20 @@ static int step7_methods(BS *bs) {
     if (install_prim_method(bs, si_cls, "-", 2, 1) != 0) return -1;
     if (install_prim_method(bs, si_cls, "<", 3, 1) != 0) return -1;
     if (install_prim_method(bs, si_cls, ">", 4, 1) != 0) return -1;
+    if (install_prim_method(bs, si_cls, "<=", 5, 1) != 0) return -1;
+    if (install_prim_method(bs, si_cls, ">=", 6, 1) != 0) return -1;
     if (install_prim_method(bs, si_cls, "=", 7, 1) != 0) return -1;
+    if (install_prim_method(bs, si_cls, "~=", 8, 1) != 0) return -1;
     if (install_prim_method(bs, si_cls, "*", 9, 1) != 0) return -1;
+    if (install_prim_method(bs, si_cls, "/", 10, 1) != 0) return -1;
+    if (install_prim_method(bs, si_cls, "\\\\", 11, 1) != 0) return -1;
+    if (install_prim_method(bs, si_cls, "//", 12, 1) != 0) return -1;
+    if (install_prim_method(bs, si_cls, "quo:", 13, 1) != 0) return -1;
+    if (install_prim_method(bs, si_cls, "bitAnd:", 14, 1) != 0) return -1;
+    if (install_prim_method(bs, si_cls, "bitOr:", 15, 1) != 0) return -1;
+    if (install_prim_method(bs, si_cls, "bitXor:", 16, 1) != 0) return -1;
+    if (install_prim_method(bs, si_cls, "bitShift:", 17, 1) != 0) return -1;
+    if (install_prim_method(bs, si_cls, "printString", 200, 0) != 0) return -1;
 
     /* ── ArrayedCollection methods ───────────────────────────────────── */
     STA_OOP ac_cls = sta_class_table_get(bs->ct, STA_CLS_ARRAYEDCOLLECTION);
@@ -538,6 +550,30 @@ static int step7_methods(BS *bs) {
     /* ── Array methods ────────────────────────────────────────────────── */
     if (install_prim_method(bs, arr_cls, "at:",     51, 1) != 0) return -1;
     if (install_prim_method(bs, arr_cls, "at:put:", 52, 2) != 0) return -1;
+
+    /* ── ByteArray methods ─────────────────────────────────────────────── */
+    STA_OOP ba_cls = sta_class_table_get(bs->ct, STA_CLS_BYTEARRAY);
+    if (install_prim_method(bs, ba_cls, "basicAt:",    60, 1) != 0) return -1;
+    if (install_prim_method(bs, ba_cls, "basicAt:put:",61, 2) != 0) return -1;
+    if (install_prim_method(bs, ba_cls, "basicSize",   62, 0) != 0) return -1;
+    if (install_prim_method(bs, ba_cls, "at:",          60, 1) != 0) return -1;
+    if (install_prim_method(bs, ba_cls, "at:put:",      61, 2) != 0) return -1;
+
+    /* ── String methods ────────────────────────────────────────────────── */
+    STA_OOP str_cls = sta_class_table_get(bs->ct, STA_CLS_STRING);
+    if (install_prim_method(bs, str_cls, "at:",     63, 1) != 0) return -1;
+    if (install_prim_method(bs, str_cls, "at:put:", 64, 2) != 0) return -1;
+
+    /* ── Character methods ──────────────────────────────────────────────── */
+    STA_OOP char_cls = sta_class_table_get(bs->ct, STA_CLS_CHARACTER);
+    if (install_prim_method(bs, char_cls, "value", 94, 0) != 0) return -1;
+
+    /* Character class >> value: — install on the metaclass */
+    {
+        STA_ObjHeader *char_cls_h = (STA_ObjHeader *)(uintptr_t)char_cls;
+        STA_OOP char_meta = sta_class_table_get(bs->ct, char_cls_h->class_index);
+        if (install_prim_method(bs, char_meta, "value:", 95, 1) != 0) return -1;
+    }
 
     /* ── BlockClosure methods ─────────────────────────────────────────── */
     if (install_prim_method(bs, bc_cls, "value",  81, 0) != 0) return -1;
