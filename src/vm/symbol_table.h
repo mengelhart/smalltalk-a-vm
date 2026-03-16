@@ -51,6 +51,13 @@ STA_OOP sta_symbol_intern(STA_ImmutableSpace *sp, STA_SymbolTable *st,
 STA_OOP sta_symbol_lookup(const STA_SymbolTable *st,
                           const char *utf8, size_t len);
 
+/* Register an already-allocated Symbol object into the hash table index.
+ * Used by the image loader to rebuild the symbol table after loading
+ * Symbol objects from an image file. The Symbol must already exist in
+ * immutable space with correct hash and bytes.
+ * Returns 0 on success, -1 on allocation failure (table growth). */
+int sta_symbol_table_register(STA_SymbolTable *st, STA_OOP symbol);
+
 /* ── Symbol accessors ──────────────────────────────────────────────────── */
 
 /* Extract the precomputed FNV-1a hash from a Symbol object (payload slot 0). */

@@ -175,6 +175,24 @@ STA_OOP sta_symbol_intern(STA_ImmutableSpace *sp, STA_SymbolTable *st,
     return sym;
 }
 
+int sta_symbol_table_register(STA_SymbolTable *st, STA_OOP symbol) {
+    size_t len;
+    const char *bytes = sta_symbol_get_bytes(symbol, &len);
+    uint32_t hash = sta_symbol_get_hash(symbol);
+
+    uint32_t idx = probe(st, bytes, len, hash);
+    if (st->slots[idx] != 0) return 0;  /* already registered */
+
+    if ((st->count + 1) * 10 > st->capacity * 7) {
+        if (table_grow(st) != 0) return -1;
+        idx = probe(st, bytes, len, hash);
+    }
+
+    st->slots[idx] = symbol;
+    st->count++;
+    return 0;
+}
+
 uint32_t sta_symbol_get_hash(STA_OOP symbol) {
     STA_ObjHeader *h = (STA_ObjHeader *)(uintptr_t)symbol;
     STA_OOP *payload = sta_payload(h);

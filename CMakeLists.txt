@@ -33,6 +33,7 @@ add_library(sta_vm STATIC
     src/compiler/parser.c
     src/compiler/codegen.c
     src/compiler/compiler.c
+    src/image/image.c
 )
 
 target_include_directories(sta_vm

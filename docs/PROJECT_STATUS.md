@@ -302,7 +302,9 @@ src/actor/                ← mailbox, lifecycle stubs
 src/gc/                   ← Phase 1+
 src/scheduler/            ← scheduler_spike.h, scheduler_spike.c
 src/io/                   ← io_spike.h, io_spike.c (Spike 005 complete)
-src/image/                ← image_spike.h, image_spike.c (Spike 006 complete)
+src/image/                ← production image save/load + spike reference
+  image.h/c                   ← production writer + loader (Epic 10)
+  image_spike.h/c             ← Phase 0 spike (reference only, not modified)
 src/bridge/               ← bridge_spike.h, bridge_spike.c (Spike 007 complete)
 src/bootstrap/            ← one-time kernel bootstrap + file-in reader
   bootstrap.h/c               ← kernel bootstrap (Epics 4/5/8) (production)
@@ -380,16 +382,49 @@ docs/spikes/              ← spike-001 through spike-007
 - Tests: 39/39 passing (38 existing + 1 new test_kernel_collections target)
 - **Epic 9 complete.** 12 kernel .st files, 39 CTest targets.
 
+### Epic 10: Image Save/Load (Production) — COMPLETE
+- GitHub: Epic #190, stories #191–#196 (all closed)
+- Branch: `phase1/epic-10-image-save-load`
+- New files:
+  - `src/image/image.h` — Production image format structs (STA_ImageHeader 48B, STA_ObjRecord 16B, STA_ImmutableEntry 10B, STA_RelocEntry 8B), OOP encoding macros, root table constants, FNV-1a hash, writer and loader declarations
+  - `src/image/image.c` — Production writer (sta_image_save_to_file) and loader (sta_image_load_from_file)
+  - `tests/test_image_format.c` — 13 format struct and encoding unit tests
+  - `tests/test_image_save.c` — 7 save smoke tests (bootstrap → save → verify file structure)
+  - `tests/test_image_roundtrip.c` — 16 round-trip acid tests (bootstrap → save → fresh state → load → interpreter works)
+- Modified files:
+  - `src/vm/symbol_table.h/c` — Added sta_symbol_table_register() for image loader to rebuild symbol table index
+  - `CMakeLists.txt` — image.c added to sta_vm library
+  - `tests/CMakeLists.txt` — 3 new test targets
+- Writer algorithm:
+  - Constructs root Array (special objects, class table, globals) in immutable space
+  - Walks reachable object graph with O(1) hash table (replaces spike's O(n²) linear scan)
+  - Handles byte-indexable objects (Symbol/String/ByteArray) — raw bytes not scanned as OOPs
+  - Handles CompiledMethod — only scans header + literal slots, not bytecodes
+  - Emits immutable name entries for nil, true, false, and all interned symbols
+  - Writes ADR 012 format: header → immutable section → data section → relocation table
+- Loader algorithm (6 passes):
+  - Validate header (magic, version, endian, ptr_width)
+  - Read immutable section entries
+  - Allocate all objects via production allocators (sta_heap_alloc / sta_immutable_alloc, not malloc)
+  - Fill payload words from encoded values
+  - Apply relocations (patch heap pointers)
+  - Rebuild runtime tables: special objects, class table, symbol table index, globals
+- Key numbers: 461 objects, 135 immutables, 41,803 bytes image after bootstrap + kernel load
+- Acid test: `3 + 4 = 7`, `true ifTrue: [42] ifFalse: [0] = 42`, `(4 * 5) + 2 = 22` all pass after save → fresh state → load
+- Tests: 42/42 passing (39 existing + 3 new targets)
+- Public API wiring (sta_vm_save_image/sta_vm_load_image) deferred to Epic 11 when STA_VM struct is fleshed out
+- **Epic 10 complete.** Image round-trip works — interpreter executes Smalltalk after loading from image.
+
 ---
 
 ## How to orient a new chat with Claude
 Paste this file plus `CLAUDE.md` at the start of the session.
-Phase 1 is in progress. Epics 1–9 are complete. Epic 10 (Image save/load) is next.
+Phase 1 is in progress. Epics 1–10 are complete. Epic 11 (Eval loop) is next.
 
-Epic ordering (actual):
+Epic ordering (actual, Epics 1–10 complete):
   1. Object memory  2. Symbols/MethodDict  3. Interpreter  4. Bootstrap
   5. Object creation (basicNew/basicNew:)  6. Object/memory prims (33–41)
-  7. Compiler  8. Exceptions  9. Kernel source loading  10. Image save/load
+  7. Compiler  8. Exceptions  9. Kernel source loading  10. Image save/load ✅
   11. Eval loop
 
 ### Deferred items from Epic 9

@@ -196,6 +196,28 @@ target_compile_definitions(test_kernel_collections PRIVATE
 target_link_libraries(test_kernel_collections PRIVATE sta_vm)
 add_test(NAME kernel_collections COMMAND test_kernel_collections)
 
+# ── Phase 1 Epic 10: Image Save/Load ────────────────────────────────────
+add_executable(test_image_format test_image_format.c)
+target_include_directories(test_image_format PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_image_format PRIVATE sta_vm)
+add_test(NAME image_format COMMAND test_image_format)
+
+add_executable(test_image_save test_image_save.c)
+target_include_directories(test_image_save PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_compile_definitions(test_image_save PRIVATE
+    KERNEL_DIR="${CMAKE_SOURCE_DIR}/kernel")
+target_link_libraries(test_image_save PRIVATE sta_vm)
+add_test(NAME image_save COMMAND test_image_save)
+
+add_executable(test_image_roundtrip test_image_roundtrip.c)
+target_include_directories(test_image_roundtrip PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_compile_definitions(test_image_roundtrip PRIVATE
+    KERNEL_DIR="${CMAKE_SOURCE_DIR}/kernel")
+target_link_libraries(test_image_roundtrip PRIVATE sta_vm)
+add_test(NAME image_roundtrip COMMAND test_image_roundtrip)
+
 # ── Spike 002: MPSC mailbox — TSan correctness gate ───────────────────────
 find_package(Threads REQUIRED)
 
