@@ -20,7 +20,7 @@ odd
     ^ self even not!
 
 gcd: anInteger
-    "Euclidean algorithm. Tail-recursive — TCO should fire."
+    "Euclidean algorithm. Not tail-recursive due to temp pattern."
     | result |
     anInteger = 0
         ifTrue: [result := self abs]

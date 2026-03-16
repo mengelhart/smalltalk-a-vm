@@ -470,7 +470,7 @@ The VM can: bootstrap from scratch, load kernel source, compile and execute Smal
   - Blue Book floor division semantics (// and \\\\) correct
   - Bit operations with sign extension correct
   - SmallInteger printString works end-to-end via C primitive (prim 200)
-  - gcd: tail recursion exercises TCO on real algorithm (46368 gcd: 28657 = 1, ~24 tail calls)
+  - gcd: Euclidean algorithm works (46368 gcd: 28657 = 1, ~24 recursive calls; not tail-recursive due to temp pattern)
   - to:do: and timesRepeat: run with real block value: dispatch under iteration
   - to:do: mutable capture limitation documented (requires Phase 2 closures)
 
