@@ -39,6 +39,8 @@ static const char *kernel_files[] = {
     "Character.st",
     "String.st",
     "ByteArray.st",
+    "Array.st",
+    "OrderedCollection.st",
 };
 
 #define KERNEL_FILE_COUNT (sizeof(kernel_files) / sizeof(kernel_files[0]))

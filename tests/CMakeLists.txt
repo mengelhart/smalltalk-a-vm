@@ -214,6 +214,15 @@ add_executable(test_batch2_integration test_batch2_integration.c)
 target_link_libraries(test_batch2_integration PRIVATE sta_vm)
 add_test(NAME batch2_integration COMMAND test_batch2_integration)
 
+# ── Phase 1.5 Batch 3: Collections ────────────────────────────────────
+add_executable(test_replace_prim test_replace_prim.c)
+target_link_libraries(test_replace_prim PRIVATE sta_vm)
+add_test(NAME replace_prim COMMAND test_replace_prim)
+
+add_executable(test_batch3_collections test_batch3_collections.c)
+target_link_libraries(test_batch3_collections PRIVATE sta_vm)
+add_test(NAME batch3_collections COMMAND test_batch3_collections)
+
 # ── Phase 1 Epic 10: Image Save/Load ────────────────────────────────────
 add_executable(test_image_format test_image_format.c)
 target_include_directories(test_image_format PRIVATE ${CMAKE_SOURCE_DIR}/src)

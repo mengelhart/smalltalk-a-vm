@@ -4,35 +4,32 @@
 
 !Collection methodsFor: 'enumerating'!
 do: aBlock
-    self subclassResponsibility
-!
-
+    self subclassResponsibility!
 collect: aBlock
-    self subclassResponsibility
-!
-
+    self subclassResponsibility!
 select: aBlock
-    self subclassResponsibility
-!
-
+    self subclassResponsibility!
 reject: aBlock
-    self subclassResponsibility
-!
-
+    self subclassResponsibility!
 detect: aBlock ifNone: noneBlock
-    self subclassResponsibility
-! !
+    self subclassResponsibility!
+inject: thisValue into: binaryBlock
+    self subclassResponsibility!
+anySatisfy: aBlock
+    self subclassResponsibility!
+allSatisfy: aBlock
+    self subclassResponsibility! !
 
 !Collection methodsFor: 'testing'!
 isEmpty
-    ^ self size = 0
-!
-
+    ^ self size = 0!
 notEmpty
-    ^ self isEmpty not
-! !
+    ^ self isEmpty not! !
 
 !Collection methodsFor: 'accessing'!
 size
-    self subclassResponsibility
-! !
+    self subclassResponsibility! !
+
+!Collection methodsFor: 'converting'!
+asArray
+    self subclassResponsibility! !

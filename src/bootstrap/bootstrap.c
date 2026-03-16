@@ -546,6 +546,7 @@ static int step7_methods(BS *bs) {
     /* ── ArrayedCollection methods ───────────────────────────────────── */
     STA_OOP ac_cls = sta_class_table_get(bs->ct, STA_CLS_ARRAYEDCOLLECTION);
     if (install_prim_method(bs, ac_cls, "size",    53, 0) != 0) return -1;
+    if (install_prim_method(bs, ac_cls, "replaceFrom:to:with:startingAt:", 54, 4) != 0) return -1;
 
     /* ── Array methods ────────────────────────────────────────────────── */
     if (install_prim_method(bs, arr_cls, "at:",     51, 1) != 0) return -1;
@@ -576,8 +577,9 @@ static int step7_methods(BS *bs) {
     }
 
     /* ── BlockClosure methods ─────────────────────────────────────────── */
-    if (install_prim_method(bs, bc_cls, "value",  81, 0) != 0) return -1;
-    if (install_prim_method(bs, bc_cls, "value:", 82, 1) != 0) return -1;
+    if (install_prim_method(bs, bc_cls, "value",       81, 0) != 0) return -1;
+    if (install_prim_method(bs, bc_cls, "value:",      82, 1) != 0) return -1;
+    if (install_prim_method(bs, bc_cls, "value:value:", 83, 2) != 0) return -1;
 
     /* ── Object >> initialize (default — returns self) ──────────────── */
     {

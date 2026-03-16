@@ -940,6 +940,69 @@ static int prim_array_size(STA_OOP *args, uint8_t nargs, STA_OOP *result) {
     return STA_PRIM_SUCCESS;
 }
 
+/* Prim 54: ArrayedCollection >> #replaceFrom:to:with:startingAt: */
+static int prim_replace(STA_OOP *args, uint8_t nargs, STA_OOP *result) {
+    (void)nargs;
+    if (STA_IS_IMMEDIATE(args[0])) return STA_PRIM_BAD_RECEIVER;
+    STA_ObjHeader *dst_h = (STA_ObjHeader *)(uintptr_t)args[0];
+    if (dst_h->obj_flags & STA_OBJ_IMMUTABLE) return STA_PRIM_BAD_RECEIVER;
+
+    if (!STA_IS_SMALLINT(args[1]) || !STA_IS_SMALLINT(args[2]) ||
+        !STA_IS_SMALLINT(args[4]))
+        return STA_PRIM_BAD_ARGUMENT;
+    if (STA_IS_IMMEDIATE(args[3])) return STA_PRIM_BAD_ARGUMENT;
+
+    intptr_t start    = STA_SMALLINT_VAL(args[1]);
+    intptr_t stop     = STA_SMALLINT_VAL(args[2]);
+    STA_ObjHeader *src_h = (STA_ObjHeader *)(uintptr_t)args[3];
+    intptr_t repStart = STA_SMALLINT_VAL(args[4]);
+
+    if (start < 1 || stop < start - 1 || repStart < 1)
+        return STA_PRIM_OUT_OF_RANGE;
+
+    intptr_t count = stop - start + 1;
+    if (count == 0) { *result = args[0]; return STA_PRIM_SUCCESS; }
+
+    STA_OOP dst_fmt = get_receiver_format(dst_h);
+    STA_OOP src_fmt = get_receiver_format(src_h);
+    if (dst_fmt == 0 || src_fmt == 0) return STA_PRIM_BAD_RECEIVER;
+
+    bool dst_bytes = sta_format_is_bytes(dst_fmt);
+    bool src_bytes = sta_format_is_bytes(src_fmt);
+
+    /* Both must be same kind. */
+    if (dst_bytes != src_bytes) return STA_PRIM_BAD_ARGUMENT;
+
+    if (dst_bytes) {
+        /* Byte-indexable path. */
+        uint8_t dst_iv = STA_FORMAT_INST_VARS(dst_fmt);
+        uint8_t src_iv = STA_FORMAT_INST_VARS(src_fmt);
+        uint32_t dst_var = dst_h->size - dst_iv;
+        uint32_t src_var = src_h->size - src_iv;
+        uint32_t dst_bc = dst_var * (uint32_t)sizeof(STA_OOP) - STA_BYTE_PADDING(dst_h);
+        uint32_t src_bc = src_var * (uint32_t)sizeof(STA_OOP) - STA_BYTE_PADDING(src_h);
+
+        if ((uint32_t)stop > dst_bc) return STA_PRIM_OUT_OF_RANGE;
+        if ((uint32_t)(repStart + count - 1) > src_bc) return STA_PRIM_OUT_OF_RANGE;
+
+        uint8_t *dst_p = (uint8_t *)&sta_payload(dst_h)[dst_iv];
+        uint8_t *src_p = (uint8_t *)&sta_payload(src_h)[src_iv];
+        memmove(&dst_p[start - 1], &src_p[repStart - 1], (size_t)count);
+    } else {
+        /* OOP-indexable path. */
+        if ((uint32_t)stop > dst_h->size) return STA_PRIM_OUT_OF_RANGE;
+        if ((uint32_t)(repStart + count - 1) > src_h->size) return STA_PRIM_OUT_OF_RANGE;
+
+        STA_OOP *dst_p = sta_payload(dst_h);
+        STA_OOP *src_p = sta_payload(src_h);
+        memmove(&dst_p[start - 1], &src_p[repStart - 1],
+                (size_t)count * sizeof(STA_OOP));
+    }
+
+    *result = args[0];
+    return STA_PRIM_SUCCESS;
+}
+
 /* ── Exception primitives (§7.8, §8.8) ─────────────────────────────────── */
 
 /* Prim 88: BlockClosure >> #on:do:
@@ -1288,6 +1351,7 @@ void sta_primitive_table_init(void) {
     sta_primitives[51] = prim_array_at;        /* #at: */
     sta_primitives[52] = prim_array_at_put;    /* #at:put: */
     sta_primitives[53] = prim_array_size;      /* #size */
+    sta_primitives[54] = prim_replace;         /* #replaceFrom:to:with:startingAt: */
 
     /* Byte-indexable access (§8.6) */
     sta_primitives[60] = prim_byte_at;         /* ByteArray >> #at: */
