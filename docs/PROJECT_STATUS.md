@@ -474,6 +474,23 @@ The VM can: bootstrap from scratch, load kernel source, compile and execute Smal
   - to:do: and timesRepeat: run with real block value: dispatch under iteration
   - to:do: mutable capture limitation documented (requires Phase 2 closures)
 
+### Phase 1.5 Batch 2: Byte-Indexable Primitives, Character, String — COMPLETE
+- Branch: phase1.5/batch-2-byte-char-string
+- New primitives: 60 (basicAt:), 61 (basicAt:put:), 62 (basicSize),
+  63 (stringAt:), 64 (stringAt:put:), 94 (Character>>value),
+  95 (Character class>>value:)
+- Closes: GitHub issue #188 (byte-aware at:/at:put:)
+- New kernel .st: Character.st, ByteArray.st
+- Expanded: String.st (concatenation, reversed, asUppercase,
+  asLowercase, copyFrom:to:, includes:, =, <, printString)
+- Tests: test_byte_prims (15 tests), test_batch2_integration (25 tests)
+- Key validations:
+  - Byte-indexable at:/at:put: works end-to-end
+  - Character immediates extract and create correctly
+  - String concatenation allocates new byte-indexable objects
+  - Polymorphic at: (Array→OOP, String→Character, ByteArray→SmallInt)
+  - Polymorphic printString across SmallInteger/String/Character/ByteArray
+
 ---
 
 ## Current phase

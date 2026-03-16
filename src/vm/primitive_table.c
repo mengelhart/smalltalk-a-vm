@@ -311,6 +311,134 @@ static int prim_smallint_printstring(STA_OOP *args, uint8_t nargs, STA_OOP *resu
     return STA_PRIM_SUCCESS;
 }
 
+/* Forward declaration — defined later in this file. */
+static STA_OOP get_receiver_format(STA_ObjHeader *h);
+
+/* ── Byte-indexable primitives ──────────────────────────────────────────── */
+
+/* Helper: compute byte pointer and byte count for a byte-indexable object. */
+static int byte_access_setup(STA_OOP receiver, uint8_t **out_bytes,
+                              uint32_t *out_byte_count) {
+    if (STA_IS_IMMEDIATE(receiver)) return STA_PRIM_BAD_RECEIVER;
+    STA_ObjHeader *h = (STA_ObjHeader *)(uintptr_t)receiver;
+    STA_OOP fmt = get_receiver_format(h);
+    if (fmt == 0) return STA_PRIM_BAD_RECEIVER;
+    if (!sta_format_is_bytes(fmt)) return STA_PRIM_BAD_RECEIVER;
+
+    uint8_t inst_vars = STA_FORMAT_INST_VARS(fmt);
+    uint32_t var_words = h->size - inst_vars;
+    uint32_t byte_count = var_words * (uint32_t)sizeof(STA_OOP)
+                          - STA_BYTE_PADDING(h);
+    *out_bytes = (uint8_t *)&sta_payload(h)[inst_vars];
+    *out_byte_count = byte_count;
+    return STA_PRIM_SUCCESS;
+}
+
+/* Prim 60: ByteArray >> #at: (byte access — returns SmallInteger 0-255) */
+static int prim_byte_at(STA_OOP *args, uint8_t nargs, STA_OOP *result) {
+    (void)nargs;
+    uint8_t *bytes; uint32_t byte_count;
+    int rc = byte_access_setup(args[0], &bytes, &byte_count);
+    if (rc != STA_PRIM_SUCCESS) return rc;
+    if (!STA_IS_SMALLINT(args[1])) return STA_PRIM_BAD_ARGUMENT;
+    intptr_t idx = STA_SMALLINT_VAL(args[1]);
+    if (idx < 1 || (uint32_t)idx > byte_count) return STA_PRIM_OUT_OF_RANGE;
+    *result = STA_SMALLINT_OOP(bytes[idx - 1]);
+    return STA_PRIM_SUCCESS;
+}
+
+/* Prim 61: ByteArray >> #at:put: (byte store — value must be 0-255) */
+static int prim_byte_at_put(STA_OOP *args, uint8_t nargs, STA_OOP *result) {
+    (void)nargs;
+    STA_ObjHeader *h = (STA_ObjHeader *)(uintptr_t)args[0];
+    if (STA_IS_IMMEDIATE(args[0])) return STA_PRIM_BAD_RECEIVER;
+    if (h->obj_flags & STA_OBJ_IMMUTABLE) return STA_PRIM_BAD_RECEIVER;
+    uint8_t *bytes; uint32_t byte_count;
+    int rc = byte_access_setup(args[0], &bytes, &byte_count);
+    if (rc != STA_PRIM_SUCCESS) return rc;
+    if (!STA_IS_SMALLINT(args[1])) return STA_PRIM_BAD_ARGUMENT;
+    if (!STA_IS_SMALLINT(args[2])) return STA_PRIM_BAD_ARGUMENT;
+    intptr_t idx = STA_SMALLINT_VAL(args[1]);
+    intptr_t val = STA_SMALLINT_VAL(args[2]);
+    if (idx < 1 || (uint32_t)idx > byte_count) return STA_PRIM_OUT_OF_RANGE;
+    if (val < 0 || val > 255) return STA_PRIM_OUT_OF_RANGE;
+    bytes[idx - 1] = (uint8_t)val;
+    *result = args[2];
+    return STA_PRIM_SUCCESS;
+}
+
+/* Prim 62: ByteArray >> #basicSize (byte count) */
+static int prim_byte_size(STA_OOP *args, uint8_t nargs, STA_OOP *result) {
+    (void)nargs;
+    uint8_t *bytes; uint32_t byte_count;
+    int rc = byte_access_setup(args[0], &bytes, &byte_count);
+    if (rc != STA_PRIM_SUCCESS) return rc;
+    *result = STA_SMALLINT_OOP((intptr_t)byte_count);
+    return STA_PRIM_SUCCESS;
+}
+
+/* Prim 63: String >> #at: (returns Character) */
+static int prim_string_at(STA_OOP *args, uint8_t nargs, STA_OOP *result) {
+    (void)nargs;
+    uint8_t *bytes; uint32_t byte_count;
+    int rc = byte_access_setup(args[0], &bytes, &byte_count);
+    if (rc != STA_PRIM_SUCCESS) return rc;
+    if (!STA_IS_SMALLINT(args[1])) return STA_PRIM_BAD_ARGUMENT;
+    intptr_t idx = STA_SMALLINT_VAL(args[1]);
+    if (idx < 1 || (uint32_t)idx > byte_count) return STA_PRIM_OUT_OF_RANGE;
+    *result = STA_CHAR_OOP(bytes[idx - 1]);
+    return STA_PRIM_SUCCESS;
+}
+
+/* Prim 64: String >> #at:put: (takes Character) */
+static int prim_string_at_put(STA_OOP *args, uint8_t nargs, STA_OOP *result) {
+    (void)nargs;
+    if (STA_IS_IMMEDIATE(args[0])) return STA_PRIM_BAD_RECEIVER;
+    STA_ObjHeader *h = (STA_ObjHeader *)(uintptr_t)args[0];
+    if (h->obj_flags & STA_OBJ_IMMUTABLE) return STA_PRIM_BAD_RECEIVER;
+    uint8_t *bytes; uint32_t byte_count;
+    int rc = byte_access_setup(args[0], &bytes, &byte_count);
+    if (rc != STA_PRIM_SUCCESS) return rc;
+    if (!STA_IS_SMALLINT(args[1])) return STA_PRIM_BAD_ARGUMENT;
+    if (!STA_IS_CHAR(args[2])) return STA_PRIM_BAD_ARGUMENT;
+    intptr_t idx = STA_SMALLINT_VAL(args[1]);
+    uint32_t cp = STA_CHAR_VAL(args[2]);
+    if (idx < 1 || (uint32_t)idx > byte_count) return STA_PRIM_OUT_OF_RANGE;
+    if (cp > 255) return STA_PRIM_OUT_OF_RANGE;
+    bytes[idx - 1] = (uint8_t)cp;
+    *result = args[2];
+    return STA_PRIM_SUCCESS;
+}
+
+/* ── Character primitives ──────────────────────────────────────────────── */
+
+/* Prim 94: Character >> #value (extract code point) */
+static int prim_char_value(STA_OOP *args, uint8_t nargs, STA_OOP *result) {
+    (void)nargs;
+    if (!STA_IS_CHAR(args[0])) return STA_PRIM_BAD_RECEIVER;
+    *result = STA_SMALLINT_OOP((intptr_t)STA_CHAR_VAL(args[0]));
+    return STA_PRIM_SUCCESS;
+}
+
+/* Prim 95: Character class >> #value: (create Character from code point) */
+static int prim_char_for(STA_OOP *args, uint8_t nargs, STA_OOP *result) {
+    (void)nargs;
+    if (!STA_IS_SMALLINT(args[1])) return STA_PRIM_BAD_ARGUMENT;
+    intptr_t cp = STA_SMALLINT_VAL(args[1]);
+    if (cp < 0) return STA_PRIM_OUT_OF_RANGE;
+    if (cp <= 255) {
+        /* Use canonical Characters from the character table. */
+        STA_OOP table = sta_spc_get(SPC_CHARACTER_TABLE);
+        if (table != 0) {
+            STA_ObjHeader *arr_h = (STA_ObjHeader *)(uintptr_t)table;
+            *result = sta_payload(arr_h)[cp];
+            return STA_PRIM_SUCCESS;
+        }
+    }
+    *result = STA_CHAR_OOP((uint32_t)cp);
+    return STA_PRIM_SUCCESS;
+}
+
 /* ── Object primitives ─────────────────────────────────────────────────── */
 
 /* Prim 29: Object >> #== (identity) */
@@ -1160,6 +1288,17 @@ void sta_primitive_table_init(void) {
     sta_primitives[51] = prim_array_at;        /* #at: */
     sta_primitives[52] = prim_array_at_put;    /* #at:put: */
     sta_primitives[53] = prim_array_size;      /* #size */
+
+    /* Byte-indexable access (§8.6) */
+    sta_primitives[60] = prim_byte_at;         /* ByteArray >> #at: */
+    sta_primitives[61] = prim_byte_at_put;     /* ByteArray >> #at:put: */
+    sta_primitives[62] = prim_byte_size;       /* ByteArray >> #basicSize */
+    sta_primitives[63] = prim_string_at;       /* String >> #at: */
+    sta_primitives[64] = prim_string_at_put;   /* String >> #at:put: */
+
+    /* Character (§8.7) */
+    sta_primitives[94] = prim_char_value;      /* Character >> #value */
+    sta_primitives[95] = prim_char_for;        /* Character class >> #value: */
 
     /* Exception handling (§7.8, §8.8) */
     sta_primitives[88]  = prim_on_do;          /* BlockClosure >> #on:do: */
