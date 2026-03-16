@@ -320,7 +320,7 @@ docs/decisions/           ← ADRs 001-014
 docs/spikes/              ← spike-001 through spike-007
 ```
 
-### Epic 9: Kernel Source Loading — IN PROGRESS (Sessions 1-3 complete)
+### Epic 9: Kernel Source Loading — COMPLETE
 - GitHub: Epic #169
 - Stories 1-2 (session 1): Class creation primitive (prim 122), chunk format reader
   - Branch: phase1/epic-9a-filein-infra (merged)
@@ -356,20 +356,48 @@ docs/spikes/              ← spike-001 through spike-007
     - `tests/CMakeLists.txt` — test_kernel_magnitude target
   - Bug fix (task/fix-nested-send-dnu): sta_frame_push was allocating new frames at slab->top, but the caller's expression stack extends above slab->top to slab->sp; non-primitive sends with pending expression stack values (e.g. receiver for a binary send) corrupted those values. Fix: advance slab->top to slab->sp before allocating the new frame.
   - Skipped (by design): Integer.st (no Integer class in bootstrap), //, \\ (no prims), to:do:/timesRepeat: (mutable closures), reciprocal (no / prim), gcd: (needs \\)
-- Tests: 42/42 passing (38 existing + 4 new factorial/nested-send tests)
-- Session 5 next: Collection family, String, Stream, Exception extensions, then integration
+- Stories 8-12 (session 5): whileTrue: verification, Collection family, String, integration
+  - Branch: phase1/epic-9e-kernel-source-3
+  - Story 8: Confirmed whileTrue: inlining allows outer temp access — both condition/body blocks compile inline via emit_block_body_inline(), so temp references resolve as normal OP_PUSH_TEMP/OP_POP_STORE_TEMP
+  - Story 9: Collection family kernel .st files
+    - New files:
+      - `kernel/Collection.st` — do:, collect:, select:, reject:, detect:ifNone: (all subclassResponsibility), isEmpty, notEmpty
+      - `kernel/SequenceableCollection.st` — do:, collect:, select:, reject:, detect:ifNone: (whileTrue:-based iteration), includes:, first, last
+      - `kernel/ArrayedCollection.st` — (empty, placeholder for hierarchy)
+    - Modified files:
+      - `src/bootstrap/bootstrap.c` — size (prim 53) moved from Array to ArrayedCollection; Symbol format instvar_count 0→1 (hash slot)
+      - `src/vm/primitive_table.c` — prim 53 now byte-aware: checks sta_format_is_bytes() and computes (h->size - instVars) * 8 - padding
+      - `src/vm/symbol_table.c` — alloc_symbol sets byte padding in h->reserved for correct size computation
+      - `src/bootstrap/kernel_load.c` — added Collection, SequenceableCollection, ArrayedCollection, String to load order
+    - Clean-block limitation: blocks passed to do:/collect:/select: etc. can only use their own args + literals. Mutable outer temp capture requires Phase 2 closures. collect:, select:, reject:, detect:ifNone: all work (blocks are pure functions of their arg).
+  - Story 10: String kernel source
+    - New: `kernel/String.st` — printString (minimal; byte-aware at:/at:put: primitives deferred)
+    - String size works via prim 53 byte-aware path + ArrayedCollection inheritance
+  - Story 11: Streams — deferred (ReadStream/WriteStream not in bootstrap class hierarchy)
+  - Story 12: Integration tests — 28 new tests, all passing
+    - New: `tests/test_kernel_collections.c` — whileTrue: inlining (2), Collection/Array (14), String (5), integration smoke (7)
+  - Modified: `tests/test_format.c` — Symbol instvar_count updated 0→1
+- Tests: 39/39 passing (38 existing + 1 new test_kernel_collections target)
+- **Epic 9 complete.** 12 kernel .st files, 39 CTest targets.
 
 ---
 
 ## How to orient a new chat with Claude
 Paste this file plus `CLAUDE.md` at the start of the session.
-Phase 1 is in progress. Epics 1–8 are complete. Epic 9 is in progress (Stories 1-7 done, session 5 remains for Collection/String/Stream kernel .st files).
+Phase 1 is in progress. Epics 1–9 are complete. Epic 10 (Image save/load) is next.
 
 Epic ordering (actual):
   1. Object memory  2. Symbols/MethodDict  3. Interpreter  4. Bootstrap
   5. Object creation (basicNew/basicNew:)  6. Object/memory prims (33–41)
   7. Compiler  8. Exceptions  9. Kernel source loading  10. Image save/load
   11. Eval loop
+
+### Deferred items from Epic 9
+- **Byte-aware at:/at:put: for String/ByteArray** — prim 51/52 read OOP slots, not bytes. Need dedicated byte-indexable primitives. Tracked as standalone Phase 1 task.
+- **Stream classes (ReadStream, WriteStream)** — not in bootstrap; require file-in class creation or bootstrap addition. Deferred to future session.
+- **OrderedCollection** — needs instance variable tracking and grow-on-add semantics. Deferred.
+- **do: with mutable-capture blocks** — requires Phase 2 closure support. collect:/select:/reject:/detect:ifNone: work with clean blocks (pure functions of their arg).
+
 For Phase 1 work: paste `CLAUDE.md` + this file + the relevant ADRs for the
 component being built (ADR 007 for object memory, ADR 008 for mailbox,
 ADR 009 for scheduler, ADR 010 for frames, ADR 013 for public API).
