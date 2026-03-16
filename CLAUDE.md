@@ -42,6 +42,7 @@ Phase 0 spikes are complete — all spike code in `src/` is exploratory referenc
 - Language: standard Smalltalk — Blue Book is the authoritative reference
 
 ## Build
+Always run these as TWO SEPARATE bash commands, never combined:
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Debug && cmake --build build
 cd build && ctest --output-on-failure
