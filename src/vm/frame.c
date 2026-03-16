@@ -43,7 +43,12 @@ STA_Frame *sta_frame_push(STA_StackSlab *slab, STA_OOP method,
     uint16_t local_count = (num_temps > nargs) ? (uint16_t)(num_temps - nargs) : 0;
     uint32_t total_slots = (uint32_t)nargs + (uint32_t)local_count;
 
-    /* Check space: frame struct + slots. */
+    /* Check space: frame struct + slots.
+     * The caller's expression stack may extend past slab->top (between top
+     * and sp).  Start the new frame after it so we don't clobber those values. */
+    if (slab->sp > slab->top)
+        slab->top = slab->sp;
+
     size_t frame_bytes = sizeof(STA_Frame) + total_slots * sizeof(STA_OOP);
     if (slab->top + frame_bytes > slab->end) return NULL;
 
