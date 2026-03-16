@@ -343,14 +343,27 @@ docs/spikes/              ← spike-001 through spike-007
     - `tests/test_smoke_filein.c` — 2 new eval-path tests (eval-path DNU bug resolved)
   - Story 5: Eval-path DNU bug from session 2 resolved (was already fixed in prior work)
   - Story 6: Boolean.st skipped (Boolean class not in bootstrap; not/&/| added directly to True/False)
-- Tests: 37/37 passing
-- Session 4 next: Magnitude, Number, Integer, SmallInteger, Association, then Collection family
+- Story 7 (session 4): Magnitude, Number, SmallInteger, Association kernel .st files
+  - Branch: phase1/epic-9d-kernel-source-2
+  - New files:
+    - `kernel/Magnitude.st` — >=, <=, max:, min:, between:and:
+    - `kernel/Number.st` — isZero, positive, negative, negated, abs, sign
+    - `kernel/SmallInteger.st` — placeholder (factorial deferred)
+    - `kernel/Association.st` — key, value, key:, value:, key:value:
+    - `tests/test_kernel_magnitude.c` — 21 tests for Magnitude/Number/Association
+  - Modified files:
+    - `src/bootstrap/kernel_load.c` — shared FileInContext with pre-registered bootstrap class ivars; added Magnitude, Number, Association to load order
+    - `tests/CMakeLists.txt` — test_kernel_magnitude target
+  - Deferred: SmallInteger>>factorial — nested recursive send inside binary expression triggers DNU (e.g. `1 * (0 factorial)`); individual pieces work but combination crashes. Likely interpreter expression stack issue during return from recursive call within binary send argument. Needs investigation.
+  - Skipped (by design): Integer.st (no Integer class in bootstrap), //, \\ (no prims), to:do:/timesRepeat: (mutable closures), reciprocal (no / prim), gcd: (needs \\)
+- Tests: 38/38 passing
+- Session 5 next: Collection family, String, Stream, Exception extensions, then integration
 
 ---
 
 ## How to orient a new chat with Claude
 Paste this file plus `CLAUDE.md` at the start of the session.
-Phase 1 is in progress. Epics 1–8 are complete. Epic 9 is in progress (Stories 1-6 done, sessions 4-5 remain for more kernel .st files).
+Phase 1 is in progress. Epics 1–8 are complete. Epic 9 is in progress (Stories 1-7 done, session 5 remains for Collection/String/Stream kernel .st files).
 
 Epic ordering (actual):
   1. Object memory  2. Symbols/MethodDict  3. Interpreter  4. Bootstrap
