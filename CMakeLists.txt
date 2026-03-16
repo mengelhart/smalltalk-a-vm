@@ -46,6 +46,10 @@ target_compile_options(sta_vm PRIVATE
     -Wno-unused-parameter
 )
 
+target_compile_definitions(sta_vm PRIVATE
+    KERNEL_DIR="${CMAKE_SOURCE_DIR}/kernel"
+)
+
 option(STA_USE_LIBUV "Enable libuv async I/O (required for Spike 005)" OFF)
 if(STA_USE_LIBUV)
     # Homebrew libuv ships a CMake config; add Homebrew prefix so find_package

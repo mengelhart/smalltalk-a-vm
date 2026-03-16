@@ -218,6 +218,19 @@ target_compile_definitions(test_image_roundtrip PRIVATE
 target_link_libraries(test_image_roundtrip PRIVATE sta_vm)
 add_test(NAME image_roundtrip COMMAND test_image_roundtrip)
 
+# ── Phase 1 Epic 11: VM Lifecycle ─────────────────────────────────────
+add_executable(test_vm_lifecycle test_vm_lifecycle.c)
+target_include_directories(test_vm_lifecycle PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_compile_definitions(test_vm_lifecycle PRIVATE
+    KERNEL_DIR="${CMAKE_SOURCE_DIR}/kernel")
+target_link_libraries(test_vm_lifecycle PRIVATE sta_vm)
+add_test(NAME vm_lifecycle COMMAND test_vm_lifecycle)
+
+add_executable(test_capstone test_capstone.c)
+target_link_libraries(test_capstone PRIVATE sta_vm)
+add_test(NAME capstone COMMAND test_capstone)
+
 # ── Spike 002: MPSC mailbox — TSan correctness gate ───────────────────────
 find_package(Threads REQUIRED)
 

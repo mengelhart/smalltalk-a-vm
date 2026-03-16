@@ -9,8 +9,8 @@ Hard rules and toolchain: `CLAUDE.md`
 ---
 
 ## Current phase
-**Phase 1 — Minimal Live Kernel**
-Object memory, interpreter, bootstrap, image save/load.
+**Phase 2 — Actor Runtime and Headless**
+Phase 1 (Minimal Live Kernel) complete. Now: scheduler, supervision, async I/O, headless lifecycle.
 
 ---
 
@@ -415,24 +415,71 @@ docs/spikes/              ← spike-001 through spike-007
 - Public API wiring (sta_vm_save_image/sta_vm_load_image) deferred to Epic 11 when STA_VM struct is fleshed out
 - **Epic 10 complete.** Image round-trip works — interpreter executes Smalltalk after loading from image.
 
+### Epic 11: Eval Loop, Public API, and Phase 1 Capstone — COMPLETE
+- GitHub: Epic #197, stories #198–#206 (all closed)
+- Branch: `phase1/epic-11-eval-loop`
+- New files:
+  - `src/vm/vm_internal.h` — Private STA_VM struct definition (heap, immutable_space, symbol_table, class_table, stack_slab, last_error, inspect_buffer, config, state flags). Audit of global state documented in header comment.
+  - `tests/test_vm_lifecycle.c` — 6 tests: bootstrap create, image round-trip, NULL config, double destroy, last error, kernel methods
+  - `tests/test_capstone.c` — 20 capstone tests through public API only: arithmetic (5), boolean (5), blocks (2), collections (2), identity (3), exceptions (1), error cases (1), image round-trip (1)
+- Modified files:
+  - `src/vm/vm.c` — Full implementations: sta_vm_create() with load-or-bootstrap pipeline, sta_vm_destroy() with reverse-order teardown, sta_vm_last_error() with per-VM and static fallback, sta_vm_save_image/load_image through STA_VM struct, sta_vm_load_source with legacy NULL-vm path
+  - `src/vm/eval.c` — sta_eval() (compile expression + interpret + return handle), sta_inspect_cstring() (C-level formatter for SmallInt, nil, true, false, Symbol, String, Array, generic objects)
+  - `examples/embed_basic/main.c` — Real working example: create VM, eval "3+4", "true ifTrue:[42]", "10 factorial", inspect results, destroy
+  - `CMakeLists.txt` — KERNEL_DIR compile definition on sta_vm library target
+  - `tests/CMakeLists.txt` — test_vm_lifecycle and test_capstone targets
+- Handle model (Phase 1): STA_Handle* is raw STA_OOP cast to pointer. sta_handle_retain/release are no-ops. Phase 2 will introduce real handle table per ADR 013.
+- Global state audit: 9 globals identified (special_objects, primitives, handler). Single VM instance at a time for Phase 1. Phase 2 will move to per-instance state.
+- Tests: 44/44 passing (42 existing + 2 new targets)
+- embed_basic output: `3 + 4 = 7`, `true ifTrue: [42] ifFalse: [0] = 42`, `10 factorial = 3628800`
+- **Epic 11 complete. Phase 1 — Minimal Live Kernel is DONE.**
+
+---
+
+## Phase 1 summary
+
+**Phase 1 — Minimal Live Kernel: COMPLETE** (2026-03-16)
+
+11 epics, 44 CTest targets, 7 architectural spikes, 14 ADRs.
+
+Key milestones:
+- Epic 3: "3 + 4 = 7" through full send/dispatch/primitive path
+- Epic 4: Bootstrapped Smalltalk object system with metaclass circularity
+- Epic 7: Smalltalk source compiles to bytecode and executes
+- Epic 8: Full exception handling (on:do:, signal, ensure:, doesNotUnderstand:)
+- Epic 9: 12 kernel .st files loaded, kernel methods work
+- Epic 10: Image save/load round-trip — interpreter works after loading from image
+- Epic 11: Public API complete — sta_vm_create/destroy/eval/inspect_cstring/save_image/load_image all wired
+
+The VM can: bootstrap from scratch, load kernel source, compile and execute Smalltalk expressions, save and load images, and expose all functionality through a clean C public API (`include/sta/vm.h`).
+
+---
+
+## Current phase
+**Phase 2 — Actor Runtime and Headless**
+Scheduler, supervision, async I/O, headless lifecycle.
+
 ---
 
 ## How to orient a new chat with Claude
 Paste this file plus `CLAUDE.md` at the start of the session.
-Phase 1 is in progress. Epics 1–10 are complete. Epic 11 (Eval loop) is next.
+Phase 1 is complete. Phase 2 (Actor Runtime and Headless) is next.
 
-Epic ordering (actual, Epics 1–10 complete):
+Epic ordering (actual, all 11 complete):
   1. Object memory  2. Symbols/MethodDict  3. Interpreter  4. Bootstrap
   5. Object creation (basicNew/basicNew:)  6. Object/memory prims (33–41)
-  7. Compiler  8. Exceptions  9. Kernel source loading  10. Image save/load ✅
-  11. Eval loop
+  7. Compiler  8. Exceptions  9. Kernel source loading  10. Image save/load
+  11. Eval loop + public API + capstone ✅
 
-### Deferred items from Epic 9
-- **Byte-aware at:/at:put: for String/ByteArray** — prim 51/52 read OOP slots, not bytes. Need dedicated byte-indexable primitives. Tracked as standalone Phase 1 task.
-- **Stream classes (ReadStream, WriteStream)** — not in bootstrap; require file-in class creation or bootstrap addition. Deferred to future session.
-- **OrderedCollection** — needs instance variable tracking and grow-on-add semantics. Deferred.
+### Deferred items from Phase 1
+- **Byte-aware at:/at:put: for String/ByteArray** — prim 51/52 read OOP slots, not bytes. Need dedicated byte-indexable primitives.
+- **Stream classes (ReadStream, WriteStream)** — not in bootstrap; require file-in class creation or bootstrap addition.
+- **OrderedCollection** — needs instance variable tracking and grow-on-add semantics.
 - **do: with mutable-capture blocks** — requires Phase 2 closure support. collect:/select:/reject:/detect:ifNone: work with clean blocks (pure functions of their arg).
+- **ensure: during exception unwinding** — longjmp bypasses ensure: blocks. Phase 2 will fix this.
+- **Real handle table** — Phase 1 uses raw OOP cast. Phase 2 will implement ADR 013 handle lifecycle.
+- **Per-instance state** — 9 globals prevent multiple VM instances. Phase 2 will move to per-instance state for actor runtime.
 
-For Phase 1 work: paste `CLAUDE.md` + this file + the relevant ADRs for the
-component being built (ADR 007 for object memory, ADR 008 for mailbox,
-ADR 009 for scheduler, ADR 010 for frames, ADR 013 for public API).
+For Phase 2 work: paste `CLAUDE.md` + this file + the relevant ADRs for the
+component being built (ADR 008 for mailbox, ADR 009 for scheduler,
+ADR 010 for frames, ADR 011 for async I/O, ADR 013 for public API).
