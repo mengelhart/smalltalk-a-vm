@@ -492,8 +492,8 @@ The VM can: bootstrap from scratch, load kernel source, compile and execute Smal
   - Polymorphic printString across SmallInteger/String/Character/ByteArray
 
 ### Phase 1.5 Batch 3: Collection Completion — COMPLETE
-- Branch: phase1.5/batch-3-collections
-- New primitives: 54 (replaceFrom:to:with:startingAt:), 83 (value:value:)
+- Branch: phase1.5/batch-3-collections (merged to main)
+- New primitives: 54 (replaceFrom:to:with:startingAt: — OOP + byte paths, memmove overlap safety), 83 (value:value: for 2-arg blocks)
 - New kernel .st: OrderedCollection.st, Array.st
 - Expanded: Collection.st (inject:into:, anySatisfy:, allSatisfy:, asArray stubs),
   SequenceableCollection.st (inject:into:, anySatisfy:, allSatisfy:, reverseDo:,
