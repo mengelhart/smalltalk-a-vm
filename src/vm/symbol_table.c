@@ -118,12 +118,18 @@ static int table_grow(STA_SymbolTable *st) {
  * Layout: slot 0 = hash, slots 1+ = packed UTF-8 bytes (NUL-terminated). */
 static STA_OOP alloc_symbol(STA_ImmutableSpace *sp,
                             const char *utf8, size_t len, uint32_t hash) {
-    /* Number of 8-byte words needed for bytes + NUL terminator. */
-    uint32_t byte_words = (uint32_t)((len + 1 + 7) / 8);
+    /* Number of 8-byte words needed for bytes + NUL terminator.
+     * For empty symbols (len=0), allocate 0 byte words so that
+     * byte-aware size (prim 53) correctly returns 0. */
+    uint32_t byte_words = (len == 0) ? 0 : (uint32_t)((len + 1 + 7) / 8);
     uint32_t nwords     = 1 + byte_words;   /* slot 0 = hash */
 
     STA_ObjHeader *h = sta_immutable_alloc(sp, STA_CLS_SYMBOL, nwords);
     if (!h) return 0;
+
+    /* Set byte padding so size primitive returns the character count.
+     * padding = (byte_words * 8) - len. */
+    h->reserved = (uint16_t)((byte_words * 8 - len) & STA_BYTE_PADDING_MASK);
 
     STA_OOP *payload = sta_payload(h);
 

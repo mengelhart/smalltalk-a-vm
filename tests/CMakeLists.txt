@@ -188,6 +188,14 @@ target_compile_definitions(test_kernel_magnitude PRIVATE
 target_link_libraries(test_kernel_magnitude PRIVATE sta_vm)
 add_test(NAME kernel_magnitude COMMAND test_kernel_magnitude)
 
+add_executable(test_kernel_collections test_kernel_collections.c)
+target_include_directories(test_kernel_collections PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_compile_definitions(test_kernel_collections PRIVATE
+    KERNEL_DIR="${CMAKE_SOURCE_DIR}/kernel")
+target_link_libraries(test_kernel_collections PRIVATE sta_vm)
+add_test(NAME kernel_collections COMMAND test_kernel_collections)
+
 # ── Spike 002: MPSC mailbox — TSan correctness gate ───────────────────────
 find_package(Threads REQUIRED)
 

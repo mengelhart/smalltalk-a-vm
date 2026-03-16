@@ -19,7 +19,11 @@
  * UndefinedObject next (overrides Object>>isNil etc.).
  * Magnitude before Number (Number inherits Magnitude comparisons).
  * Number before SmallInteger (SmallInteger inherits Number arithmetic).
- * Association last (standalone, no dependencies beyond Object). */
+ * Association standalone (no deps beyond Object).
+ * Collection before SequenceableCollection (abstract iteration protocol).
+ * SequenceableCollection before ArrayedCollection (index-based iteration).
+ * ArrayedCollection before Array/String (concrete indexed collections).
+ * String last in collection family (inherits size from ArrayedCollection). */
 static const char *kernel_files[] = {
     "Object.st",
     "True.st",
@@ -29,6 +33,10 @@ static const char *kernel_files[] = {
     "Number.st",
     "SmallInteger.st",
     "Association.st",
+    "Collection.st",
+    "SequenceableCollection.st",
+    "ArrayedCollection.st",
+    "String.st",
 };
 
 #define KERNEL_FILE_COUNT (sizeof(kernel_files) / sizeof(kernel_files[0]))

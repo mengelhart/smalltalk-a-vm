@@ -72,7 +72,7 @@ static const FormatExpectation expectations[] = {
     { STA_CLS_ARRAYEDCOLLECTION,   "ArrayedCollection",      0, true,  false, true  },
     { STA_CLS_ARRAY,               "Array",                  0, true,  false, true  },
     { STA_CLS_STRING,              "String",                 0, true,  true,  true  },
-    { STA_CLS_SYMBOL,              "Symbol",                 0, true,  true,  true  },
+    { STA_CLS_SYMBOL,              "Symbol",                 1, true,  true,  true  },
     { STA_CLS_BYTEARRAY,           "ByteArray",              0, true,  true,  true  },
 
     /* Singleton classes */

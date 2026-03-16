@@ -325,7 +325,7 @@ static int step4_tier1(BS *bs) {
     STA_OOP arrcoll    = create_class(bs, "ArrayedCollection", seqcoll, STA_CLS_ARRAYEDCOLLECTION, 0, STA_FMT_VARIABLE_OOP);
     STA_OOP array      = create_class(bs, "Array", arrcoll, STA_CLS_ARRAY, 0, STA_FMT_VARIABLE_OOP);
     STA_OOP string     = create_class(bs, "String", arrcoll, STA_CLS_STRING, 0, STA_FMT_VARIABLE_BYTE);
-    STA_OOP symbol     = create_class(bs, "Symbol", string, STA_CLS_SYMBOL, 0, STA_FMT_VARIABLE_BYTE);
+    STA_OOP symbol     = create_class(bs, "Symbol", string, STA_CLS_SYMBOL, 1, STA_FMT_VARIABLE_BYTE);
     STA_OOP bytearray  = create_class(bs, "ByteArray", arrcoll, STA_CLS_BYTEARRAY, 0, STA_FMT_VARIABLE_BYTE);
     (void)array; (void)symbol; (void)bytearray;
 
@@ -531,10 +531,13 @@ static int step7_methods(BS *bs) {
     if (install_prim_method(bs, si_cls, "=", 7, 1) != 0) return -1;
     if (install_prim_method(bs, si_cls, "*", 9, 1) != 0) return -1;
 
+    /* ── ArrayedCollection methods ───────────────────────────────────── */
+    STA_OOP ac_cls = sta_class_table_get(bs->ct, STA_CLS_ARRAYEDCOLLECTION);
+    if (install_prim_method(bs, ac_cls, "size",    53, 0) != 0) return -1;
+
     /* ── Array methods ────────────────────────────────────────────────── */
     if (install_prim_method(bs, arr_cls, "at:",     51, 1) != 0) return -1;
     if (install_prim_method(bs, arr_cls, "at:put:", 52, 2) != 0) return -1;
-    if (install_prim_method(bs, arr_cls, "size",    53, 0) != 0) return -1;
 
     /* ── BlockClosure methods ─────────────────────────────────────────── */
     if (install_prim_method(bs, bc_cls, "value",  81, 0) != 0) return -1;

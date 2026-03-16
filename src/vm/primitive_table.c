@@ -618,12 +618,25 @@ static int prim_array_at_put(STA_OOP *args, uint8_t nargs, STA_OOP *result) {
     return STA_PRIM_SUCCESS;
 }
 
-/* Prim 53: Array >> #size */
+/* Prim 53: ArrayedCollection >> #size
+ * For OOP-indexable objects (Array): returns h->size (slot count).
+ * For byte-indexable objects (String, ByteArray, Symbol):
+ *   returns (h->size - instVarCount) * 8 - padding (byte count). */
 static int prim_array_size(STA_OOP *args, uint8_t nargs, STA_OOP *result) {
     (void)nargs;
     if (STA_IS_IMMEDIATE(args[0])) return STA_PRIM_BAD_RECEIVER;
     STA_ObjHeader *h = (STA_ObjHeader *)(uintptr_t)args[0];
-    *result = STA_SMALLINT_OOP((intptr_t)h->size);
+
+    STA_OOP fmt = get_receiver_format(h);
+    if (fmt != 0 && sta_format_is_bytes(fmt)) {
+        uint8_t inst_vars = STA_FORMAT_INST_VARS(fmt);
+        uint32_t byte_slots = h->size - inst_vars;
+        uint32_t padding = STA_BYTE_PADDING(h);
+        uint32_t byte_count = byte_slots * 8 - padding;
+        *result = STA_SMALLINT_OOP((intptr_t)byte_count);
+    } else {
+        *result = STA_SMALLINT_OOP((intptr_t)h->size);
+    }
     return STA_PRIM_SUCCESS;
 }
 
