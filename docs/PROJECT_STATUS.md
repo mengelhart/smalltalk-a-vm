@@ -307,6 +307,9 @@ src/bridge/               ← bridge_spike.h, bridge_spike.c (Spike 007 complete
 src/bootstrap/            ← one-time kernel bootstrap + file-in reader
   bootstrap.h/c               ← kernel bootstrap (Epics 4/5/8) (production)
   filein.h/c                  ← chunk-format file-in reader (Epic 9) (scaffolding)
+  kernel_load.h/c             ← dependency-ordered .st file loader (Epic 9) (scaffolding)
+kernel/                   ← Smalltalk kernel source files (.st chunk format)
+  Object.st, True.st, False.st, UndefinedObject.st
 src/compiler/             ← scanner, parser, AST, codegen (Epic 7)
   scanner.h/c                 ← pull-model lexer for method source (production)
   ast.h, ast.c                ← AST node types and recursive free (production)
@@ -317,30 +320,37 @@ docs/decisions/           ← ADRs 001-014
 docs/spikes/              ← spike-001 through spike-007
 ```
 
-### Epic 9: Kernel Source Loading — IN PROGRESS (Session 1/4: Stories 1-2)
-- GitHub: Epic #169, stories #170, #171 (closed), #172, #173 (open)
-- Branch: phase1/epic-9a-filein-infra
-- New files:
-  - `src/bootstrap/filein.h`, `src/bootstrap/filein.c` — Chunk format reader
-    (Phase 1 C scaffolding; will be replaced by Smalltalk implementation)
-  - `tests/fixtures/simple.st`, `tests/fixtures/escaped.st` — Test .st files
-  - `tests/test_class_creation.c` — 8 tests for class creation primitive
-  - `tests/test_filein.c` — 3 tests for chunk format reader
-- Modified files:
-  - `src/vm/primitive_table.h/c` — Added prim 122 (subclass:instanceVariableNames:
-    classVariableNames:poolDictionaries:category:), symbol table and immutable space context setters
-  - `src/vm/class_table.h/c` — Added sta_class_table_alloc_index() for dynamic index allocation
-  - `src/bootstrap/bootstrap.c` — Installed class creation method on Class, wired symbol table and immutable space to primitive context
-  - `CMakeLists.txt` — filein.c added to sta_vm library
-- Tests: 34/34 passing (11 new)
-- Session 1 complete: class creation primitive + chunk reader
-- Session 2 next: public API (sta_vm_load_source), smoke test, then kernel .st files
+### Epic 9: Kernel Source Loading — IN PROGRESS (Sessions 1-3 complete)
+- GitHub: Epic #169
+- Stories 1-2 (session 1): Class creation primitive (prim 122), chunk format reader
+  - Branch: phase1/epic-9a-filein-infra (merged)
+  - New: `src/bootstrap/filein.h/c`, `tests/fixtures/simple.st`, `tests/fixtures/escaped.st`, `tests/test_class_creation.c`, `tests/test_filein.c`
+  - Modified: `src/vm/primitive_table.h/c` (prim 122), `src/vm/class_table.h/c` (alloc_index), `src/bootstrap/bootstrap.c` (Class>>subclass:...)
+- Stories 3-4 (session 2): Public API (sta_vm_load_source), smoke test
+  - Branch: phase1/epic-9b-public-api (merged)
+  - New: `src/vm/vm.c` (sta_vm_load_source), `tests/test_load_source.c`, `tests/test_smoke_filein.c`, `tests/fixtures/smoke.st`
+- Stories 5-6 (session 3): Eval-path fix, kernel load infrastructure + first .st files
+  - Branch: phase1/epic-9c-kernel-source-1
+  - New files:
+    - `src/bootstrap/kernel_load.h/c` — sta_kernel_load_all() loads .st files in dependency order
+    - `kernel/Object.st` — isNil, notNil, =, ~=, subclassResponsibility, error:
+    - `kernel/True.st` — not, &, |, printString
+    - `kernel/False.st` — not, &, |, printString
+    - `kernel/UndefinedObject.st` — isNil, notNil, printString, ifNil:, ifNotNil:, ifNil:ifNotNil:
+    - `tests/test_kernel_load.c` — 18 tests for kernel methods
+  - Modified files:
+    - `src/compiler/parser.c` — TOKEN_VBAR (|) accepted as binary selector in method headers and expressions
+    - `tests/test_smoke_filein.c` — 2 new eval-path tests (eval-path DNU bug resolved)
+  - Story 5: Eval-path DNU bug from session 2 resolved (was already fixed in prior work)
+  - Story 6: Boolean.st skipped (Boolean class not in bootstrap; not/&/| added directly to True/False)
+- Tests: 37/37 passing
+- Session 4 next: Magnitude, Number, Integer, SmallInteger, Association, then Collection family
 
 ---
 
 ## How to orient a new chat with Claude
 Paste this file plus `CLAUDE.md` at the start of the session.
-Phase 1 is in progress. Epics 1–8 are complete. Epic 9 is in progress (Stories 1-2 done, Stories 3-4 + kernel source next).
+Phase 1 is in progress. Epics 1–8 are complete. Epic 9 is in progress (Stories 1-6 done, sessions 4-5 remain for more kernel .st files).
 
 Epic ordering (actual):
   1. Object memory  2. Symbols/MethodDict  3. Interpreter  4. Bootstrap
