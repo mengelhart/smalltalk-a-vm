@@ -491,6 +491,23 @@ The VM can: bootstrap from scratch, load kernel source, compile and execute Smal
   - Polymorphic at: (Array→OOP, String→Character, ByteArray→SmallInt)
   - Polymorphic printString across SmallInteger/String/Character/ByteArray
 
+### Phase 1.5 Batch 3: Collection Completion — COMPLETE
+- Branch: phase1.5/batch-3-collections
+- New primitives: 54 (replaceFrom:to:with:startingAt:), 83 (value:value:)
+- New kernel .st: OrderedCollection.st, Array.st
+- Expanded: Collection.st (inject:into:, anySatisfy:, allSatisfy:, asArray stubs),
+  SequenceableCollection.st (inject:into:, anySatisfy:, allSatisfy:, reverseDo:,
+  with:collect:, indexOf:, indexOf:ifAbsent:, copyFrom:to:, copyWith:,
+  copyWithout:, asArray)
+- Tests: test_replace_prim (6 tests), test_batch3_collections (24 tests)
+- Key validations:
+  - 4-argument primitive dispatch (prim 54 replaceFrom:to:with:startingAt:)
+  - OrderedCollection grow cycle (10 elements into capacity-4 backing array)
+  - Array printString deep call chains (polymorphic element printing, nested arrays)
+  - inject:into: with 2-arg block (value:value: prim 83 dispatch)
+  - replaceFrom:to:with:startingAt: self-overlap safety (memmove)
+  - Cuis Smalltalk sources consulted as reference for all implementations
+
 ---
 
 ## Current phase
