@@ -348,15 +348,15 @@ docs/spikes/              ← spike-001 through spike-007
   - New files:
     - `kernel/Magnitude.st` — >=, <=, max:, min:, between:and:
     - `kernel/Number.st` — isZero, positive, negative, negated, abs, sign
-    - `kernel/SmallInteger.st` — placeholder (factorial deferred)
+    - `kernel/SmallInteger.st` — factorial
     - `kernel/Association.st` — key, value, key:, value:, key:value:
-    - `tests/test_kernel_magnitude.c` — 21 tests for Magnitude/Number/Association
+    - `tests/test_kernel_magnitude.c` — 24 tests for Magnitude/Number/SmallInteger/Association
   - Modified files:
-    - `src/bootstrap/kernel_load.c` — shared FileInContext with pre-registered bootstrap class ivars; added Magnitude, Number, Association to load order
+    - `src/bootstrap/kernel_load.c` — shared FileInContext with pre-registered bootstrap class ivars; added Magnitude, Number, SmallInteger, Association to load order
     - `tests/CMakeLists.txt` — test_kernel_magnitude target
-  - Deferred: SmallInteger>>factorial — nested recursive send inside binary expression triggers DNU (e.g. `1 * (0 factorial)`); individual pieces work but combination crashes. Likely interpreter expression stack issue during return from recursive call within binary send argument. Needs investigation.
+  - Bug fix (task/fix-nested-send-dnu): sta_frame_push was allocating new frames at slab->top, but the caller's expression stack extends above slab->top to slab->sp; non-primitive sends with pending expression stack values (e.g. receiver for a binary send) corrupted those values. Fix: advance slab->top to slab->sp before allocating the new frame.
   - Skipped (by design): Integer.st (no Integer class in bootstrap), //, \\ (no prims), to:do:/timesRepeat: (mutable closures), reciprocal (no / prim), gcd: (needs \\)
-- Tests: 38/38 passing
+- Tests: 42/42 passing (38 existing + 4 new factorial/nested-send tests)
 - Session 5 next: Collection family, String, Stream, Exception extensions, then integration
 
 ---

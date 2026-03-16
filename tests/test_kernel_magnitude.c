@@ -169,9 +169,27 @@ static void test_negative_true(void) {
 
 /* ── SmallInteger tests ───────────────────────────────────────────────── */
 
-/* factorial deferred — nested recursive send triggers DNU, likely
- * interpreter stack issue. See session 4 notes.
- * test_factorial_5, test_factorial_0, test_factorial_1 skipped. */
+static void test_factorial_0(void) {
+    STA_OOP r = eval("0 factorial");
+    assert(STA_IS_SMALLINT(r) && STA_SMALLINT_VAL(r) == 1);
+}
+
+static void test_factorial_1(void) {
+    STA_OOP r = eval("1 factorial");
+    assert(STA_IS_SMALLINT(r) && STA_SMALLINT_VAL(r) == 1);
+}
+
+static void test_factorial_5(void) {
+    STA_OOP r = eval("5 factorial");
+    assert(STA_IS_SMALLINT(r) && STA_SMALLINT_VAL(r) == 120);
+}
+
+static void test_nested_send_factorial(void) {
+    /* This was the original crash case: nested non-primitive send
+     * inside a binary expression corrupted the expression stack. */
+    STA_OOP r = eval("1 * ((1 - 1) factorial)");
+    assert(STA_IS_SMALLINT(r) && STA_SMALLINT_VAL(r) == 1);
+}
 
 /* ── Association tests ────────────────────────────────────────────────── */
 
@@ -219,7 +237,11 @@ int main(void) {
     RUN(test_positive_true);
     RUN(test_negative_true);
 
-    /* SmallInteger — factorial deferred (see comment above) */
+    /* SmallInteger */
+    RUN(test_factorial_0);
+    RUN(test_factorial_1);
+    RUN(test_factorial_5);
+    RUN(test_nested_send_factorial);
 
     /* Association */
     RUN(test_association_key_value);

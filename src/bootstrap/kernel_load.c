@@ -27,7 +27,7 @@ static const char *kernel_files[] = {
     "UndefinedObject.st",
     "Magnitude.st",
     "Number.st",
-    /* SmallInteger.st — empty; factorial deferred (interpreter stack issue) */
+    "SmallInteger.st",
     "Association.st",
 };
 
