@@ -3,6 +3,8 @@
  SKIPPED: reciprocal (no Fraction class yet)."
 
 !Number methodsFor: 'testing'!
+isNumber
+	^ true!
 isZero
 	^ self = 0!
 positive

@@ -13,3 +13,7 @@ value: anObject
 key: aKey value: aValue
 	key := aKey.
 	value := aValue! !
+
+!Association methodsFor: 'hashing'!
+hash
+	^ key hash! !

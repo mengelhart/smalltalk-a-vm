@@ -562,8 +562,20 @@ static int step7_methods(BS *bs) {
 
     /* ── String methods ────────────────────────────────────────────────── */
     STA_OOP str_cls = sta_class_table_get(bs->ct, STA_CLS_STRING);
-    if (install_prim_method(bs, str_cls, "at:",     63, 1) != 0) return -1;
-    if (install_prim_method(bs, str_cls, "at:put:", 64, 2) != 0) return -1;
+    if (install_prim_method(bs, str_cls, "at:",      63, 1) != 0) return -1;
+    if (install_prim_method(bs, str_cls, "at:put:",  64, 2) != 0) return -1;
+    if (install_prim_method(bs, str_cls, "asSymbol",  91, 0) != 0) return -1;
+
+    /* ── Symbol methods ───────────────────────────────────────────────── */
+    STA_OOP sym_cls = sta_class_table_get(bs->ct, STA_CLS_SYMBOL);
+    if (install_prim_method(bs, sym_cls, "asString",  92, 0) != 0) return -1;
+
+    /* Symbol class >> intern: — install on the metaclass */
+    {
+        STA_ObjHeader *sym_cls_h = (STA_ObjHeader *)(uintptr_t)sym_cls;
+        STA_OOP sym_meta = sta_class_table_get(bs->ct, sym_cls_h->class_index);
+        if (install_prim_method(bs, sym_meta, "intern:", 93, 1) != 0) return -1;
+    }
 
     /* ── Character methods ──────────────────────────────────────────────── */
     STA_OOP char_cls = sta_class_table_get(bs->ct, STA_CLS_CHARACTER);

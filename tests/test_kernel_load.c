@@ -62,6 +62,21 @@ static STA_OOP eval(const char *source) {
     return sta_interpret(slab, heap, ct, cr.method, nil_oop, NULL, 0);
 }
 
+/* Helper: extract bytes from a String or Symbol OOP. */
+static const char *string_or_symbol_bytes(STA_OOP oop, size_t *out_len) {
+    if (STA_IS_IMMEDIATE(oop)) return NULL;
+    STA_ObjHeader *h = (STA_ObjHeader *)(uintptr_t)oop;
+    if (h->class_index == STA_CLS_SYMBOL) {
+        return sta_symbol_get_bytes(oop, out_len);
+    }
+    /* String: byte-indexable, no instVars. */
+    uint32_t var_words = h->size;
+    uint32_t byte_count = var_words * (uint32_t)sizeof(STA_OOP)
+                          - STA_BYTE_PADDING(h);
+    *out_len = byte_count;
+    return (const char *)sta_payload(h);
+}
+
 /* ── Tests ─────────────────────────────────────────────────────────────── */
 
 static void test_kernel_load(void) {
@@ -103,10 +118,10 @@ static void test_false_or_true(void) {
 }
 
 static void test_nil_printString(void) {
-    /* printString returns a Symbol (strings are interned as symbols in Phase 1). */
+    /* printString returns a String (was Symbol before codegen fix). */
     STA_OOP result = eval("nil printString");
     size_t len;
-    const char *str = sta_symbol_get_bytes(result, &len);
+    const char *str = string_or_symbol_bytes(result, &len);
     assert(len == 3);
     assert(memcmp(str, "nil", 3) == 0);
 }
@@ -114,7 +129,7 @@ static void test_nil_printString(void) {
 static void test_true_printString(void) {
     STA_OOP result = eval("true printString");
     size_t len;
-    const char *str = sta_symbol_get_bytes(result, &len);
+    const char *str = string_or_symbol_bytes(result, &len);
     assert(len == 4);
     assert(memcmp(str, "true", 4) == 0);
 }
@@ -165,7 +180,7 @@ static void test_object_equals_identity(void) {
 static void test_false_printString(void) {
     STA_OOP result = eval("false printString");
     size_t len;
-    const char *str = sta_symbol_get_bytes(result, &len);
+    const char *str = string_or_symbol_bytes(result, &len);
     assert(len == 5);
     assert(memcmp(str, "false", 5) == 0);
 }

@@ -108,6 +108,17 @@ includes: aCharacter
         i := i + 1].
     ^ result! !
 
+!String methodsFor: 'hashing'!
+hash
+    "Content-based hash. Uses whileTrue: to avoid mutable outer temp capture.
+     Mask to 29-bit positive SmallInteger range (536870911 = 16r1FFFFFFF)."
+    | h i sz |
+    h := 0. i := 1. sz := self size.
+    [i <= sz] whileTrue: [
+        h := (h * 31 + (self at: i) value) bitAnd: 536870911.
+        i := i + 1].
+    ^ h! !
+
 !String methodsFor: 'printing'!
 printString
     "Return string representation with quotes.

@@ -890,24 +890,25 @@ static void emit_node(Codegen *cg, STA_AstNode *node, bool for_value) {
 
     case NODE_LITERAL_STRING:
         if (for_value) {
-            /* Create a String object in immutable space. For Phase 1,
-             * we intern it as a symbol (strings and symbols share
-             * similar representation for literals). */
+            /* Allocate a real String object (class_index = STA_CLS_STRING)
+             * in immutable space. Symbols and Strings are distinct types —
+             * Symbols have their own printString, hash behaviour, etc. */
             const char *str = node->as.variable.name;
             size_t len = strlen(str);
-            /* Create a String object. For Phase 1, allocate in heap
-             * as a byte-indexable object. For simplicity, store as
-             * a symbol (since all String literals are immutable). */
-            // FIXME Phase 2: String literals must be distinct from Symbol
-            // objects — currently interned as symbols for Phase 1 simplicity.
-            STA_OOP sym = sta_symbol_intern(cg->ctx->immutable_space,
-                                             cg->ctx->symbol_table,
-                                             str, len);
-            if (sym == 0) {
-                cg_error(cg, "failed to intern string literal");
+            uint32_t var_words = ((uint32_t)len + (uint32_t)(sizeof(STA_OOP) - 1))
+                                 / (uint32_t)sizeof(STA_OOP);
+            STA_ObjHeader *str_h = sta_immutable_alloc(
+                cg->ctx->immutable_space, STA_CLS_STRING, var_words);
+            if (!str_h) {
+                cg_error(cg, "failed to allocate string literal");
                 break;
             }
-            uint16_t idx = lb_add(&cg->literals, sym);
+            uint8_t padding = (uint8_t)(var_words * sizeof(STA_OOP) - (uint32_t)len);
+            str_h->reserved = padding;
+            memset(sta_payload(str_h), 0, var_words * sizeof(STA_OOP));
+            memcpy(sta_payload(str_h), str, len);
+            STA_OOP str_oop = (STA_OOP)(uintptr_t)str_h;
+            uint16_t idx = lb_add(&cg->literals, str_oop);
             bb_emit_wide(&cg->code, OP_PUSH_LIT, idx);
         }
         break;
