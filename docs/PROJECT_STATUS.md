@@ -530,6 +530,37 @@ The VM can: bootstrap from scratch, load kernel source, compile and execute Smal
   - gcd: TCO on deep recursion (46368 gcd: 28657 = 1)
   - Hash protocol ready for Dictionary/Set (Batch 5 or Phase 2)
 
+### Phase 1.5 Batch 5: Integration Stress Tests — COMPLETE
+- Branch: phase1.5/batch-5-stress-tests (merged to main)
+- No new primitives or kernel source
+- 4 new test files: test_stress_dispatch, test_stress_depth,
+  test_stress_exceptions, test_stress_strings
+- 59 new tests exercising feature combinations:
+  - Polymorphic dispatch (7+ classes, same selector: printString, =, hash, size)
+  - Deep call chains (15+ frames via nested Array printString)
+  - 20 factorial (20 recursive frames + printString of 19-digit result)
+  - Sustained allocation pressure (50 string concatenations, 100-element OC grow)
+  - inject:into: over 100-element array (100 iterations of value:value:)
+  - Exception propagation through collection iteration
+  - Nested exception handlers (inner catch → re-signal → outer catch)
+  - DNU caught on SmallInteger, String, nil
+  - String comparison boundary cases (empty, length tie-break)
+  - Character classification sweep (128 characters)
+  - Hash distribution validation (10 strings, ≥8 distinct hashes)
+  - printString:base: sweep (hex, binary, octal, negative, zero)
+- Bugs discovered:
+  - #243: SmallInteger = with non-SmallInt arg returns receiver instead of false
+  - #244: Catching DNU via on:do: triggers unhandled BlockCannotReturn
+- Total CTest targets: 58/58 passing (2 tests KNOWN_FAIL/skipped with filed issues)
+
+## Phase 1.5 — Class Library Foundation: COMPLETE
+
+5 batches, 20 new primitives (1–17, 54, 60–64, 81–83, 88–95, 100, 120–122,
+200, 91–93), 17 kernel .st files (Object, True, False, UndefinedObject,
+Magnitude, Number, SmallInteger, Association, Collection, SequenceableCollection,
+ArrayedCollection, Character, String, Symbol, ByteArray, Array, OrderedCollection),
+58 CTest targets all passing. Ready for Phase 2 — Actor Runtime.
+
 ---
 
 ## Current phase

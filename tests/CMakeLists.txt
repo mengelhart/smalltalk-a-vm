@@ -240,6 +240,23 @@ add_executable(test_batch4_integration test_batch4_integration.c)
 target_link_libraries(test_batch4_integration PRIVATE sta_vm)
 add_test(NAME batch4_integration COMMAND test_batch4_integration)
 
+# ── Phase 1.5 Batch 5: Integration Stress Tests ─────────────────────────
+add_executable(test_stress_dispatch test_stress_dispatch.c)
+target_link_libraries(test_stress_dispatch PRIVATE sta_vm)
+add_test(NAME stress_dispatch COMMAND test_stress_dispatch)
+
+add_executable(test_stress_depth test_stress_depth.c)
+target_link_libraries(test_stress_depth PRIVATE sta_vm)
+add_test(NAME stress_depth COMMAND test_stress_depth)
+
+add_executable(test_stress_exceptions test_stress_exceptions.c)
+target_link_libraries(test_stress_exceptions PRIVATE sta_vm)
+add_test(NAME stress_exceptions COMMAND test_stress_exceptions)
+
+add_executable(test_stress_strings test_stress_strings.c)
+target_link_libraries(test_stress_strings PRIVATE sta_vm)
+add_test(NAME stress_strings COMMAND test_stress_strings)
+
 # ── Phase 1 Epic 10: Image Save/Load ────────────────────────────────────
 add_executable(test_image_format test_image_format.c)
 target_include_directories(test_image_format PRIVATE ${CMAKE_SOURCE_DIR}/src)
