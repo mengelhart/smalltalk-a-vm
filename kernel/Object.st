@@ -8,7 +8,11 @@
 isNil
 	^ false!
 notNil
-	^ true! !
+	^ true!
+isNumber
+	^ false!
+isInteger
+	^ false! !
 
 !Object methodsFor: 'comparing'!
 = anObject

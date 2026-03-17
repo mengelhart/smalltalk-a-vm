@@ -223,6 +223,23 @@ add_executable(test_batch3_collections test_batch3_collections.c)
 target_link_libraries(test_batch3_collections PRIVATE sta_vm)
 add_test(NAME batch3_collections COMMAND test_batch3_collections)
 
+# ── Phase 1.5 Batch 4: Number Protocol, Symbol, and Hashing ─────────────
+add_executable(test_batch4_symbol test_batch4_symbol.c)
+target_link_libraries(test_batch4_symbol PRIVATE sta_vm)
+add_test(NAME batch4_symbol COMMAND test_batch4_symbol)
+
+add_executable(test_batch4_hash test_batch4_hash.c)
+target_link_libraries(test_batch4_hash PRIVATE sta_vm)
+add_test(NAME batch4_hash COMMAND test_batch4_hash)
+
+add_executable(test_batch4_number test_batch4_number.c)
+target_link_libraries(test_batch4_number PRIVATE sta_vm)
+add_test(NAME batch4_number COMMAND test_batch4_number)
+
+add_executable(test_batch4_integration test_batch4_integration.c)
+target_link_libraries(test_batch4_integration PRIVATE sta_vm)
+add_test(NAME batch4_integration COMMAND test_batch4_integration)
+
 # ── Phase 1 Epic 10: Image Save/Load ────────────────────────────────────
 add_executable(test_image_format test_image_format.c)
 target_include_directories(test_image_format PRIVATE ${CMAKE_SOURCE_DIR}/src)

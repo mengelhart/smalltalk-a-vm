@@ -1110,6 +1110,104 @@ static int prim_ensure(STA_OOP *args, uint8_t nargs, STA_OOP *result) {
     return STA_PRIM_SUCCESS;
 }
 
+/* ── Symbol/String interning primitives (§8.9, prims 91–93) ─────────────── */
+
+/* Prim 91: String >> #asSymbol
+ * Receiver is a String. Interns it in the symbol table.
+ * Returns the canonical Symbol OOP. */
+static int prim_as_symbol(STA_OOP *args, uint8_t nargs, STA_OOP *result) {
+    (void)nargs;
+    if (!g_prim_symbol_table || !g_prim_immutable_space)
+        return STA_PRIM_NOT_AVAILABLE;
+    if (STA_IS_IMMEDIATE(args[0])) return STA_PRIM_BAD_RECEIVER;
+
+    STA_ObjHeader *h = (STA_ObjHeader *)(uintptr_t)args[0];
+    if (h->class_index != STA_CLS_STRING) return STA_PRIM_BAD_RECEIVER;
+
+    /* Extract bytes from the String. */
+    uint32_t var_words = h->size;
+    uint32_t byte_count = var_words * (uint32_t)sizeof(STA_OOP)
+                          - STA_BYTE_PADDING(h);
+    const char *bytes = (const char *)sta_payload(h);
+
+    STA_OOP sym = sta_symbol_intern(g_prim_immutable_space,
+                                     g_prim_symbol_table,
+                                     bytes, byte_count);
+    if (sym == 0) return STA_PRIM_NO_MEMORY;
+
+    *result = sym;
+    return STA_PRIM_SUCCESS;
+}
+
+/* Prim 92: Symbol >> #asString
+ * Receiver is a Symbol. Allocates a new mutable String copy. */
+static int prim_sym_as_string(STA_OOP *args, uint8_t nargs, STA_OOP *result) {
+    (void)nargs;
+    if (!g_prim_heap) return STA_PRIM_NOT_AVAILABLE;
+    if (STA_IS_IMMEDIATE(args[0])) return STA_PRIM_BAD_RECEIVER;
+
+    STA_ObjHeader *h = (STA_ObjHeader *)(uintptr_t)args[0];
+    if (h->class_index != STA_CLS_SYMBOL) return STA_PRIM_BAD_RECEIVER;
+
+    /* Symbol layout: slot 0 = hash, slots 1+ = UTF-8 bytes (1 instvar). */
+    size_t len = 0;
+    const char *bytes = sta_symbol_get_bytes(args[0], &len);
+    if (!bytes) return STA_PRIM_BAD_RECEIVER;
+
+    /* Allocate a new String. */
+    uint32_t var_words = ((uint32_t)len + (uint32_t)(sizeof(STA_OOP) - 1))
+                         / (uint32_t)sizeof(STA_OOP);
+    STA_ObjHeader *str_h = sta_heap_alloc(g_prim_heap, STA_CLS_STRING, var_words);
+    if (!str_h) return STA_PRIM_NO_MEMORY;
+
+    uint8_t padding = (uint8_t)(var_words * sizeof(STA_OOP) - (uint32_t)len);
+    str_h->reserved = padding;
+
+    memset(sta_payload(str_h), 0, var_words * sizeof(STA_OOP));
+    memcpy(sta_payload(str_h), bytes, len);
+
+    *result = (STA_OOP)(uintptr_t)str_h;
+    return STA_PRIM_SUCCESS;
+}
+
+/* Prim 93: Symbol class >> #intern:
+ * Class-side method. Argument is a String. Same as prim 91. */
+static int prim_sym_intern(STA_OOP *args, uint8_t nargs, STA_OOP *result) {
+    (void)nargs;
+    if (!g_prim_symbol_table || !g_prim_immutable_space)
+        return STA_PRIM_NOT_AVAILABLE;
+
+    /* args[0] = Symbol class (receiver, ignored),
+     * args[1] = String argument. */
+    if (STA_IS_IMMEDIATE(args[1])) return STA_PRIM_BAD_ARGUMENT;
+
+    STA_ObjHeader *h = (STA_ObjHeader *)(uintptr_t)args[1];
+    if (h->class_index != STA_CLS_STRING && h->class_index != STA_CLS_SYMBOL)
+        return STA_PRIM_BAD_ARGUMENT;
+
+    uint32_t var_words;
+    const char *bytes;
+    uint32_t byte_count;
+
+    if (h->class_index == STA_CLS_SYMBOL) {
+        /* Already a symbol — just return it. */
+        *result = args[1];
+        return STA_PRIM_SUCCESS;
+    }
+
+    var_words = h->size;
+    byte_count = var_words * (uint32_t)sizeof(STA_OOP) - STA_BYTE_PADDING(h);
+    bytes = (const char *)sta_payload(h);
+
+    STA_OOP sym = sta_symbol_intern(g_prim_immutable_space,
+                                     g_prim_symbol_table,
+                                     bytes, byte_count);
+    if (sym == 0) return STA_PRIM_NO_MEMORY;
+
+    *result = sym;
+    return STA_PRIM_SUCCESS;
+}
+
 /* ── Class creation primitive (§9, prim 122) ───────────────────────────── */
 
 /* Helper: extract bytes from a Smalltalk String OOP as a C string.
@@ -1359,6 +1457,11 @@ void sta_primitive_table_init(void) {
     sta_primitives[62] = prim_byte_size;       /* ByteArray >> #basicSize */
     sta_primitives[63] = prim_string_at;       /* String >> #at: */
     sta_primitives[64] = prim_string_at_put;   /* String >> #at:put: */
+
+    /* Symbol/String interning (§8.9) */
+    sta_primitives[91] = prim_as_symbol;       /* String >> #asSymbol */
+    sta_primitives[92] = prim_sym_as_string;   /* Symbol >> #asString */
+    sta_primitives[93] = prim_sym_intern;      /* Symbol class >> #intern: */
 
     /* Character (§8.7) */
     sta_primitives[94] = prim_char_value;      /* Character >> #value */

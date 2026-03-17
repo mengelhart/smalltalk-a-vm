@@ -38,6 +38,7 @@ static const char *kernel_files[] = {
     "ArrayedCollection.st",
     "Character.st",
     "String.st",
+    "Symbol.st",
     "ByteArray.st",
     "Array.st",
     "OrderedCollection.st",

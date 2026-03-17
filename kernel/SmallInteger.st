@@ -4,6 +4,36 @@
    bitAnd:, bitOr:, bitXor:, bitShift:, printString, basicNew, basicNew:
  SKIPPED: @ (no Point class)."
 
+!SmallInteger methodsFor: 'testing'!
+isInteger
+	^ true!
+asInteger
+	^ self! !
+
+!SmallInteger methodsFor: 'printing'!
+printString: base
+	"Return string representation in given radix."
+	| n result |
+	self = 0
+		ifTrue: [result := '0']
+		ifFalse: [
+			self < 0
+				ifTrue: [result := '-', (self negated printString: base)]
+				ifFalse: [
+					n := self. result := ''.
+					[n > 0] whileTrue: [
+						| digit |
+						digit := n \\ base.
+						result := ('0123456789ABCDEF' at: digit + 1) asString, result.
+						n := n // base]]].
+	^ result!
+printStringHex
+	^ self printString: 16!
+printStringOctal
+	^ self printString: 8!
+printStringBinary
+	^ self printString: 2! !
+
 !SmallInteger methodsFor: 'mathematical functions'!
 
 factorial

@@ -508,6 +508,28 @@ The VM can: bootstrap from scratch, load kernel source, compile and execute Smal
   - replaceFrom:to:with:startingAt: self-overlap safety (memmove)
   - Cuis Smalltalk sources consulted as reference for all implementations
 
+### Phase 1.5 Batch 4: Number Protocol, Symbol, and Hashing — COMPLETE
+- Branch: phase1.5/batch-4-number-symbol (merged to main)
+- New primitives: 91 (String>>asSymbol), 92 (Symbol>>asString),
+  93 (Symbol class>>intern:)
+- New kernel .st: Symbol.st (printString, asSymbol, concatenation)
+- Expanded: Object.st (isNumber, isInteger), Number.st (isNumber),
+  SmallInteger.st (isInteger, asInteger, printString:, printStringHex,
+  printStringOctal, printStringBinary),
+  String.st (hash — content-based, 31-multiply with 29-bit mask),
+  Association.st (hash — delegates to key hash)
+- Codegen fix: string literals now allocate as proper String objects
+  (class_index = STA_CLS_STRING) in immutable space, fixing Symbol/String
+  type confusion that caused 'hi' printString to return '#hi'
+- Tests: test_batch4_symbol (12 tests), test_batch4_hash (10 tests),
+  test_batch4_number (30 tests), test_batch4_integration (11 tests)
+- Key validations:
+  - Symbol interning round-trip (String→Symbol→String)
+  - Hash consistency across String/Symbol boundary
+  - printString:base: with hex/octal/binary radixes
+  - gcd: TCO on deep recursion (46368 gcd: 28657 = 1)
+  - Hash protocol ready for Dictionary/Set (Batch 5 or Phase 2)
+
 ---
 
 ## Current phase
