@@ -47,8 +47,11 @@ struct STA_Actor {
     /* Actor identity */
     uint32_t          actor_id;
 
-    /* The actor's Smalltalk-level class (for future use) */
+    /* The actor's Smalltalk-level behavior class and object.
+     * Messages dispatched to this actor are looked up in behavior_class
+     * and invoked with behavior_obj as the receiver. */
     STA_OOP           behavior_class;
+    STA_OOP           behavior_obj;
 
     /* MPSC mailbox — Vyukov linked list, bounded, per ADR 008 */
     STA_Mailbox       mailbox;
@@ -88,3 +91,20 @@ int sta_actor_send_msg(struct STA_Actor *sender,
                        struct STA_Actor *target,
                        STA_OOP selector,
                        STA_OOP *args, uint8_t nargs);
+
+/* ── Message dispatch (Epic 3 Story 5) ───────────────────────────────── */
+
+/* Process one message from the actor's mailbox.
+ *
+ * 1. Dequeue one message from the mailbox.
+ * 2. Look up the selector in the actor's behavior_class hierarchy.
+ * 3. Execute the method with the actor's behavior_obj as receiver
+ *    and the message's copied arguments.
+ * 4. Free the message envelope.
+ *
+ * The actor must have behavior_class and behavior_obj set.
+ * Execution uses the actor's own heap and stack slab.
+ *
+ * Returns 1 if a message was processed, 0 if mailbox was empty,
+ * negative on error (method not found, etc.). */
+int sta_actor_process_one(struct STA_VM *vm, struct STA_Actor *actor);

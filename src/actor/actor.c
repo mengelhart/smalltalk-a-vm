@@ -6,6 +6,10 @@
 #include "deep_copy.h"
 #include "mailbox_msg.h"
 #include "vm/vm_state.h"
+#include "vm/interpreter.h"
+#include "vm/method_dict.h"
+#include "vm/class_table.h"
+#include "vm/special_objects.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -64,6 +68,7 @@ struct STA_Actor *sta_actor_create(struct STA_VM *vm,
 
     /* Placeholders. */
     actor->behavior_class = 0;
+    actor->behavior_obj = 0;
     actor->supervisor = NULL;
 
     return actor;
@@ -132,4 +137,58 @@ int sta_actor_send_msg(struct STA_Actor *sender,
     }
 
     return 0;
+}
+
+/* ── Message dispatch ────────────────────────────────────────────────── */
+
+/* Look up selector in class hierarchy starting from class_index. */
+static STA_OOP actor_method_lookup(STA_VM *vm, uint32_t class_index,
+                                    STA_OOP selector) {
+    STA_OOP nil_oop = vm->specials[SPC_NIL];
+    STA_OOP cls = sta_class_table_get(&vm->class_table, class_index);
+    while (cls != 0 && cls != nil_oop) {
+        STA_OOP md = sta_class_method_dict(cls);
+        if (md != 0) {
+            STA_OOP method = sta_method_dict_lookup(md, selector);
+            if (method != 0) return method;
+        }
+        cls = sta_class_superclass(cls);
+    }
+    return 0;
+}
+
+int sta_actor_process_one(struct STA_VM *vm, struct STA_Actor *actor)
+{
+    /* 1. Dequeue one message from the mailbox. */
+    STA_MailboxMsg *msg = sta_mailbox_dequeue(&actor->mailbox);
+    if (!msg) return 0;  /* empty — nothing to do */
+
+    /* 2. Look up the selector in the actor's behavior class. */
+    STA_ObjHeader *beh_h = (STA_ObjHeader *)(uintptr_t)actor->behavior_obj;
+    uint32_t cls_idx = beh_h->class_index;
+    STA_OOP method = actor_method_lookup(vm, cls_idx, msg->selector);
+
+    if (method == 0) {
+        /* Method not found — free envelope and return error.
+         * In production, this would trigger doesNotUnderstand:. */
+        sta_mailbox_msg_destroy(msg);
+        return -1;
+    }
+
+    /* 3. Execute the method on the target actor's resources.
+     * Temporarily swap vm->root_actor so sta_interpret uses this
+     * actor's heap and stack slab. This is correct for single-threaded
+     * manual dispatch (no scheduler yet). */
+    struct STA_Actor *saved_root = vm->root_actor;
+    vm->root_actor = actor;
+
+    (void)sta_interpret(vm, method, actor->behavior_obj,
+                         msg->args, msg->arg_count);
+
+    vm->root_actor = saved_root;
+
+    /* 4. Free the message envelope. */
+    sta_mailbox_msg_destroy(msg);
+
+    return 1;  /* message processed */
 }
