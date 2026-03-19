@@ -9,6 +9,7 @@
 #include "vm/class_table.h"
 #include "vm/symbol_table.h"
 #include "vm/interpreter.h"
+#include "actor/actor.h"
 #include "compiler/compiler.h"
 #include <sta/vm.h>
 #include <stdarg.h>
@@ -23,9 +24,10 @@ STA_Handle* sta_eval(STA_VM* vm, const char* expression) {
 
     STA_OOP sysdict = sta_spc_get(SPC_SMALLTALK);
 
+    STA_Heap *heap = vm->root_actor ? &vm->root_actor->heap : &vm->heap;
     STA_CompileResult cr = sta_compile_expression(
         expression, &vm->symbol_table, &vm->immutable_space,
-        &vm->heap, sysdict);
+        heap, sysdict);
 
     if (cr.had_error) {
         snprintf(vm->last_error, sizeof(vm->last_error),

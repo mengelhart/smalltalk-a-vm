@@ -8,6 +8,7 @@
  */
 #include "filein.h"
 #include "../vm/vm_state.h"
+#include "../actor/actor.h"
 #include "../vm/interpreter.h"
 #include "../vm/compiled_method.h"
 #include "../vm/method_dict.h"
@@ -26,6 +27,11 @@
 #define FILEIN_OK         0
 #define FILEIN_ERR_IO    (-3)  /* matches STA_ERR_IO */
 #define FILEIN_ERR_COMPILE (-5)
+
+/* Resolve heap: prefer root actor's heap, fall back to VM heap (bootstrap). */
+static inline STA_Heap *filein_heap(STA_FileInContext *ctx) {
+    return ctx->vm->root_actor ? &ctx->vm->root_actor->heap : &ctx->vm->heap;
+}
 
 /* ── Chunk reader ─────────────────────────────────────────────────────── */
 
@@ -239,7 +245,7 @@ static int execute_class_definition(STA_FileInContext *ctx,
 
     STA_CompileResult cr = sta_compile_expression(
         chunk, &ctx->vm->symbol_table, &ctx->vm->immutable_space,
-        &ctx->vm->heap, sysdict);
+        filein_heap(ctx), sysdict);
 
     if (cr.had_error) {
         snprintf(ctx->error_msg, sizeof(ctx->error_msg),
@@ -297,7 +303,7 @@ static int install_method(STA_FileInContext *ctx, const char *class_name,
     STA_CompileResult cr = sta_compile_method(
         source, class_oop, ivar_ptrs, ivar_count,
         &ctx->vm->symbol_table, &ctx->vm->immutable_space,
-        &ctx->vm->heap, sysdict);
+        filein_heap(ctx), sysdict);
 
     if (cr.had_error) {
         snprintf(ctx->error_msg, sizeof(ctx->error_msg),
@@ -307,7 +313,7 @@ static int install_method(STA_FileInContext *ctx, const char *class_name,
     }
 
     STA_OOP md = sta_class_method_dict(class_oop);
-    int rc = sta_method_dict_insert(&ctx->vm->heap, md, selector, cr.method);
+    int rc = sta_method_dict_insert(filein_heap(ctx), md, selector, cr.method);
     if (rc != 0) {
         snprintf(ctx->error_msg, sizeof(ctx->error_msg),
                  "chunk %d: failed to install method in %s", chunk_num, class_name);

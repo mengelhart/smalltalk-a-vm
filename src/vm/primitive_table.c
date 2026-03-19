@@ -4,6 +4,7 @@
  */
 #include "primitive_table.h"
 #include "vm_state.h"
+#include "actor/actor.h"
 #include "format.h"
 #include "handler.h"
 #include "interpreter.h"
@@ -17,6 +18,16 @@
 #include <stdio.h>
 
 STA_PrimFn sta_primitives[STA_PRIM_TABLE_SIZE];
+
+/* ── Execution context resolution helpers ─────────────────────────────── */
+
+static inline STA_StackSlab *resolve_slab(STA_ExecContext *ctx) {
+    return ctx->actor ? &ctx->actor->slab : &ctx->vm->slab;
+}
+
+static inline STA_Heap *resolve_heap(STA_ExecContext *ctx) {
+    return ctx->actor ? &ctx->actor->heap : &ctx->vm->heap;
+}
 
 /* ── SmallInteger arithmetic primitives ────────────────────────────────── */
 
@@ -216,7 +227,7 @@ static int prim_smallint_printstring(STA_ExecContext *ctx, STA_OOP *args, uint8_
 
     uint32_t var_words = ((uint32_t)len + (uint32_t)(sizeof(STA_OOP) - 1))
                          / (uint32_t)sizeof(STA_OOP);
-    STA_ObjHeader *str_h = sta_heap_alloc(&ctx->vm->heap, STA_CLS_STRING, var_words);
+    STA_ObjHeader *str_h = sta_heap_alloc(resolve_heap(ctx), STA_CLS_STRING, var_words);
     if (!str_h) return STA_PRIM_NO_MEMORY;
 
     str_h->reserved = (uint8_t)(var_words * sizeof(STA_OOP) - (uint32_t)len);
@@ -418,7 +429,7 @@ static int prim_basic_new(STA_ExecContext *ctx, STA_OOP *args, uint8_t nargs, ST
     if (cls_idx == 0) return STA_PRIM_BAD_RECEIVER;
 
     uint8_t inst_size = STA_FORMAT_INST_VARS(fmt);
-    STA_ObjHeader *obj = sta_heap_alloc(&ctx->vm->heap, cls_idx, inst_size);
+    STA_ObjHeader *obj = sta_heap_alloc(resolve_heap(ctx), cls_idx, inst_size);
     if (!obj) return STA_PRIM_NO_MEMORY;
 
     STA_OOP nil_oop = ctx->vm->specials[SPC_NIL];
@@ -460,7 +471,7 @@ static int prim_basic_new_size(STA_ExecContext *ctx, STA_OOP *args, uint8_t narg
     }
 
     uint32_t total_words = (uint32_t)inst_size + var_words;
-    STA_ObjHeader *obj = sta_heap_alloc(&ctx->vm->heap, cls_idx, total_words);
+    STA_ObjHeader *obj = sta_heap_alloc(resolve_heap(ctx), cls_idx, total_words);
     if (!obj) return STA_PRIM_NO_MEMORY;
 
     if (is_bytes) obj->reserved = byte_padding;
@@ -684,7 +695,7 @@ static int prim_shallow_copy(STA_ExecContext *ctx, STA_OOP *args, uint8_t nargs,
     }
 
     STA_ObjHeader *h = (STA_ObjHeader *)(uintptr_t)args[0];
-    STA_ObjHeader *copy = sta_heap_alloc(&ctx->vm->heap, h->class_index, h->size);
+    STA_ObjHeader *copy = sta_heap_alloc(resolve_heap(ctx), h->class_index, h->size);
     if (!copy) return 7;
 
     memcpy(sta_payload(copy), sta_payload(h), (size_t)h->size * sizeof(STA_OOP));
@@ -804,12 +815,14 @@ static int prim_on_do(STA_ExecContext *ctx, STA_OOP *args, uint8_t nargs, STA_OO
     STA_OOP exc_class     = args[1];
     STA_OOP handler_block = args[2];
 
+    STA_StackSlab *slab = resolve_slab(ctx);
+
     STA_HandlerEntry entry;
     memset(&entry, 0, sizeof(entry));
     entry.exception_class = exc_class;
     entry.handler_block   = handler_block;
-    entry.saved_slab_top  = ctx->vm->slab.top;
-    entry.saved_slab_sp   = ctx->vm->slab.sp;
+    entry.saved_slab_top  = slab->top;
+    entry.saved_slab_sp   = slab->sp;
 
     if (setjmp(entry.jmp) == 0) {
         sta_handler_push_ctx(ctx, &entry);
@@ -818,8 +831,8 @@ static int prim_on_do(STA_ExecContext *ctx, STA_OOP *args, uint8_t nargs, STA_OO
         *result = body_result;
         return STA_PRIM_SUCCESS;
     } else {
-        ctx->vm->slab.top = entry.saved_slab_top;
-        ctx->vm->slab.sp  = entry.saved_slab_sp;
+        slab->top = entry.saved_slab_top;
+        slab->sp  = entry.saved_slab_sp;
 
         STA_OOP exc = sta_handler_get_signaled_ctx(ctx);
         STA_OOP handler_args[1] = { exc };
@@ -934,7 +947,7 @@ static int prim_sym_as_string(STA_ExecContext *ctx, STA_OOP *args, uint8_t nargs
 
     uint32_t var_words = ((uint32_t)len + (uint32_t)(sizeof(STA_OOP) - 1))
                          / (uint32_t)sizeof(STA_OOP);
-    STA_ObjHeader *str_h = sta_heap_alloc(&ctx->vm->heap, STA_CLS_STRING, var_words);
+    STA_ObjHeader *str_h = sta_heap_alloc(resolve_heap(ctx), STA_CLS_STRING, var_words);
     if (!str_h) return STA_PRIM_NO_MEMORY;
 
     str_h->reserved = (uint8_t)(var_words * sizeof(STA_OOP) - (uint32_t)len);
@@ -1020,6 +1033,7 @@ static int prim_sysdict_put(STA_Heap *heap, STA_OOP dict, STA_OOP key_sym, STA_O
 static int prim_subclass(STA_ExecContext *ctx, STA_OOP *args, uint8_t nargs, STA_OOP *result) {
     (void)nargs;
     STA_VM *vm = ctx->vm;
+    STA_Heap *heap = resolve_heap(ctx);
 
     STA_OOP superclass = args[0];
     STA_OOP name_sym   = args[1];
@@ -1066,22 +1080,22 @@ static int prim_subclass(STA_ExecContext *ctx, STA_OOP *args, uint8_t nargs, STA
         return STA_PRIM_NO_MEMORY;
     }
 
-    STA_ObjHeader *cls_h = sta_heap_alloc(&vm->heap, meta_index, 4);
+    STA_ObjHeader *cls_h = sta_heap_alloc(heap, meta_index, 4);
     if (!cls_h) {
         sta_class_table_set(&vm->class_table, cls_index, 0);
         return STA_PRIM_NO_MEMORY;
     }
     STA_OOP cls = (STA_OOP)(uintptr_t)cls_h;
 
-    STA_ObjHeader *meta_h = sta_heap_alloc(&vm->heap, STA_CLS_METACLASS, 4);
+    STA_ObjHeader *meta_h = sta_heap_alloc(heap, STA_CLS_METACLASS, 4);
     if (!meta_h) {
         sta_class_table_set(&vm->class_table, cls_index, 0);
         return STA_PRIM_NO_MEMORY;
     }
     STA_OOP meta = (STA_OOP)(uintptr_t)meta_h;
 
-    STA_OOP cls_md  = sta_method_dict_create(&vm->heap, 8);
-    STA_OOP meta_md = sta_method_dict_create(&vm->heap, 4);
+    STA_OOP cls_md  = sta_method_dict_create(heap, 8);
+    STA_OOP meta_md = sta_method_dict_create(heap, 4);
     if (!cls_md || !meta_md) {
         sta_class_table_set(&vm->class_table, cls_index, 0);
         return STA_PRIM_NO_MEMORY;
@@ -1111,7 +1125,7 @@ static int prim_subclass(STA_ExecContext *ctx, STA_OOP *args, uint8_t nargs, STA
 
     STA_OOP sysdict = vm->specials[SPC_SMALLTALK];
     if (sysdict != 0 && sysdict != nil_oop)
-        prim_sysdict_put(&vm->heap, sysdict, name_sym, cls);
+        prim_sysdict_put(heap, sysdict, name_sym, cls);
 
     *result = cls;
     return STA_PRIM_SUCCESS;
