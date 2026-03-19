@@ -604,6 +604,30 @@ ArrayedCollection, Character, String, Symbol, ByteArray, Array, OrderedCollectio
 - Closes deferred items: "do: with mutable-capture blocks", "ensure: during exception unwinding"
 - Resolves open decision #8: Closure and NLR compatibility (ADR 010)
 
+### Epic 2: Actor Struct, Lifecycle & Per-Actor Heaps — COMPLETE
+- GitHub: Epic #263, stories #264–#269 (all closed)
+- Branch: phase2/epic-2-actor-struct
+- New files:
+  - `src/actor/actor.h` — Production STA_Actor struct: per-actor STA_Heap, STA_StackSlab, handler chain (handler_top, signaled_exception), lifecycle state machine (CREATED/READY/RUNNING/SUSPENDED/TERMINATED), actor_id, behavior_class, NULL placeholders for mailbox and supervisor, vm back-pointer
+  - `src/actor/actor.c` — sta_actor_create/sta_actor_destroy with heap+slab init/teardown; public API stubs retained
+  - `tests/test_actor_lifecycle.c` — 9 lifecycle tests
+  - `tests/test_actor_heap.c` — 6 heap isolation tests
+  - `tests/test_actor_epic2.c` — 12 comprehensive tests (lifecycle, execution in actors, density measurement)
+- Modified files:
+  - `src/vm/vm_state.h` — STA_VM gains root_actor field; ExecContext comment updated
+  - `src/vm/vm.c` — Root actor created after bootstrap, takes ownership of VM's heap/slab/handler chain via struct copy; sta_vm_destroy cleans up root actor; save/load image use root actor's heap
+  - `src/vm/interpreter.c` — interpret_loop, sta_interpret, sta_eval_block resolve slab/heap from root actor
+  - `src/vm/handler.h/c` — New _ctx API: sta_handler_push/pop/find/set_signaled/get_signaled _ctx variants that resolve through STA_ExecContext (actor when set, VM fallback for bootstrap)
+  - `src/vm/primitive_table.c` — resolve_heap(ctx)/resolve_slab(ctx) helpers; all allocating primitives use them; exception prims (88/89/90) use _ctx handler API
+  - `src/vm/eval.c` — sta_compile_expression uses root actor's heap
+  - `src/bootstrap/filein.c` — filein_heap() helper for post-bootstrap source loading
+- Density measurement:
+  - sizeof(STA_Actor) = 112 bytes (under 164-byte ADR 014 target — scheduler/IO/snapshot fields not yet added)
+  - Creation cost = 768 bytes (112 struct + 128 nursery + 512 stack + 16 identity)
+  - 3.5x more compact than BEAM (2704 bytes)
+- Sanitizers: ASan clean; LSan (detect_leaks) not supported on macOS ARM — deferred to Linux CI with Valgrind
+- Tests: 63 CTest targets passing (27 new actor-specific tests across 3 test files)
+
 ---
 
 ## Current phase
