@@ -13,39 +13,47 @@
 #include "vm/class_table.h"
 #include "vm/heap.h"
 #include "vm/immutable_space.h"
+#include "vm/vm_state.h"
 #include "bootstrap/bootstrap.h"
 #include "vm/handler.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <assert.h>
 #include <string.h>
 #include <setjmp.h>
 
 /* ── Shared test infrastructure ────────────────────────────────────────── */
 
-static STA_ImmutableSpace *g_sp;
-static STA_SymbolTable    *g_st;
-static STA_Heap           *g_heap;
-static STA_ClassTable     *g_ct;
+static STA_VM *g_vm;
 
 static STA_OOP sym(const char *name) {
-    return sta_symbol_intern(g_sp, g_st, name, strlen(name));
+    return sta_symbol_intern(&g_vm->immutable_space, &g_vm->symbol_table, name, strlen(name));
 }
 
 static void setup(void) {
-    g_sp   = sta_immutable_space_create(512 * 1024);
-    g_st   = sta_symbol_table_create(512);
-    g_heap = sta_heap_create(512 * 1024);
-    g_ct   = sta_class_table_create();
+    g_vm = calloc(1, sizeof(STA_VM));
+    assert(g_vm);
 
-    STA_BootstrapResult r = sta_bootstrap(g_heap, g_sp, g_st, g_ct);
+    sta_heap_init(&g_vm->heap, 512 * 1024);
+    sta_immutable_space_init(&g_vm->immutable_space, 512 * 1024);
+    sta_symbol_table_init(&g_vm->symbol_table, 512);
+    sta_class_table_init(&g_vm->class_table);
+    sta_stack_slab_init(&g_vm->slab, 65536);
+
+    sta_special_objects_bind(g_vm->specials);
+    sta_primitive_table_init();
+
+    STA_BootstrapResult r = sta_bootstrap(&g_vm->heap, &g_vm->immutable_space, &g_vm->symbol_table, &g_vm->class_table);
     assert(r.status == 0);
 }
 
 static void teardown(void) {
-    sta_class_table_destroy(g_ct);
-    sta_heap_destroy(g_heap);
-    sta_symbol_table_destroy(g_st);
-    sta_immutable_space_destroy(g_sp);
+    sta_stack_slab_deinit(&g_vm->slab);
+    sta_class_table_deinit(&g_vm->class_table);
+    sta_heap_deinit(&g_vm->heap);
+    sta_symbol_table_deinit(&g_vm->symbol_table);
+    sta_immutable_space_deinit(&g_vm->immutable_space);
+    free(g_vm);
 }
 
 /* ── Test 1: Bootstrap completes without error ─────────────────────────── */
@@ -74,7 +82,7 @@ static void test_special_objects_populated(void) {
 static void test_class_table_populated(void) {
     printf("  class table populated...");
     for (uint32_t i = 1; i <= 31; i++) {
-        STA_OOP cls = sta_class_table_get(g_ct, i);
+        STA_OOP cls = sta_class_table_get(&g_vm->class_table, i);
         assert(cls != 0);
     }
     printf(" ok\n");
@@ -85,14 +93,14 @@ static void test_class_table_populated(void) {
 static void test_metaclass_circularity(void) {
     printf("  metaclass circularity...");
 
-    STA_OOP object_cls = sta_class_table_get(g_ct, STA_CLS_OBJECT);
+    STA_OOP object_cls = sta_class_table_get(&g_vm->class_table, STA_CLS_OBJECT);
     assert(object_cls != 0);
 
     /* Object's class → Object class (index 32). */
     STA_ObjHeader *obj_h = (STA_ObjHeader *)(uintptr_t)object_cls;
     uint32_t obj_meta_idx = obj_h->class_index;
     assert(obj_meta_idx == 32);
-    STA_OOP object_metaclass = sta_class_table_get(g_ct, obj_meta_idx);
+    STA_OOP object_metaclass = sta_class_table_get(&g_vm->class_table, obj_meta_idx);
     assert(object_metaclass != 0);
 
     /* Object class's class → Metaclass (index 17). */
@@ -100,19 +108,19 @@ static void test_metaclass_circularity(void) {
     assert(obj_mc_h->class_index == STA_CLS_METACLASS);
 
     /* Metaclass (index 17) → its class is Metaclass class (index 36). */
-    STA_OOP metaclass_cls = sta_class_table_get(g_ct, STA_CLS_METACLASS);
+    STA_OOP metaclass_cls = sta_class_table_get(&g_vm->class_table, STA_CLS_METACLASS);
     STA_ObjHeader *mc_h = (STA_ObjHeader *)(uintptr_t)metaclass_cls;
     uint32_t mc_meta_idx = mc_h->class_index;
     assert(mc_meta_idx == 36);
 
     /* Metaclass class (index 36) → its class is Metaclass (index 17). Circularity. */
-    STA_OOP metaclass_metaclass = sta_class_table_get(g_ct, mc_meta_idx);
+    STA_OOP metaclass_metaclass = sta_class_table_get(&g_vm->class_table, mc_meta_idx);
     STA_ObjHeader *mc_mc_h = (STA_ObjHeader *)(uintptr_t)metaclass_metaclass;
     assert(mc_mc_h->class_index == STA_CLS_METACLASS);
 
     /* Object class's superclass → Class (index 16). */
     STA_OOP obj_mc_super = sta_class_superclass(object_metaclass);
-    STA_OOP class_cls = sta_class_table_get(g_ct, STA_CLS_CLASS);
+    STA_OOP class_cls = sta_class_table_get(&g_vm->class_table, STA_CLS_CLASS);
     assert(obj_mc_super == class_cls);
 
     printf(" ok\n");
@@ -126,36 +134,36 @@ static void test_superclass_chains(void) {
     STA_OOP nil_oop = sta_spc_get(SPC_NIL);
 
     /* SmallInteger → Number → Magnitude → Object → nil. */
-    STA_OOP si  = sta_class_table_get(g_ct, STA_CLS_SMALLINTEGER);
+    STA_OOP si  = sta_class_table_get(&g_vm->class_table, STA_CLS_SMALLINTEGER);
     STA_OOP num = sta_class_superclass(si);
-    assert(num == sta_class_table_get(g_ct, STA_CLS_NUMBER));
+    assert(num == sta_class_table_get(&g_vm->class_table, STA_CLS_NUMBER));
     STA_OOP mag = sta_class_superclass(num);
-    assert(mag == sta_class_table_get(g_ct, STA_CLS_MAGNITUDE));
+    assert(mag == sta_class_table_get(&g_vm->class_table, STA_CLS_MAGNITUDE));
     STA_OOP obj = sta_class_superclass(mag);
-    assert(obj == sta_class_table_get(g_ct, STA_CLS_OBJECT));
+    assert(obj == sta_class_table_get(&g_vm->class_table, STA_CLS_OBJECT));
     STA_OOP top = sta_class_superclass(obj);
     assert(top == nil_oop);
 
     /* Symbol → String → ArrayedCollection → SequenceableCollection
      * → Collection → Object → nil. */
-    STA_OOP sym_cls  = sta_class_table_get(g_ct, STA_CLS_SYMBOL);
+    STA_OOP sym_cls  = sta_class_table_get(&g_vm->class_table, STA_CLS_SYMBOL);
     STA_OOP str_cls  = sta_class_superclass(sym_cls);
-    assert(str_cls == sta_class_table_get(g_ct, STA_CLS_STRING));
+    assert(str_cls == sta_class_table_get(&g_vm->class_table, STA_CLS_STRING));
     STA_OOP ac  = sta_class_superclass(str_cls);
-    assert(ac == sta_class_table_get(g_ct, STA_CLS_ARRAYEDCOLLECTION));
+    assert(ac == sta_class_table_get(&g_vm->class_table, STA_CLS_ARRAYEDCOLLECTION));
     STA_OOP sc  = sta_class_superclass(ac);
-    assert(sc == sta_class_table_get(g_ct, STA_CLS_SEQCOLLECTION));
+    assert(sc == sta_class_table_get(&g_vm->class_table, STA_CLS_SEQCOLLECTION));
     STA_OOP col = sta_class_superclass(sc);
-    assert(col == sta_class_table_get(g_ct, STA_CLS_COLLECTION));
+    assert(col == sta_class_table_get(&g_vm->class_table, STA_CLS_COLLECTION));
     STA_OOP obj2 = sta_class_superclass(col);
-    assert(obj2 == sta_class_table_get(g_ct, STA_CLS_OBJECT));
+    assert(obj2 == sta_class_table_get(&g_vm->class_table, STA_CLS_OBJECT));
 
     /* Error → Exception → Object → nil. */
-    STA_OOP err = sta_class_table_get(g_ct, STA_CLS_ERROR);
+    STA_OOP err = sta_class_table_get(&g_vm->class_table, STA_CLS_ERROR);
     STA_OOP exc = sta_class_superclass(err);
-    assert(exc == sta_class_table_get(g_ct, STA_CLS_EXCEPTION));
+    assert(exc == sta_class_table_get(&g_vm->class_table, STA_CLS_EXCEPTION));
     STA_OOP obj3 = sta_class_superclass(exc);
-    assert(obj3 == sta_class_table_get(g_ct, STA_CLS_OBJECT));
+    assert(obj3 == sta_class_table_get(&g_vm->class_table, STA_CLS_OBJECT));
 
     printf(" ok\n");
 }
@@ -173,16 +181,14 @@ static void test_arithmetic_send(void) {
         OP_SEND, 0,
         OP_RETURN_TOP, 0
     };
-    STA_OOP method = sta_compiled_method_create(g_sp, 0, 0, 0,
+    STA_OOP method = sta_compiled_method_create(&g_vm->immutable_space, 0, 0, 0,
         lits, 2, bc, sizeof(bc));
     assert(method);
 
-    STA_StackSlab *slab = sta_stack_slab_create(65536);
-    STA_OOP result = sta_interpret(slab, g_heap, g_ct, method,
+    STA_OOP result = sta_interpret(g_vm, method,
                                     STA_SMALLINT_OOP(0), NULL, 0);
     assert(result == STA_SMALLINT_OOP(7));
 
-    sta_stack_slab_destroy(slab);
     printf(" ok\n");
 }
 
@@ -190,7 +196,7 @@ static void test_arithmetic_send(void) {
 
 /* Helper: create a BlockClosure that executes a 0-arg block body method. */
 static STA_OOP make_block(STA_OOP body_method) {
-    STA_ObjHeader *bc_h = sta_heap_alloc(g_heap, STA_CLS_BLOCKCLOSURE, 4);
+    STA_ObjHeader *bc_h = sta_heap_alloc(&g_vm->heap, STA_CLS_BLOCKCLOSURE, 4);
     assert(bc_h);
     STA_OOP *s = sta_payload(bc_h);
     s[0] = STA_SMALLINT_OOP(0);       /* startPC = 0         */
@@ -204,7 +210,7 @@ static STA_OOP make_block(STA_OOP body_method) {
 static STA_OOP make_const_block_method(intptr_t n) {
     STA_OOP lits[] = { STA_SMALLINT_OOP(0) };
     uint8_t bc[] = { OP_PUSH_SMALLINT, (uint8_t)n, OP_RETURN_TOP, 0 };
-    STA_OOP m = sta_compiled_method_create(g_sp, 0, 0, 0,
+    STA_OOP m = sta_compiled_method_create(&g_vm->immutable_space, 0, 0, 0,
         lits, 1, bc, sizeof(bc));
     assert(m);
     return m;
@@ -225,16 +231,14 @@ static void test_boolean_iftrue(void) {
         OP_SEND, 2,            /* #ifTrue:ifFalse: */
         OP_RETURN_TOP, 0
     };
-    STA_OOP method = sta_compiled_method_create(g_sp, 0, 0, 0,
+    STA_OOP method = sta_compiled_method_create(&g_vm->immutable_space, 0, 0, 0,
         lits, 4, bc, sizeof(bc));
     assert(method);
 
-    STA_StackSlab *slab = sta_stack_slab_create(65536);
-    STA_OOP result = sta_interpret(slab, g_heap, g_ct, method,
+    STA_OOP result = sta_interpret(g_vm, method,
                                     STA_SMALLINT_OOP(0), NULL, 0);
     assert(result == STA_SMALLINT_OOP(42));
 
-    sta_stack_slab_destroy(slab);
     printf(" ok\n");
 }
 
@@ -255,16 +259,14 @@ static void test_boolean_iffalse(void) {
         OP_SEND, 2,
         OP_RETURN_TOP, 0
     };
-    STA_OOP method = sta_compiled_method_create(g_sp, 0, 0, 0,
+    STA_OOP method = sta_compiled_method_create(&g_vm->immutable_space, 0, 0, 0,
         lits, 4, bc, sizeof(bc));
     assert(method);
 
-    STA_StackSlab *slab = sta_stack_slab_create(65536);
-    STA_OOP result = sta_interpret(slab, g_heap, g_ct, method,
+    STA_OOP result = sta_interpret(g_vm, method,
                                     STA_SMALLINT_OOP(0), NULL, 0);
     assert(result == STA_SMALLINT_OOP(99));
 
-    sta_stack_slab_destroy(slab);
     printf(" ok\n");
 }
 
@@ -274,7 +276,7 @@ static void test_array_access(void) {
     printf("  Array #at: (bootstrapped)...");
 
     /* Create [10, 20, 30]. */
-    STA_ObjHeader *arr_h = sta_heap_alloc(g_heap, STA_CLS_ARRAY, 3);
+    STA_ObjHeader *arr_h = sta_heap_alloc(&g_vm->heap, STA_CLS_ARRAY, 3);
     assert(arr_h);
     STA_OOP *arr_payload = sta_payload(arr_h);
     arr_payload[0] = STA_SMALLINT_OOP(10);
@@ -291,16 +293,14 @@ static void test_array_access(void) {
         OP_SEND, 1,
         OP_RETURN_TOP, 0
     };
-    STA_OOP method = sta_compiled_method_create(g_sp, 0, 0, 0,
+    STA_OOP method = sta_compiled_method_create(&g_vm->immutable_space, 0, 0, 0,
         lits, 3, bc, sizeof(bc));
     assert(method);
 
-    STA_StackSlab *slab = sta_stack_slab_create(65536);
-    STA_OOP result = sta_interpret(slab, g_heap, g_ct, method,
+    STA_OOP result = sta_interpret(g_vm, method,
                                     STA_SMALLINT_OOP(0), NULL, 0);
     assert(result == STA_SMALLINT_OOP(20));
 
-    sta_stack_slab_destroy(slab);
     printf(" ok\n");
 }
 
@@ -336,7 +336,7 @@ static void test_global_dictionary(void) {
     /* Association value (slot 1) should be the Object class. */
     STA_ObjHeader *assoc_h = (STA_ObjHeader *)(uintptr_t)assoc;
     STA_OOP value = sta_payload(assoc_h)[1];
-    assert(value == sta_class_table_get(g_ct, STA_CLS_OBJECT));
+    assert(value == sta_class_table_get(&g_vm->class_table, STA_CLS_OBJECT));
 
     /* Look up #SmallInteger → should also be found. */
     STA_OOP si_sym = sym("SmallInteger");
@@ -354,7 +354,7 @@ static void test_global_dictionary(void) {
     assert(assoc != 0);
     assoc_h = (STA_ObjHeader *)(uintptr_t)assoc;
     value = sta_payload(assoc_h)[1];
-    assert(value == sta_class_table_get(g_ct, STA_CLS_SMALLINTEGER));
+    assert(value == sta_class_table_get(&g_vm->class_table, STA_CLS_SMALLINTEGER));
 
     printf(" ok\n");
 }
@@ -364,8 +364,6 @@ static void test_global_dictionary(void) {
 static void test_dnu_fires(void) {
     printf("  doesNotUnderstand: fires...");
 
-    /* Send #nonexistent to SmallInteger 5 → should signal MNU exception.
-     * Install a C-level handler to catch it. */
     STA_OOP nonexist_sel = sym("nonexistent");
     STA_OOP lits[] = { nonexist_sel, STA_SMALLINT_OOP(0) };
     uint8_t bc[] = {
@@ -373,32 +371,29 @@ static void test_dnu_fires(void) {
         OP_SEND, 0,
         OP_RETURN_TOP, 0
     };
-    STA_OOP method = sta_compiled_method_create(g_sp, 0, 0, 0,
+    STA_OOP method = sta_compiled_method_create(&g_vm->immutable_space, 0, 0, 0,
         lits, 2, bc, sizeof(bc));
     assert(method);
-
-    STA_StackSlab *slab = sta_stack_slab_create(65536);
 
     /* Install a handler to catch the MessageNotUnderstood exception. */
     STA_HandlerEntry entry;
     memset(&entry, 0, sizeof(entry));
-    entry.exception_class = sta_class_table_get(g_ct, STA_CLS_MESSAGENOTUNDERSTOOD);
+    entry.exception_class = sta_class_table_get(&g_vm->class_table, STA_CLS_MESSAGENOTUNDERSTOOD);
     entry.handler_block = 0; /* unused — we handle in C */
-    entry.saved_slab_top = slab->top;
-    entry.saved_slab_sp  = slab->sp;
+    entry.saved_slab_top = g_vm->slab.top;
+    entry.saved_slab_sp  = g_vm->slab.sp;
     sta_handler_set_top(NULL);
 
     int caught = 0;
     if (setjmp(entry.jmp) == 0) {
         sta_handler_push(&entry);
-        sta_primitive_set_slab(slab);
-        (void)sta_interpret(slab, g_heap, g_ct, method,
+        (void)sta_interpret(g_vm, method,
                             STA_SMALLINT_OOP(0), NULL, 0);
     } else {
         /* Exception was caught via longjmp. */
         caught = 1;
-        slab->top = entry.saved_slab_top;
-        slab->sp  = entry.saved_slab_sp;
+        g_vm->slab.top = entry.saved_slab_top;
+        g_vm->slab.sp  = entry.saved_slab_sp;
     }
     sta_handler_set_top(NULL);
     assert(caught);
@@ -407,7 +402,6 @@ static void test_dnu_fires(void) {
     STA_OOP exc = sta_handler_get_signaled_exception();
     assert(STA_IS_HEAP(exc));
 
-    sta_stack_slab_destroy(slab);
     printf(" ok\n");
 }
 

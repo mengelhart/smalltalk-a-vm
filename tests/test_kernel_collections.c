@@ -18,20 +18,18 @@
 #include "vm/heap.h"
 #include "vm/immutable_space.h"
 #include "vm/frame.h"
+#include "vm/vm_state.h"
 #include "bootstrap/bootstrap.h"
 #include "bootstrap/kernel_load.h"
 #include "compiler/compiler.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <assert.h>
 #include <string.h>
 
 /* ── Shared infrastructure ───────────────────────────────────────────── */
 
-static STA_ImmutableSpace *imm;
-static STA_SymbolTable    *syms;
-static STA_Heap           *heap;
-static STA_ClassTable     *ct;
-static STA_StackSlab      *slab;
+static STA_VM *g_vm;
 
 static int tests_run = 0;
 static int tests_passed = 0;
@@ -44,18 +42,24 @@ static int tests_passed = 0;
 } while(0)
 
 static void setup(void) {
-    heap = sta_heap_create(4 * 1024 * 1024);
-    imm  = sta_immutable_space_create(4 * 1024 * 1024);
-    syms = sta_symbol_table_create(512);
-    ct   = sta_class_table_create();
-    slab = sta_stack_slab_create(64 * 1024);
+    g_vm = calloc(1, sizeof(STA_VM));
+    assert(g_vm);
 
-    STA_BootstrapResult br = sta_bootstrap(heap, imm, syms, ct);
+    sta_heap_init(&g_vm->heap, 4 * 1024 * 1024);
+    sta_immutable_space_init(&g_vm->immutable_space, 4 * 1024 * 1024);
+    sta_symbol_table_init(&g_vm->symbol_table, 512);
+    sta_class_table_init(&g_vm->class_table);
+    sta_stack_slab_init(&g_vm->slab, 64 * 1024);
+
+    sta_special_objects_bind(g_vm->specials);
+    sta_primitive_table_init();
+
+    STA_BootstrapResult br = sta_bootstrap(&g_vm->heap, &g_vm->immutable_space, &g_vm->symbol_table, &g_vm->class_table);
     assert(br.status == 0);
 
-    int rc = sta_kernel_load_all(KERNEL_DIR);
+    int rc = sta_kernel_load_all(g_vm, KERNEL_DIR);
     if (rc != STA_OK) {
-        fprintf(stderr, "kernel_load error: %s\n", sta_vm_last_error(NULL));
+        fprintf(stderr, "kernel_load error: %s\n", sta_vm_last_error(g_vm));
     }
     assert(rc == STA_OK);
 }
@@ -64,22 +68,19 @@ static void setup(void) {
 static STA_OOP eval(const char *source) {
     STA_OOP sysdict = sta_spc_get(SPC_SMALLTALK);
     STA_CompileResult cr = sta_compile_expression(
-        source, syms, imm, heap, sysdict);
+        source, &g_vm->symbol_table, &g_vm->immutable_space, &g_vm->heap, sysdict);
     if (cr.had_error) {
         fprintf(stderr, "eval compile error: %s\n  source: %s\n",
                 cr.error_msg, source);
         assert(!cr.had_error);
     }
     STA_OOP nil_oop = sta_spc_get(SPC_NIL);
-    return sta_interpret(slab, heap, ct, cr.method, nil_oop, NULL, 0);
+    return sta_interpret(g_vm, cr.method, nil_oop, NULL, 0);
 }
 
 /* ── Story 8: whileTrue: with mutable outer temp ─────────────────────── */
 
 static void test_while_true_mutable_temp(void) {
-    /* Sum 1 to 5 using whileTrue: with mutable outer temps.
-     * This works because whileTrue: is inlined — both [...] blocks
-     * compile as inline code, so outer temp access is just OP_PUSH_TEMP. */
     STA_OOP r = eval(
         "| sum i | "
         "sum := 0. "
@@ -105,7 +106,6 @@ static void test_while_true_counter(void) {
 /* ── Story 9: Collection / SequenceableCollection / Array ────────────── */
 
 static void test_array_collect_identity(void) {
-    /* collect: [:each | each] — block uses only its own arg. */
     STA_OOP r = eval(
         "| arr result | "
         "arr := Array new: 3. "
@@ -120,7 +120,6 @@ static void test_array_collect_identity(void) {
 }
 
 static void test_array_collect_double(void) {
-    /* collect: [:each | each * 2] — block uses arg + literal. */
     STA_OOP r = eval(
         "| arr result | "
         "arr := Array new: 3. "
@@ -135,7 +134,6 @@ static void test_array_collect_double(void) {
 }
 
 static void test_array_collect_size(void) {
-    /* Verify collect: returns an array of the same size. */
     STA_OOP r = eval(
         "| arr | "
         "arr := Array new: 5. "
@@ -148,7 +146,6 @@ static void test_array_collect_size(void) {
 }
 
 static void test_array_select(void) {
-    /* select: [:each | each > 2] — picks elements > 2. */
     STA_OOP r = eval(
         "| arr result | "
         "arr := Array new: 4. "
@@ -164,7 +161,6 @@ static void test_array_select(void) {
 }
 
 static void test_array_select_values(void) {
-    /* Verify the selected values are correct. */
     STA_OOP r = eval(
         "| arr result | "
         "arr := Array new: 4. "
@@ -180,7 +176,6 @@ static void test_array_select_values(void) {
 }
 
 static void test_array_reject(void) {
-    /* reject: [:each | each > 2] — removes elements > 2. */
     STA_OOP r = eval(
         "| arr result | "
         "arr := Array new: 4. "
@@ -196,7 +191,6 @@ static void test_array_reject(void) {
 }
 
 static void test_array_detect_found(void) {
-    /* detect:ifNone: — finds first match. */
     STA_OOP r = eval(
         "| arr | "
         "arr := Array new: 3. "
@@ -210,7 +204,6 @@ static void test_array_detect_found(void) {
 }
 
 static void test_array_detect_not_found(void) {
-    /* detect:ifNone: — returns none block value when no match. */
     STA_OOP r = eval(
         "| arr | "
         "arr := Array new: 3. "
@@ -284,13 +277,8 @@ static void test_array_last(void) {
 }
 
 /* ── Story 10: String ────────────────────────────────────────────────── */
-/* NOTE: String literals are interned as Symbols in Phase 1 (codegen.c).
- * Prim 53 now handles byte-indexable objects (returns byte count).
- * at:/at:put: for byte objects are deferred (prim 51/52 are OOP-only). */
 
 static void test_string_size(void) {
-    /* Symbol inherits size from ArrayedCollection; prim 53 computes
-     * byte count for byte-indexable objects. */
     STA_OOP r = eval("'hello' size");
     assert(STA_IS_SMALLINT(r));
     assert(STA_SMALLINT_VAL(r) == 5);
@@ -313,7 +301,6 @@ static void test_string_not_empty(void) {
 }
 
 static void test_string_printstring(void) {
-    /* String>>printString returns self. */
     STA_OOP r = eval("'hello' printString");
     assert(r != sta_spc_get(SPC_NIL));
     assert(!STA_IS_SMALLINT(r));

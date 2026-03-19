@@ -15,26 +15,25 @@
 #include "vm/heap.h"
 #include "vm/immutable_space.h"
 #include "vm/selector.h"
+#include "vm/vm_state.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <assert.h>
 #include <string.h>
 
 /* ── Shared test infrastructure ────────────────────────────────────────── */
 
-static STA_ImmutableSpace *g_sp;
-static STA_SymbolTable *g_st;
-static STA_Heap *g_heap;
-static STA_ClassTable *g_ct;
+static STA_VM *g_vm;
 
 static STA_OOP sym(const char *name) {
-    return sta_symbol_intern(g_sp, g_st, name, strlen(name));
+    return sta_symbol_intern(&g_vm->immutable_space, &g_vm->symbol_table, name, strlen(name));
 }
 
 /* Create a class object with 4+ slots: superclass, methoddict, format, name.
  * Allocates on the mutable heap. Registers in the class table. */
 static STA_OOP make_class(uint32_t cls_idx, STA_OOP superclass,
                            const char *name) {
-    STA_ObjHeader *h = sta_heap_alloc(g_heap, STA_CLS_CLASS, 4);
+    STA_ObjHeader *h = sta_heap_alloc(&g_vm->heap, STA_CLS_CLASS, 4);
     assert(h);
     STA_OOP cls = (STA_OOP)(uintptr_t)h;
     STA_OOP *slots = sta_payload(h);
@@ -44,7 +43,7 @@ static STA_OOP make_class(uint32_t cls_idx, STA_OOP superclass,
     slots[STA_CLASS_SLOT_FORMAT] = STA_SMALLINT_OOP(0);
     slots[STA_CLASS_SLOT_NAME] = sym(name);
 
-    int rc = sta_class_table_set(g_ct, cls_idx, cls);
+    int rc = sta_class_table_set(&g_vm->class_table, cls_idx, cls);
     assert(rc == 0);
     return cls;
 }
@@ -55,31 +54,37 @@ static void set_method_dict(STA_OOP cls, STA_OOP dict) {
 }
 
 static void setup(void) {
-    sta_special_objects_init();
+    g_vm = calloc(1, sizeof(STA_VM));
+    assert(g_vm);
+
+    sta_heap_init(&g_vm->heap, 256 * 1024);
+    sta_immutable_space_init(&g_vm->immutable_space, 256 * 1024);
+    sta_symbol_table_init(&g_vm->symbol_table, 256);
+    sta_class_table_init(&g_vm->class_table);
+    sta_stack_slab_init(&g_vm->slab, 65536);
+
+    sta_special_objects_bind(g_vm->specials);
     sta_primitive_table_init();
 
-    g_sp = sta_immutable_space_create(256 * 1024);
-    g_st = sta_symbol_table_create(256);
-    g_heap = sta_heap_create(256 * 1024);
-    g_ct = sta_class_table_create();
-
     /* Bootstrap nil, true, false. */
-    STA_ObjHeader *nil_h = sta_immutable_alloc(g_sp, STA_CLS_UNDEFINEDOBJ, 0);
-    STA_ObjHeader *true_h = sta_immutable_alloc(g_sp, STA_CLS_TRUE, 0);
-    STA_ObjHeader *false_h = sta_immutable_alloc(g_sp, STA_CLS_FALSE, 0);
+    STA_ObjHeader *nil_h = sta_immutable_alloc(&g_vm->immutable_space, STA_CLS_UNDEFINEDOBJ, 0);
+    STA_ObjHeader *true_h = sta_immutable_alloc(&g_vm->immutable_space, STA_CLS_TRUE, 0);
+    STA_ObjHeader *false_h = sta_immutable_alloc(&g_vm->immutable_space, STA_CLS_FALSE, 0);
     sta_spc_set(SPC_NIL, (STA_OOP)(uintptr_t)nil_h);
     sta_spc_set(SPC_TRUE, (STA_OOP)(uintptr_t)true_h);
     sta_spc_set(SPC_FALSE, (STA_OOP)(uintptr_t)false_h);
 
     /* Intern special selectors. */
-    sta_intern_special_selectors(g_sp, g_st);
+    sta_intern_special_selectors(&g_vm->immutable_space, &g_vm->symbol_table);
 }
 
 static void teardown(void) {
-    sta_class_table_destroy(g_ct);
-    sta_heap_destroy(g_heap);
-    sta_symbol_table_destroy(g_st);
-    sta_immutable_space_destroy(g_sp);
+    sta_stack_slab_deinit(&g_vm->slab);
+    sta_class_table_deinit(&g_vm->class_table);
+    sta_heap_deinit(&g_vm->heap);
+    sta_symbol_table_deinit(&g_vm->symbol_table);
+    sta_immutable_space_deinit(&g_vm->immutable_space);
+    free(g_vm);
 }
 
 /* ── Test a: 3 + 4 = 7 ────────────────────────────────────────────────── */
@@ -95,19 +100,19 @@ static void test_three_plus_four(void) {
     STA_OOP plus_sel = sym("+");
     STA_OOP si_plus_lits[] = { plus_sel, si_cls };
     uint8_t si_plus_bc[] = { OP_PRIMITIVE, 0x01, OP_RETURN_SELF, 0x00 };
-    STA_OOP si_plus = sta_compiled_method_create(g_sp,
+    STA_OOP si_plus = sta_compiled_method_create(&g_vm->immutable_space,
         1, 1, 1,  /* numArgs=1, numTemps=1, primIdx=1 */
         si_plus_lits, 2,
         si_plus_bc, 4);
     assert(si_plus);
 
     /* Install into SmallInteger's method dict. */
-    STA_OOP si_md = sta_method_dict_create(g_heap, 8);
-    sta_method_dict_insert(g_heap, si_md, plus_sel, si_plus);
+    STA_OOP si_md = sta_method_dict_create(&g_vm->heap, 8);
+    sta_method_dict_insert(&g_vm->heap, si_md, plus_sel, si_plus);
     set_method_dict(si_cls, si_md);
 
     /* Object >> (empty dict). */
-    STA_OOP obj_md = sta_method_dict_create(g_heap, 4);
+    STA_OOP obj_md = sta_method_dict_create(&g_vm->heap, 4);
     set_method_dict(obj_cls, obj_md);
 
     /* Test harness method:
@@ -122,18 +127,16 @@ static void test_three_plus_four(void) {
         OP_SEND, 0,
         OP_RETURN_TOP, 0
     };
-    STA_OOP harness = sta_compiled_method_create(g_sp,
+    STA_OOP harness = sta_compiled_method_create(&g_vm->immutable_space,
         0, 0, 0,
         harness_lits, 2,
         harness_bc, sizeof(harness_bc));
     assert(harness);
 
-    STA_StackSlab *slab = sta_stack_slab_create(65536);
-    STA_OOP result = sta_interpret(slab, g_heap, g_ct, harness,
+    STA_OOP result = sta_interpret(g_vm, harness,
                                     STA_SMALLINT_OOP(0), NULL, 0);
     assert(result == STA_SMALLINT_OOP(7));
 
-    sta_stack_slab_destroy(slab);
     printf(" ok\n");
 }
 
@@ -155,13 +158,11 @@ static void test_push_constants(void) {
         OP_PUSH_RECEIVER, 0,
         OP_RETURN_TOP, 0
     };
-    STA_OOP method = sta_compiled_method_create(g_sp, 0, 0, 0,
+    STA_OOP method = sta_compiled_method_create(&g_vm->immutable_space, 0, 0, 0,
                                                   lits, 1, bc, sizeof(bc));
-    STA_StackSlab *slab = sta_stack_slab_create(65536);
-    STA_OOP result = sta_interpret(slab, g_heap, g_ct, method,
+    STA_OOP result = sta_interpret(g_vm, method,
                                     STA_SMALLINT_OOP(42), NULL, 0);
     assert(result == STA_SMALLINT_OOP(42));
-    sta_stack_slab_destroy(slab);
     printf(" ok\n");
 }
 
@@ -183,13 +184,11 @@ static void test_store_push_temp(void) {
         OP_PUSH_TEMP, 0,
         OP_RETURN_TOP, 0
     };
-    STA_OOP method = sta_compiled_method_create(g_sp, 0, 2, 0,
+    STA_OOP method = sta_compiled_method_create(&g_vm->immutable_space, 0, 2, 0,
                                                   lits, 1, bc, sizeof(bc));
-    STA_StackSlab *slab = sta_stack_slab_create(65536);
-    STA_OOP result = sta_interpret(slab, g_heap, g_ct, method,
+    STA_OOP result = sta_interpret(g_vm, method,
                                     STA_SMALLINT_OOP(0), NULL, 0);
     assert(result == STA_SMALLINT_OOP(99));
-    sta_stack_slab_destroy(slab);
     printf(" ok\n");
 }
 
@@ -210,10 +209,9 @@ static void test_jump_conditionals(void) {
         OP_PUSH_SMALLINT, 2,       /* 8 */
         OP_RETURN_TOP, 0           /* 10 */
     };
-    STA_OOP method = sta_compiled_method_create(g_sp, 0, 0, 0,
+    STA_OOP method = sta_compiled_method_create(&g_vm->immutable_space, 0, 0, 0,
                                                   lits, 1, bc, sizeof(bc));
-    STA_StackSlab *slab = sta_stack_slab_create(65536);
-    STA_OOP result = sta_interpret(slab, g_heap, g_ct, method,
+    STA_OOP result = sta_interpret(g_vm, method,
                                     STA_SMALLINT_OOP(0), NULL, 0);
     assert(result == STA_SMALLINT_OOP(1));
 
@@ -226,15 +224,14 @@ static void test_jump_conditionals(void) {
         OP_PUSH_SMALLINT, 2,
         OP_RETURN_TOP, 0
     };
-    STA_OOP method2 = sta_compiled_method_create(g_sp, 0, 0, 0,
+    STA_OOP method2 = sta_compiled_method_create(&g_vm->immutable_space, 0, 0, 0,
                                                    lits, 1, bc2, sizeof(bc2));
-    slab->top = slab->base;
-    slab->sp = slab->base;
-    result = sta_interpret(slab, g_heap, g_ct, method2,
+    g_vm->slab.top = g_vm->slab.base;
+    g_vm->slab.sp = g_vm->slab.base;
+    result = sta_interpret(g_vm, method2,
                            STA_SMALLINT_OOP(0), NULL, 0);
     assert(result == STA_SMALLINT_OOP(2));
 
-    sta_stack_slab_destroy(slab);
     printf(" ok\n");
 }
 
@@ -243,36 +240,8 @@ static void test_jump_conditionals(void) {
 static void test_jump_back_reductions(void) {
     printf("  jump_back + reduction counting...");
 
-    /* Simple loop: push counter, jump back, check that it eventually exits.
-     * Actually, since we need an exit condition, let's do:
-     * temp[0] = 0 (counter)
-     * Loop: PUSH_TEMP 0, PUSH_SMALLINT 10, SEND #<, JUMP_FALSE exit,
-     *        PUSH_TEMP 0, PUSH_ONE, SEND #+, POP_STORE_TEMP 0, JUMP_BACK
-     * exit: PUSH_TEMP 0, RETURN_TOP
-     *
-     * This would need SmallInteger class with #< wired up.
-     * Simpler: just test that JUMP_BACK works with a fixed countdown.
-     *
-     * Even simpler: test that reduction counter resets on JUMP_BACK.
-     * Method: loop 5 times with JUMP_BACK, then return.
-     * We can't easily observe the reduction counter from outside,
-     * but we can at least verify the interpreter doesn't infinite-loop.
-     *
-     * Let's just verify JUMP_BACK computes the right PC. */
-
-    /* PUSH_SMALLINT 42, RETURN_TOP — preceded by a JUMP_BACK that we
-     * don't actually take. Just test that JUMP_BACK goes backward. */
     STA_OOP lits[] = { STA_SMALLINT_OOP(0) };
 
-    /* pc=0: PUSH_ONE
-     * pc=2: JUMP 6 (skip to pc=10)
-     * pc=4: PUSH_TWO
-     * pc=6: RETURN_TOP
-     * pc=8: NOP (unreachable)
-     * pc=10: JUMP_BACK 6 (pc = 10+2-6 = 6... wait, that's RETURN_TOP)
-     * Actually let me rethink. JUMP_BACK offset means pc = pc + 2 - offset.
-     * So to jump from pc=10 to pc=4: offset = 10+2-4 = 8.
-     */
     uint8_t bc[] = {
         OP_PUSH_ONE, 0,            /* 0 */
         OP_JUMP, 6,                /* 2 → pc = 2+2+6 = 10 */
@@ -281,16 +250,11 @@ static void test_jump_back_reductions(void) {
         OP_NOP, 0,                 /* 8 */
         OP_JUMP_BACK, 8,           /* 10 → pc = 10+2-8 = 4 */
     };
-    STA_OOP method = sta_compiled_method_create(g_sp, 0, 0, 0,
+    STA_OOP method = sta_compiled_method_create(&g_vm->immutable_space, 0, 0, 0,
                                                   lits, 1, bc, sizeof(bc));
-    STA_StackSlab *slab = sta_stack_slab_create(65536);
-    STA_OOP result = sta_interpret(slab, g_heap, g_ct, method,
+    STA_OOP result = sta_interpret(g_vm, method,
                                     STA_SMALLINT_OOP(0), NULL, 0);
-    /* Flow: pc=0 push 1, pc=2 jump to 10, pc=10 jump_back to 4,
-     * pc=4 push 2, pc=6 return_top → returns 2 (top of stack).
-     * But wait, stack has [1, 2] — return_top pops 2. */
     assert(result == STA_SMALLINT_OOP(2));
-    sta_stack_slab_destroy(slab);
     printf(" ok\n");
 }
 
@@ -303,24 +267,22 @@ static void test_return_variants(void) {
 
     /* RETURN_SELF */
     uint8_t bc1[] = { OP_RETURN_SELF, 0 };
-    STA_OOP m1 = sta_compiled_method_create(g_sp, 0, 0, 0,
+    STA_OOP m1 = sta_compiled_method_create(&g_vm->immutable_space, 0, 0, 0,
                                               lits, 1, bc1, 2);
-    STA_StackSlab *slab = sta_stack_slab_create(65536);
-    STA_OOP r = sta_interpret(slab, g_heap, g_ct, m1,
+    STA_OOP r = sta_interpret(g_vm, m1,
                                STA_SMALLINT_OOP(77), NULL, 0);
     assert(r == STA_SMALLINT_OOP(77));
 
     /* RETURN_NIL */
     uint8_t bc2[] = { OP_RETURN_NIL, 0 };
-    STA_OOP m2 = sta_compiled_method_create(g_sp, 0, 0, 0,
+    STA_OOP m2 = sta_compiled_method_create(&g_vm->immutable_space, 0, 0, 0,
                                               lits, 1, bc2, 2);
-    slab->top = slab->base;
-    slab->sp = slab->base;
-    r = sta_interpret(slab, g_heap, g_ct, m2,
+    g_vm->slab.top = g_vm->slab.base;
+    g_vm->slab.sp = g_vm->slab.base;
+    r = sta_interpret(g_vm, m2,
                       STA_SMALLINT_OOP(0), NULL, 0);
     assert(r == sta_spc_get(SPC_NIL));
 
-    sta_stack_slab_destroy(slab);
     printf(" ok\n");
 }
 
@@ -330,8 +292,8 @@ static void test_tco(void) {
     printf("  TCO tail recursion...");
 
     /* Build SmallInteger >> #< (prim 3) and SmallInteger >> #- (prim 2). */
-    STA_OOP obj_cls = sta_class_table_get(g_ct, STA_CLS_OBJECT);
-    STA_OOP si_cls = sta_class_table_get(g_ct, STA_CLS_SMALLINTEGER);
+    STA_OOP obj_cls = sta_class_table_get(&g_vm->class_table, STA_CLS_OBJECT);
+    STA_OOP si_cls = sta_class_table_get(&g_vm->class_table, STA_CLS_SMALLINTEGER);
 
     STA_OOP lt_sel = sym("<");
     STA_OOP sub_sel = sym("-");
@@ -340,38 +302,21 @@ static void test_tco(void) {
     /* SmallInteger >> #< (prim 3) */
     STA_OOP lt_lits[] = { lt_sel, si_cls };
     uint8_t lt_bc[] = { OP_PRIMITIVE, 3, OP_RETURN_SELF, 0 };
-    STA_OOP lt_method = sta_compiled_method_create(g_sp, 1, 1, 3,
+    STA_OOP lt_method = sta_compiled_method_create(&g_vm->immutable_space, 1, 1, 3,
         lt_lits, 2, lt_bc, sizeof(lt_bc));
 
     /* SmallInteger >> #- (prim 2) */
     STA_OOP sub_lits[] = { sub_sel, si_cls };
     uint8_t sub_bc[] = { OP_PRIMITIVE, 2, OP_RETURN_SELF, 0 };
-    STA_OOP sub_method = sta_compiled_method_create(g_sp, 1, 1, 2,
+    STA_OOP sub_method = sta_compiled_method_create(&g_vm->immutable_space, 1, 1, 2,
         sub_lits, 2, sub_bc, sizeof(sub_bc));
 
     /* Install #< and #- into SmallInteger. */
     STA_OOP si_md = sta_class_method_dict(si_cls);
-    sta_method_dict_insert(g_heap, si_md, lt_sel, lt_method);
-    sta_method_dict_insert(g_heap, si_md, sub_sel, sub_method);
+    sta_method_dict_insert(&g_vm->heap, si_md, lt_sel, lt_method);
+    sta_method_dict_insert(&g_vm->heap, si_md, sub_sel, sub_method);
 
-    /* Create a "countdown" method that tail-calls itself:
-     *   countdown: n
-     *     n < 1 ifTrue: [^ self].
-     *     ^ self countdown: n - 1
-     *
-     * Bytecode:
-     *   PUSH_TEMP 0        — push n (arg)
-     *   PUSH_ONE
-     *   SEND #<            — n < 1
-     *   JUMP_FALSE 4       — if false, skip to continue
-     *   RETURN_SELF
-     *   PUSH_RECEIVER
-     *   PUSH_TEMP 0
-     *   PUSH_ONE
-     *   SEND #-            — n - 1
-     *   SEND countdown:    — tail call
-     *   RETURN_TOP         — (TCO lookahead should catch this)
-     */
+    /* Create a "countdown" method that tail-calls itself. */
     STA_OOP cd_lits[] = { lt_sel, sub_sel, countdown_sel, si_cls };
     uint8_t cd_bc[] = {
         OP_PUSH_TEMP, 0,          /* 0: push n */
@@ -387,17 +332,13 @@ static void test_tco(void) {
         OP_SEND, 2,               /* 20: send #countdown: (lit[2]) — tail */
         OP_RETURN_TOP, 0,         /* 22: return top (TCO target) */
     };
-    STA_OOP cd_method = sta_compiled_method_create(g_sp, 1, 1, 0,
+    STA_OOP cd_method = sta_compiled_method_create(&g_vm->immutable_space, 1, 1, 0,
         cd_lits, 4, cd_bc, sizeof(cd_bc));
 
     /* Install countdown: into SmallInteger. */
-    sta_method_dict_insert(g_heap, si_md, countdown_sel, cd_method);
+    sta_method_dict_insert(&g_vm->heap, si_md, countdown_sel, cd_method);
 
-    /* Harness: self countdown: 100
-     *   PUSH_RECEIVER
-     *   PUSH_SMALLINT 100
-     *   SEND countdown: (lit[0])
-     *   RETURN_TOP */
+    /* Harness: self countdown: 100 */
     STA_OOP harness_lits[] = { countdown_sel, STA_SMALLINT_OOP(0) };
     uint8_t harness_bc[] = {
         OP_PUSH_RECEIVER, 0,
@@ -405,18 +346,19 @@ static void test_tco(void) {
         OP_SEND, 0,
         OP_RETURN_TOP, 0
     };
-    STA_OOP harness = sta_compiled_method_create(g_sp, 0, 0, 0,
+    STA_OOP harness = sta_compiled_method_create(&g_vm->immutable_space, 0, 0, 0,
         harness_lits, 2, harness_bc, sizeof(harness_bc));
 
-    /* Run with a small slab — if TCO doesn't work, it overflows. */
-    STA_StackSlab *slab = sta_stack_slab_create(2048);
-    STA_OOP result = sta_interpret(slab, g_heap, g_ct, harness,
+    /* Run with a small slab — reinit for this test. */
+    sta_stack_slab_deinit(&g_vm->slab);
+    sta_stack_slab_init(&g_vm->slab, 2048);
+    STA_OOP result = sta_interpret(g_vm, harness,
                                     STA_SMALLINT_OOP(0), NULL, 0);
-    /* countdown: 100 on SmallInteger 0 → eventually n < 1 is true
-     * at n = 0, returns self = 0. */
     assert(result == STA_SMALLINT_OOP(0));
 
-    sta_stack_slab_destroy(slab);
+    /* Restore normal slab size. */
+    sta_stack_slab_deinit(&g_vm->slab);
+    sta_stack_slab_init(&g_vm->slab, 65536);
     printf(" ok\n");
 }
 
@@ -426,32 +368,27 @@ static void test_array_at_via_send(void) {
     printf("  Array >> #at: via send...");
 
     /* Create Array class. */
-    STA_OOP obj_cls = sta_class_table_get(g_ct, STA_CLS_OBJECT);
+    STA_OOP obj_cls = sta_class_table_get(&g_vm->class_table, STA_CLS_OBJECT);
     STA_OOP arr_cls = make_class(STA_CLS_ARRAY, obj_cls, "Array");
 
     STA_OOP at_sel = sym("at:");
     STA_OOP at_lits[] = { at_sel, arr_cls };
     uint8_t at_bc[] = { OP_PRIMITIVE, 51, OP_RETURN_SELF, 0 };
-    STA_OOP at_method = sta_compiled_method_create(g_sp, 1, 1, 51,
+    STA_OOP at_method = sta_compiled_method_create(&g_vm->immutable_space, 1, 1, 51,
         at_lits, 2, at_bc, sizeof(at_bc));
 
-    STA_OOP arr_md = sta_method_dict_create(g_heap, 4);
-    sta_method_dict_insert(g_heap, arr_md, at_sel, at_method);
+    STA_OOP arr_md = sta_method_dict_create(&g_vm->heap, 4);
+    sta_method_dict_insert(&g_vm->heap, arr_md, at_sel, at_method);
     set_method_dict(arr_cls, arr_md);
 
     /* Create a test array [10, 20, 30]. */
-    STA_ObjHeader *arr_h = sta_heap_alloc(g_heap, STA_CLS_ARRAY, 3);
+    STA_ObjHeader *arr_h = sta_heap_alloc(&g_vm->heap, STA_CLS_ARRAY, 3);
     STA_OOP *arr_payload = sta_payload(arr_h);
     arr_payload[0] = STA_SMALLINT_OOP(10);
     arr_payload[1] = STA_SMALLINT_OOP(20);
     arr_payload[2] = STA_SMALLINT_OOP(30);
     STA_OOP arr_oop = (STA_OOP)(uintptr_t)arr_h;
 
-    /* Harness: arr at: 2 → should return 20.
-     * PUSH_LIT 0 (the array)
-     * PUSH_SMALLINT 2
-     * SEND #at: (lit[1])
-     * RETURN_TOP */
     STA_OOP harness_lits[] = { arr_oop, at_sel, STA_SMALLINT_OOP(0) };
     uint8_t harness_bc[] = {
         OP_PUSH_LIT, 0,
@@ -459,15 +396,13 @@ static void test_array_at_via_send(void) {
         OP_SEND, 1,
         OP_RETURN_TOP, 0
     };
-    STA_OOP harness = sta_compiled_method_create(g_sp, 0, 0, 0,
+    STA_OOP harness = sta_compiled_method_create(&g_vm->immutable_space, 0, 0, 0,
         harness_lits, 3, harness_bc, sizeof(harness_bc));
 
-    STA_StackSlab *slab = sta_stack_slab_create(65536);
-    STA_OOP result = sta_interpret(slab, g_heap, g_ct, harness,
+    STA_OOP result = sta_interpret(g_vm, harness,
                                     STA_SMALLINT_OOP(0), NULL, 0);
     assert(result == STA_SMALLINT_OOP(20));
 
-    sta_stack_slab_destroy(slab);
     printf(" ok\n");
 }
 
@@ -476,14 +411,9 @@ static void test_array_at_via_send(void) {
 static void test_primitive_failure_fallback(void) {
     printf("  primitive failure → fallback...");
 
-    /* Create a method with prim 1 (#+ ) but where the fallback
-     * bytecodes return a fixed value (999) instead. */
     STA_OOP plus_sel = sym("+");
-    STA_OOP si_cls = sta_class_table_get(g_ct, STA_CLS_SMALLINTEGER);
+    STA_OOP si_cls = sta_class_table_get(&g_vm->class_table, STA_CLS_SMALLINTEGER);
 
-    /* Method: numArgs=1, numTemps=2 (1 arg + 1 fallback temp for error code).
-     * Prim 1, but we'll call it with a non-SmallInt arg to make it fail.
-     * Fallback: push 999, return. */
     STA_OOP lits[] = { plus_sel, si_cls };
     uint8_t bc[] = {
         OP_PRIMITIVE, 1,           /* 0: preamble */
@@ -491,19 +421,13 @@ static void test_primitive_failure_fallback(void) {
         OP_PUSH_SMALLINT, 244,    /* 4: push 244 */
         OP_RETURN_TOP, 0,         /* 6: return 244 */
     };
-    STA_OOP fail_method = sta_compiled_method_create(g_sp, 1, 2, 1,
+    STA_OOP fail_method = sta_compiled_method_create(&g_vm->immutable_space, 1, 2, 1,
         lits, 2, bc, sizeof(bc));
 
-    /* Install as SmallInteger >> #failingAdd (a custom selector for test). */
     STA_OOP fail_sel = sym("failingAdd:");
     STA_OOP si_md = sta_class_method_dict(si_cls);
-    sta_method_dict_insert(g_heap, si_md, fail_sel, fail_method);
+    sta_method_dict_insert(&g_vm->heap, si_md, fail_sel, fail_method);
 
-    /* Harness: send failingAdd: with a Character argument (causes prim failure).
-     * PUSH_SMALLINT 5 (receiver)
-     * PUSH_LIT 0 (a Character OOP — not SmallInt)
-     * SEND failingAdd: (lit[1])
-     * RETURN_TOP */
     STA_OOP char_oop = STA_CHAR_OOP('X');
     STA_OOP harness_lits[] = { char_oop, fail_sel, STA_SMALLINT_OOP(0) };
     uint8_t harness_bc[] = {
@@ -512,16 +436,13 @@ static void test_primitive_failure_fallback(void) {
         OP_SEND, 1,
         OP_RETURN_TOP, 0
     };
-    STA_OOP harness = sta_compiled_method_create(g_sp, 0, 0, 0,
+    STA_OOP harness = sta_compiled_method_create(&g_vm->immutable_space, 0, 0, 0,
         harness_lits, 3, harness_bc, sizeof(harness_bc));
 
-    STA_StackSlab *slab = sta_stack_slab_create(65536);
-    STA_OOP result = sta_interpret(slab, g_heap, g_ct, harness,
+    STA_OOP result = sta_interpret(g_vm, harness,
                                     STA_SMALLINT_OOP(0), NULL, 0);
-    /* The fallback bytecodes should execute and return 244. */
     assert(result == STA_SMALLINT_OOP(244));
 
-    sta_stack_slab_destroy(slab);
     printf(" ok\n");
 }
 
@@ -530,14 +451,8 @@ static void test_primitive_failure_fallback(void) {
 static void test_super_send(void) {
     printf("  super send...");
 
-    /* Create a class hierarchy: Object → Base → Sub.
-     * Base >> #foo returns 100.
-     * Sub >> #foo does: super foo (returns whatever Base >> #foo returns).
-     * Sub >> #bar does: self foo (normal send, hits Sub >> #foo). */
+    STA_OOP obj_cls = sta_class_table_get(&g_vm->class_table, STA_CLS_OBJECT);
 
-    STA_OOP obj_cls = sta_class_table_get(g_ct, STA_CLS_OBJECT);
-
-    /* We need class indices > 31 for our test classes. */
     uint32_t BASE_IDX = 32;
     uint32_t SUB_IDX = 33;
 
@@ -552,52 +467,44 @@ static void test_super_send(void) {
         OP_PUSH_SMALLINT, 100,
         OP_RETURN_TOP, 0
     };
-    STA_OOP base_foo = sta_compiled_method_create(g_sp, 0, 0, 0,
+    STA_OOP base_foo = sta_compiled_method_create(&g_vm->immutable_space, 0, 0, 0,
         base_foo_lits, 2, base_foo_bc, sizeof(base_foo_bc));
 
-    STA_OOP base_md = sta_method_dict_create(g_heap, 4);
-    sta_method_dict_insert(g_heap, base_md, foo_sel, base_foo);
+    STA_OOP base_md = sta_method_dict_create(&g_vm->heap, 4);
+    sta_method_dict_insert(&g_vm->heap, base_md, foo_sel, base_foo);
     set_method_dict(base_cls, base_md);
 
-    /* Sub >> #foo: PUSH_RECEIVER, SEND_SUPER #foo, RETURN_TOP.
-     * Last literal = sub_cls (owner). */
+    /* Sub >> #foo: PUSH_RECEIVER, SEND_SUPER #foo, RETURN_TOP. */
     STA_OOP sub_foo_lits[] = { foo_sel, sub_cls };
     uint8_t sub_foo_bc[] = {
         OP_PUSH_RECEIVER, 0,
-        OP_SEND_SUPER, 0,        /* lit[0] = #foo, owner = lit[1] = sub_cls */
+        OP_SEND_SUPER, 0,
         OP_RETURN_TOP, 0
     };
-    STA_OOP sub_foo = sta_compiled_method_create(g_sp, 0, 0, 0,
+    STA_OOP sub_foo = sta_compiled_method_create(&g_vm->immutable_space, 0, 0, 0,
         sub_foo_lits, 2, sub_foo_bc, sizeof(sub_foo_bc));
 
-    STA_OOP sub_md = sta_method_dict_create(g_heap, 4);
-    sta_method_dict_insert(g_heap, sub_md, foo_sel, sub_foo);
+    STA_OOP sub_md = sta_method_dict_create(&g_vm->heap, 4);
+    sta_method_dict_insert(&g_vm->heap, sub_md, foo_sel, sub_foo);
     set_method_dict(sub_cls, sub_md);
 
     /* Create an instance of Sub. */
-    STA_ObjHeader *instance_h = sta_heap_alloc(g_heap, SUB_IDX, 0);
+    STA_ObjHeader *instance_h = sta_heap_alloc(&g_vm->heap, SUB_IDX, 0);
     STA_OOP instance = (STA_OOP)(uintptr_t)instance_h;
 
-    /* Harness: instance foo → should dispatch to Sub >> #foo which does
-     * super foo → Base >> #foo → returns 100.
-     * PUSH_LIT 0 (instance)
-     * SEND #foo (lit[1])
-     * RETURN_TOP */
     STA_OOP harness_lits[] = { instance, foo_sel, STA_SMALLINT_OOP(0) };
     uint8_t harness_bc[] = {
         OP_PUSH_LIT, 0,
         OP_SEND, 1,
         OP_RETURN_TOP, 0
     };
-    STA_OOP harness = sta_compiled_method_create(g_sp, 0, 0, 0,
+    STA_OOP harness = sta_compiled_method_create(&g_vm->immutable_space, 0, 0, 0,
         harness_lits, 3, harness_bc, sizeof(harness_bc));
 
-    STA_StackSlab *slab = sta_stack_slab_create(65536);
-    STA_OOP result = sta_interpret(slab, g_heap, g_ct, harness,
+    STA_OOP result = sta_interpret(g_vm, harness,
                                     STA_SMALLINT_OOP(0), NULL, 0);
     assert(result == STA_SMALLINT_OOP(100));
 
-    sta_stack_slab_destroy(slab);
     printf(" ok\n");
 }
 
@@ -608,8 +515,6 @@ static void test_push_small_constants(void) {
 
     STA_OOP lits[] = { STA_SMALLINT_OOP(0) };
 
-    /* Return -1 + 0 + 1 + 2 = 2, but without arithmetic just push and pop
-     * to verify each opcode works. Return PUSH_TWO result. */
     uint8_t bc[] = {
         OP_PUSH_MINUS_ONE, 0,
         OP_POP, 0,
@@ -620,13 +525,11 @@ static void test_push_small_constants(void) {
         OP_PUSH_TWO, 0,
         OP_RETURN_TOP, 0
     };
-    STA_OOP method = sta_compiled_method_create(g_sp, 0, 0, 0,
+    STA_OOP method = sta_compiled_method_create(&g_vm->immutable_space, 0, 0, 0,
                                                   lits, 1, bc, sizeof(bc));
-    STA_StackSlab *slab = sta_stack_slab_create(65536);
-    STA_OOP r = sta_interpret(slab, g_heap, g_ct, method,
+    STA_OOP r = sta_interpret(g_vm, method,
                                STA_SMALLINT_OOP(0), NULL, 0);
     assert(r == STA_SMALLINT_OOP(2));
-    sta_stack_slab_destroy(slab);
     printf(" ok\n");
 }
 
@@ -642,13 +545,11 @@ static void test_dup(void) {
         OP_POP, 0,
         OP_RETURN_TOP, 0
     };
-    STA_OOP method = sta_compiled_method_create(g_sp, 0, 0, 0,
+    STA_OOP method = sta_compiled_method_create(&g_vm->immutable_space, 0, 0, 0,
                                                   lits, 1, bc, sizeof(bc));
-    STA_StackSlab *slab = sta_stack_slab_create(65536);
-    STA_OOP r = sta_interpret(slab, g_heap, g_ct, method,
+    STA_OOP r = sta_interpret(g_vm, method,
                                STA_SMALLINT_OOP(0), NULL, 0);
     assert(r == STA_SMALLINT_OOP(42));
-    sta_stack_slab_destroy(slab);
     printf(" ok\n");
 }
 
@@ -660,23 +561,21 @@ static void test_return_true_false(void) {
     STA_OOP lits[] = { STA_SMALLINT_OOP(0) };
 
     uint8_t bc1[] = { OP_RETURN_TRUE, 0 };
-    STA_OOP m1 = sta_compiled_method_create(g_sp, 0, 0, 0,
+    STA_OOP m1 = sta_compiled_method_create(&g_vm->immutable_space, 0, 0, 0,
                                               lits, 1, bc1, 2);
-    STA_StackSlab *slab = sta_stack_slab_create(65536);
-    STA_OOP r = sta_interpret(slab, g_heap, g_ct, m1,
+    STA_OOP r = sta_interpret(g_vm, m1,
                                STA_SMALLINT_OOP(0), NULL, 0);
     assert(r == sta_spc_get(SPC_TRUE));
 
     uint8_t bc2[] = { OP_RETURN_FALSE, 0 };
-    STA_OOP m2 = sta_compiled_method_create(g_sp, 0, 0, 0,
+    STA_OOP m2 = sta_compiled_method_create(&g_vm->immutable_space, 0, 0, 0,
                                               lits, 1, bc2, 2);
-    slab->top = slab->base;
-    slab->sp = slab->base;
-    r = sta_interpret(slab, g_heap, g_ct, m2,
+    g_vm->slab.top = g_vm->slab.base;
+    g_vm->slab.sp = g_vm->slab.base;
+    r = sta_interpret(g_vm, m2,
                       STA_SMALLINT_OOP(0), NULL, 0);
     assert(r == sta_spc_get(SPC_FALSE));
 
-    sta_stack_slab_destroy(slab);
     printf(" ok\n");
 }
 
@@ -685,20 +584,8 @@ static void test_return_true_false(void) {
 static void test_chained_expression(void) {
     printf("  10 + (3 + 4) = 17 (sp restore)...");
 
-    /* This test verifies that slab->sp is correctly restored when a
-     * callee frame returns. Without saved_sp restoration, the sender's
-     * pending expression stack items (the 10) get corrupted. */
-
     STA_OOP plus_sel = sym("+");
 
-    /* Harness method:
-     *   PUSH_SMALLINT 10     — left operand, sits on stack during inner send
-     *   PUSH_SMALLINT 3
-     *   PUSH_SMALLINT 4
-     *   SEND #+              — 3 + 4 = 7 (inner send)
-     *   SEND #+              — 10 + 7 = 17 (outer send)
-     *   RETURN_TOP
-     */
     STA_OOP harness_lits[] = { plus_sel, STA_SMALLINT_OOP(0) };
     uint8_t harness_bc[] = {
         OP_PUSH_SMALLINT, 10,
@@ -708,16 +595,14 @@ static void test_chained_expression(void) {
         OP_SEND, 0,
         OP_RETURN_TOP, 0
     };
-    STA_OOP harness = sta_compiled_method_create(g_sp, 0, 0, 0,
+    STA_OOP harness = sta_compiled_method_create(&g_vm->immutable_space, 0, 0, 0,
         harness_lits, 2, harness_bc, sizeof(harness_bc));
     assert(harness);
 
-    STA_StackSlab *slab = sta_stack_slab_create(65536);
-    STA_OOP result = sta_interpret(slab, g_heap, g_ct, harness,
+    STA_OOP result = sta_interpret(g_vm, harness,
                                     STA_SMALLINT_OOP(0), NULL, 0);
     assert(result == STA_SMALLINT_OOP(17));
 
-    sta_stack_slab_destroy(slab);
     printf(" ok\n");
 }
 

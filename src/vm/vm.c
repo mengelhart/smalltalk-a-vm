@@ -1,11 +1,9 @@
 /* src/vm/vm.c
  * Public API implementation — STA_VM lifecycle, image, source loading.
- * Phase 1, Epic 11.
+ * Phase 2, Epic 0: all mutable state is inline in STA_VM.
  */
-#include "vm/vm_internal.h"
-#include "vm/primitive_table.h"
+#include "vm/vm_state.h"
 #include "vm/special_objects.h"
-#include "vm/handler.h"
 #include "bootstrap/bootstrap.h"
 #include "bootstrap/kernel_load.h"
 #include "bootstrap/filein.h"
@@ -35,14 +33,12 @@ static void set_error(STA_VM *vm, const char *fmt, ...) {
     va_end(ap);
 }
 
-static void wire_primitives(STA_VM *vm) {
-    sta_primitive_table_init();
-    sta_primitive_set_class_table(vm->class_table);
-    sta_primitive_set_heap(vm->heap);
-    sta_primitive_set_slab(vm->stack_slab);
-    sta_primitive_set_symbol_table(vm->symbol_table);
-    sta_primitive_set_immutable_space(vm->immutable_space);
-}
+/* Track which subsystems have been initialized for cleanup on failure. */
+#define INIT_HEAP    (1u << 0)
+#define INIT_IMM     (1u << 1)
+#define INIT_SYMTAB  (1u << 2)
+#define INIT_CLASSTAB (1u << 3)
+#define INIT_SLAB    (1u << 4)
 
 static int file_exists(const char *path) {
     FILE *f = fopen(path, "rb");
@@ -60,73 +56,80 @@ STA_VM* sta_vm_create(const STA_VMConfig* config) {
 
     vm->config = *config;
     vm->last_error[0] = '\0';
+    unsigned inited = 0;
 
-    /* Allocate subsystems. */
+    /* Initialize inline subsystems. */
     size_t heap_bytes = config->initial_heap_bytes > 0
                         ? config->initial_heap_bytes
                         : DEFAULT_HEAP_BYTES;
 
-    vm->heap = sta_heap_create(heap_bytes);
-    if (!vm->heap) { set_error(vm, "heap allocation failed"); goto fail; }
+    if (sta_heap_init(&vm->heap, heap_bytes) != 0) {
+        set_error(vm, "heap allocation failed"); goto fail;
+    }
+    inited |= INIT_HEAP;
 
-    vm->immutable_space = sta_immutable_space_create(DEFAULT_IMM_BYTES);
-    if (!vm->immutable_space) { set_error(vm, "immutable space allocation failed"); goto fail; }
+    if (sta_immutable_space_init(&vm->immutable_space, DEFAULT_IMM_BYTES) != 0) {
+        set_error(vm, "immutable space allocation failed"); goto fail;
+    }
+    inited |= INIT_IMM;
 
-    vm->symbol_table = sta_symbol_table_create(DEFAULT_SYMTAB_CAPACITY);
-    if (!vm->symbol_table) { set_error(vm, "symbol table allocation failed"); goto fail; }
+    if (sta_symbol_table_init(&vm->symbol_table, DEFAULT_SYMTAB_CAPACITY) != 0) {
+        set_error(vm, "symbol table allocation failed"); goto fail;
+    }
+    inited |= INIT_SYMTAB;
 
-    vm->class_table = sta_class_table_create();
-    if (!vm->class_table) { set_error(vm, "class table allocation failed"); goto fail; }
+    if (sta_class_table_init(&vm->class_table) != 0) {
+        set_error(vm, "class table allocation failed"); goto fail;
+    }
+    inited |= INIT_CLASSTAB;
 
-    vm->stack_slab = sta_stack_slab_create(DEFAULT_SLAB_BYTES);
-    if (!vm->stack_slab) { set_error(vm, "stack slab allocation failed"); goto fail; }
+    if (sta_stack_slab_init(&vm->slab, DEFAULT_SLAB_BYTES) != 0) {
+        set_error(vm, "stack slab allocation failed"); goto fail;
+    }
+    inited |= INIT_SLAB;
+
+    /* Bind special objects to this VM's inline array. */
+    sta_special_objects_bind(vm->specials);
 
     /* Reset global handler state for clean startup. */
     sta_handler_set_top(NULL);
 
     /* Startup pipeline: load image or bootstrap from scratch. */
     if (config->image_path && file_exists(config->image_path)) {
-        /* Load from saved image. */
         int rc = sta_image_load_from_file(config->image_path,
-                                          vm->heap, vm->immutable_space,
-                                          vm->symbol_table, vm->class_table);
+                                          &vm->heap, &vm->immutable_space,
+                                          &vm->symbol_table, &vm->class_table);
         if (rc != 0) {
             set_error(vm, "image load failed: %s (code %d)",
                       config->image_path, rc);
             goto fail;
         }
-        wire_primitives(vm);
+        sta_primitive_table_init();
     } else {
-        /* First launch — bootstrap from scratch. */
-        STA_BootstrapResult br = sta_bootstrap(vm->heap, vm->immutable_space,
-                                               vm->symbol_table, vm->class_table);
+        STA_BootstrapResult br = sta_bootstrap(&vm->heap, &vm->immutable_space,
+                                               &vm->symbol_table, &vm->class_table);
         if (br.status != 0) {
             set_error(vm, "bootstrap failed: %s", br.error ? br.error : "unknown");
             goto fail;
         }
 
-        /* Wire primitives before kernel load (kernel_load uses prim getters). */
-        wire_primitives(vm);
+        sta_primitive_table_init();
 
-        /* Load kernel .st files. KERNEL_DIR is compile-time for tests;
-         * for the public API we look for a "kernel/" directory relative
-         * to the working directory. Tests pass KERNEL_DIR via -D. */
 #ifdef KERNEL_DIR
         const char *kernel_dir = KERNEL_DIR;
 #else
         const char *kernel_dir = "kernel";
 #endif
-        int rc = sta_kernel_load_all(kernel_dir);
+        int rc = sta_kernel_load_all(vm, kernel_dir);
         if (rc != 0) {
             set_error(vm, "kernel load failed (code %d)", rc);
             goto fail;
         }
 
-        /* Optionally save the image for next launch. */
         if (config->image_path) {
             rc = sta_image_save_to_file(config->image_path,
-                                        vm->heap, vm->immutable_space,
-                                        vm->symbol_table, vm->class_table);
+                                        &vm->heap, &vm->immutable_space,
+                                        &vm->symbol_table, &vm->class_table);
             if (rc != 0) {
                 set_error(vm, "image save failed (code %d)", rc);
                 goto fail;
@@ -138,13 +141,11 @@ STA_VM* sta_vm_create(const STA_VMConfig* config) {
     return vm;
 
 fail:
-    /* Tear down any partially-allocated subsystems. */
-    if (vm->stack_slab)       sta_stack_slab_destroy(vm->stack_slab);
-    if (vm->class_table)      sta_class_table_destroy(vm->class_table);
-    if (vm->symbol_table)     sta_symbol_table_destroy(vm->symbol_table);
-    if (vm->immutable_space)  sta_immutable_space_destroy(vm->immutable_space);
-    if (vm->heap)             sta_heap_destroy(vm->heap);
-    /* Copy error to static fallback so sta_vm_last_error(NULL) works. */
+    if (inited & INIT_SLAB)     sta_stack_slab_deinit(&vm->slab);
+    if (inited & INIT_CLASSTAB) sta_class_table_deinit(&vm->class_table);
+    if (inited & INIT_SYMTAB)   sta_symbol_table_deinit(&vm->symbol_table);
+    if (inited & INIT_IMM)      sta_immutable_space_deinit(&vm->immutable_space);
+    if (inited & INIT_HEAP)     sta_heap_deinit(&vm->heap);
     memcpy(g_last_error, vm->last_error, sizeof(g_last_error));
     free(vm);
     return NULL;
@@ -157,15 +158,16 @@ void sta_vm_destroy(STA_VM* vm) {
 
     vm->destroyed = true;
 
-    /* Teardown in reverse order of creation. */
-    if (vm->stack_slab)       sta_stack_slab_destroy(vm->stack_slab);
-    if (vm->class_table)      sta_class_table_destroy(vm->class_table);
-    if (vm->symbol_table)     sta_symbol_table_destroy(vm->symbol_table);
-    if (vm->immutable_space)  sta_immutable_space_destroy(vm->immutable_space);
-    if (vm->heap)             sta_heap_destroy(vm->heap);
+    /* Teardown in reverse order of initialization. */
+    sta_stack_slab_deinit(&vm->slab);
+    sta_class_table_deinit(&vm->class_table);
+    sta_symbol_table_deinit(&vm->symbol_table);
+    sta_immutable_space_deinit(&vm->immutable_space);
+    sta_heap_deinit(&vm->heap);
 
     /* Reset globals so a subsequent sta_vm_create starts clean. */
     sta_handler_set_top(NULL);
+    sta_special_objects_bind(NULL);
     sta_special_objects_init();
 
     free(vm);
@@ -182,21 +184,20 @@ const char* sta_vm_last_error(STA_VM* vm) {
 
 int sta_vm_load_image(STA_VM* vm, const char* path) {
     if (!vm || !path) return STA_ERR_INVALID;
-    int rc = sta_image_load_from_file(path, vm->heap, vm->immutable_space,
-                                      vm->symbol_table, vm->class_table);
+    int rc = sta_image_load_from_file(path, &vm->heap, &vm->immutable_space,
+                                      &vm->symbol_table, &vm->class_table);
     if (rc != 0) {
         set_error(vm, "image load failed: %s (code %d)", path, rc);
         return STA_ERR_IO;
     }
-    /* Re-wire primitive table after load (C function pointers not serialised). */
-    wire_primitives(vm);
+    sta_primitive_table_init();
     return STA_OK;
 }
 
 int sta_vm_save_image(STA_VM* vm, const char* path) {
     if (!vm || !path) return STA_ERR_INVALID;
-    int rc = sta_image_save_to_file(path, vm->heap, vm->immutable_space,
-                                    vm->symbol_table, vm->class_table);
+    int rc = sta_image_save_to_file(path, &vm->heap, &vm->immutable_space,
+                                    &vm->symbol_table, &vm->class_table);
     if (rc != 0) {
         set_error(vm, "image save failed: %s (code %d)", path, rc);
     }
@@ -206,48 +207,18 @@ int sta_vm_save_image(STA_VM* vm, const char* path) {
 /* ── sta_vm_load_source ────────────────────────────────────────────── */
 
 int sta_vm_load_source(STA_VM* vm, const char* path) {
-    if (!path) return STA_ERR_INVALID;
+    if (!vm || !path) return STA_ERR_INVALID;
 
-    /* Resolve subsystems: from VM struct if available, else from globals. */
-    STA_Heap           *heap;
-    STA_ImmutableSpace *imm;
-    STA_SymbolTable    *syms;
-    STA_ClassTable     *ct;
-
-    if (vm) {
-        if (!vm->bootstrapped) {
-            set_error(vm, "kernel not bootstrapped");
-            return STA_ERR_INTERNAL;
-        }
-        heap = vm->heap;
-        imm  = vm->immutable_space;
-        syms = vm->symbol_table;
-        ct   = vm->class_table;
-    } else {
-        /* Legacy path: existing tests pass NULL. */
-        heap = sta_primitive_get_heap();
-        imm  = sta_primitive_get_immutable_space();
-        syms = sta_primitive_get_symbol_table();
-        ct   = sta_primitive_get_class_table();
-    }
-
-    if (!heap || !imm || !syms || !ct) {
-        if (vm) set_error(vm, "kernel not bootstrapped");
-        else snprintf(g_last_error, sizeof(g_last_error), "kernel not bootstrapped");
+    if (!vm->bootstrapped) {
+        set_error(vm, "kernel not bootstrapped");
         return STA_ERR_INTERNAL;
     }
 
-    STA_FileInContext ctx = {
-        .heap = heap,
-        .immutable_space = imm,
-        .symbol_table = syms,
-        .class_table = ct,
-    };
+    STA_FileInContext ctx = { .vm = vm };
 
     int rc = sta_filein_load(&ctx, path);
     if (rc != 0) {
-        if (vm) set_error(vm, "%s", ctx.error_msg);
-        else snprintf(g_last_error, sizeof(g_last_error), "%s", ctx.error_msg);
+        set_error(vm, "%s", ctx.error_msg);
         if (rc == -3) return STA_ERR_IO;
         return STA_ERR_COMPILE;
     }

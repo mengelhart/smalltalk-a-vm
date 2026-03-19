@@ -3,15 +3,18 @@
  * Phase 1, Epic 10.
  */
 #include <sta/vm.h>
+#include "vm/vm_state.h"
 #include "vm/heap.h"
 #include "vm/immutable_space.h"
 #include "vm/symbol_table.h"
 #include "vm/class_table.h"
 #include "vm/special_objects.h"
+#include "vm/primitive_table.h"
 #include "bootstrap/bootstrap.h"
 #include "bootstrap/kernel_load.h"
 #include "image/image.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <assert.h>
 #include <string.h>
 #include <unistd.h>
@@ -28,29 +31,33 @@ static int tests_passed = 0;
 
 /* ── Shared infrastructure ───────────────────────────────────────────── */
 
-static STA_ImmutableSpace *imm;
-static STA_SymbolTable    *syms;
-static STA_Heap           *heap;
-static STA_ClassTable     *ct;
-static const char         *image_path = "/tmp/sta_test_image_save.stai";
+static STA_VM *g_vm;
+static const char *image_path = "/tmp/sta_test_image_save.stai";
 
 static void setup(void) {
-    heap = sta_heap_create(4 * 1024 * 1024);
-    imm  = sta_immutable_space_create(4 * 1024 * 1024);
-    syms = sta_symbol_table_create(512);
-    ct   = sta_class_table_create();
+    g_vm = calloc(1, sizeof(STA_VM));
+    assert(g_vm);
+    sta_heap_init(&g_vm->heap, 4 * 1024 * 1024);
+    sta_immutable_space_init(&g_vm->immutable_space, 4 * 1024 * 1024);
+    sta_symbol_table_init(&g_vm->symbol_table, 512);
+    sta_class_table_init(&g_vm->class_table);
+    sta_stack_slab_init(&g_vm->slab, 64 * 1024);
+    sta_special_objects_bind(g_vm->specials);
+    sta_primitive_table_init();
 
-    STA_BootstrapResult br = sta_bootstrap(heap, imm, syms, ct);
+    STA_BootstrapResult br = sta_bootstrap(&g_vm->heap, &g_vm->immutable_space,
+                                            &g_vm->symbol_table, &g_vm->class_table);
     assert(br.status == 0);
 
-    int rc = sta_kernel_load_all(KERNEL_DIR);
+    int rc = sta_kernel_load_all(g_vm, KERNEL_DIR);
     assert(rc == 0);
 }
 
 /* ── Tests ──────────────────────────────────────────────────────────── */
 
 static void test_save_returns_ok(void) {
-    int rc = sta_image_save_to_file(image_path, heap, imm, syms, ct);
+    int rc = sta_image_save_to_file(image_path, &g_vm->heap, &g_vm->immutable_space,
+                                    &g_vm->symbol_table, &g_vm->class_table);
     assert(rc == STA_OK);
 }
 

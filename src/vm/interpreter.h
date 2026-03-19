@@ -1,6 +1,6 @@
 /* src/vm/interpreter.h
- * Bytecode interpreter — Phase 1 dispatch loop.
- * Phase 1 — permanent. See bytecode spec §§2–5, 10, ADR 010, ADR 014.
+ * Bytecode interpreter — Phase 2 dispatch loop.
+ * See bytecode spec §§2–5, 10, ADR 010, ADR 014.
  */
 #pragma once
 #include "oop.h"
@@ -8,6 +8,9 @@
 #include "heap.h"
 #include "class_table.h"
 #include <stdint.h>
+
+/* Forward declaration — full definition in vm_state.h */
+struct STA_VM;
 
 /* ── Opcode constants (bytecode spec §3, §12) ─────────────────────────── */
 
@@ -67,14 +70,14 @@
 
 /* ── Frame flag bits ───────────────────────────────────────────────────── */
 
-#define STA_FRAME_FLAG_MARKER    0x01u  /* live/dead marker (Phase 2 NLR) */
-#define STA_FRAME_FLAG_UNWIND    0x02u  /* unwind handler present (§7.7)  */
+#define STA_FRAME_FLAG_MARKER    0x01u
+#define STA_FRAME_FLAG_UNWIND    0x02u
 
 /* ── Reduction quota ───────────────────────────────────────────────────── */
 
 #define STA_REDUCTION_QUOTA 1000u
 
-/* ── Class object slot layout (contract with Epic 4 bootstrap) ─────────── */
+/* ── Class object slot layout ──────────────────────────────────────────── */
 
 #define STA_CLASS_SLOT_SUPERCLASS   0
 #define STA_CLASS_SLOT_METHODDICT   1
@@ -83,39 +86,27 @@
 
 /* ── Class object accessors ────────────────────────────────────────────── */
 
-/* Read superclass OOP from a class object. */
 static inline STA_OOP sta_class_superclass(STA_OOP class_oop) {
     STA_ObjHeader *h = (STA_ObjHeader *)(uintptr_t)class_oop;
     return sta_payload(h)[STA_CLASS_SLOT_SUPERCLASS];
 }
 
-/* Read method dictionary OOP from a class object. */
 static inline STA_OOP sta_class_method_dict(STA_OOP class_oop) {
     STA_ObjHeader *h = (STA_ObjHeader *)(uintptr_t)class_oop;
     return sta_payload(h)[STA_CLASS_SLOT_METHODDICT];
 }
 
-/* ── Interpreter entry point ───────────────────────────────────────────── */
+/* ── Interpreter entry points ──────────────────────────────────────────── */
 
 /* Execute a method on a receiver with arguments.
  * Creates the initial frame, enters the dispatch loop, returns when
- * the top-level frame returns.
- *
- * The class_table is needed for message dispatch (class lookup).
- * Returns the result OOP (the value returned by the top-level method). */
-STA_OOP sta_interpret(STA_StackSlab *slab, STA_Heap *heap,
-                      STA_ClassTable *ct,
+ * the top-level frame returns. */
+STA_OOP sta_interpret(struct STA_VM *vm,
                       STA_OOP method, STA_OOP receiver,
                       STA_OOP *args, uint8_t nargs);
 
-/* Evaluate a BlockClosure by creating a block activation frame and
- * running the dispatch loop. Used by on:do: and ensure: primitives
- * to invoke blocks from C.
- *
- * Reads startPC, homeMethod, receiver from the closure's slots.
- * Pushes a frame with sender = NULL, runs until the block returns.
- * Returns the block's result OOP. */
-STA_OOP sta_eval_block(STA_StackSlab *slab, STA_Heap *heap,
-                        STA_ClassTable *ct,
+/* Evaluate a BlockClosure by creating a block activation frame.
+ * Used by on:do: and ensure: primitives to invoke blocks from C. */
+STA_OOP sta_eval_block(struct STA_VM *vm,
                         STA_OOP block_closure,
                         STA_OOP *args, uint8_t nargs);

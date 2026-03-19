@@ -14,7 +14,20 @@
 #include "oop.h"
 #include <stddef.h>
 
-typedef struct STA_ImmutableSpace STA_ImmutableSpace;
+/* Struct definition (visible for STA_VM embedding). */
+typedef struct STA_ImmutableSpace {
+    char  *base;      /* page-aligned mmap'd region  */
+    size_t capacity;  /* total mapped bytes           */
+    size_t used;      /* bytes consumed so far        */
+    int    sealed;    /* 1 after mprotect(PROT_READ)  */
+} STA_ImmutableSpace;
+
+/* Initialize in-place. Allocates mmap backing memory.
+ * Returns 0 on success, -1 on failure. */
+int sta_immutable_space_init(STA_ImmutableSpace *sp, size_t min_capacity);
+
+/* Deinitialize (unmap backing memory). Does not free the struct itself. */
+void sta_immutable_space_deinit(STA_ImmutableSpace *sp);
 
 /* Create a space of at least min_capacity bytes.
  * Actual capacity is rounded up to the system page size.

@@ -8,46 +8,55 @@
 #include <stdlib.h>
 #include <string.h>
 
-struct STA_ImmutableSpace {
-    char  *base;      /* page-aligned mmap'd region  */
-    size_t capacity;  /* total mapped bytes           */
-    size_t used;      /* bytes consumed so far        */
-    int    sealed;    /* 1 after mprotect(PROT_READ)  */
-};
-
 static size_t page_round_up(size_t n) {
     long pgsz = sysconf(_SC_PAGESIZE);
     size_t p = (size_t)pgsz;
     return (n + p - 1) / p * p;
 }
 
-STA_ImmutableSpace *sta_immutable_space_create(size_t min_capacity) {
+int sta_immutable_space_init(STA_ImmutableSpace *sp, size_t min_capacity) {
     if (min_capacity == 0) min_capacity = 1;
     size_t capacity = page_round_up(min_capacity);
-
-    STA_ImmutableSpace *sp = malloc(sizeof(*sp));
-    if (!sp) return NULL;
 
     void *mem = mmap(NULL, capacity,
                      PROT_READ | PROT_WRITE,
                      MAP_PRIVATE | MAP_ANON,
                      -1, 0);
-    if (mem == MAP_FAILED) { free(sp); return NULL; }
+    if (mem == MAP_FAILED) return -1;
 
     sp->base     = mem;
     sp->capacity = capacity;
     sp->used     = 0;
     sp->sealed   = 0;
+    return 0;
+}
+
+void sta_immutable_space_deinit(STA_ImmutableSpace *sp) {
+    if (!sp) return;
+    if (sp->sealed) {
+        mprotect(sp->base, sp->capacity, PROT_READ | PROT_WRITE);
+    }
+    if (sp->base) munmap(sp->base, sp->capacity);
+    sp->base = NULL;
+    sp->capacity = 0;
+    sp->used = 0;
+    sp->sealed = 0;
+}
+
+STA_ImmutableSpace *sta_immutable_space_create(size_t min_capacity) {
+    STA_ImmutableSpace *sp = malloc(sizeof(*sp));
+    if (!sp) return NULL;
+
+    if (sta_immutable_space_init(sp, min_capacity) != 0) {
+        free(sp);
+        return NULL;
+    }
     return sp;
 }
 
 void sta_immutable_space_destroy(STA_ImmutableSpace *sp) {
     if (!sp) return;
-    /* Unseal before munmap so the kernel can reclaim the pages cleanly. */
-    if (sp->sealed) {
-        mprotect(sp->base, sp->capacity, PROT_READ | PROT_WRITE);
-    }
-    if (sp->base) munmap(sp->base, sp->capacity);
+    sta_immutable_space_deinit(sp);
     free(sp);
 }
 

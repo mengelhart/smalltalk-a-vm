@@ -6,33 +6,41 @@
 #include <stdlib.h>
 #include <string.h>
 
-struct STA_Heap {
-    char  *base;      /* 16-byte aligned slab */
-    size_t capacity;  /* total usable bytes   */
-    size_t used;      /* bytes consumed       */
-};
-
-STA_Heap *sta_heap_create(size_t capacity) {
-    /* Round up to 16-byte multiple. */
+int sta_heap_init(STA_Heap *heap, size_t capacity) {
     capacity = (capacity + 15u) & ~(size_t)15u;
     if (capacity == 0) capacity = 16u;
 
-    STA_Heap *heap = malloc(sizeof(*heap));
-    if (!heap) return NULL;
-
-    /* aligned_alloc: alignment must divide size; both are multiples of 16. */
     heap->base = aligned_alloc(16, capacity);
-    if (!heap->base) { free(heap); return NULL; }
+    if (!heap->base) return -1;
 
     memset(heap->base, 0, capacity);
     heap->capacity = capacity;
     heap->used     = 0;
+    return 0;
+}
+
+void sta_heap_deinit(STA_Heap *heap) {
+    if (!heap) return;
+    free(heap->base);
+    heap->base = NULL;
+    heap->capacity = 0;
+    heap->used = 0;
+}
+
+STA_Heap *sta_heap_create(size_t capacity) {
+    STA_Heap *heap = malloc(sizeof(*heap));
+    if (!heap) return NULL;
+
+    if (sta_heap_init(heap, capacity) != 0) {
+        free(heap);
+        return NULL;
+    }
     return heap;
 }
 
 void sta_heap_destroy(STA_Heap *heap) {
     if (!heap) return;
-    free(heap->base);
+    sta_heap_deinit(heap);
     free(heap);
 }
 

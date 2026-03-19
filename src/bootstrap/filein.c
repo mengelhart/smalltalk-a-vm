@@ -7,6 +7,7 @@
  * objects. Do not over-engineer this code.
  */
 #include "filein.h"
+#include "../vm/vm_state.h"
 #include "../vm/interpreter.h"
 #include "../vm/compiled_method.h"
 #include "../vm/method_dict.h"
@@ -28,7 +29,6 @@
 
 /* ── Chunk reader ─────────────────────────────────────────────────────── */
 
-/* Read an entire file into a malloc'd buffer. Returns NULL on failure. */
 static char *read_file(const char *path, size_t *out_len) {
     FILE *f = fopen(path, "rb");
     if (!f) return NULL;
@@ -50,15 +50,10 @@ static char *read_file(const char *path, size_t *out_len) {
     return buf;
 }
 
-/* Extract the next chunk from source starting at *pos.
- * A chunk is delimited by an unescaped '!'. Double '!!' is escaped to '!'.
- * Returns a malloc'd string with unescaped content, or NULL at end.
- * Sets *out_len to the unescaped length. */
 static char *next_chunk(const char *source, size_t source_len,
                          size_t *pos, size_t *out_len) {
     if (*pos >= source_len) return NULL;
 
-    /* Skip leading whitespace and newlines between chunks. */
     while (*pos < source_len &&
            (source[*pos] == '\n' || source[*pos] == '\r' ||
             source[*pos] == ' '  || source[*pos] == '\t')) {
@@ -66,7 +61,6 @@ static char *next_chunk(const char *source, size_t source_len,
     }
     if (*pos >= source_len) return NULL;
 
-    /* Scan for unescaped '!'. */
     size_t start = *pos;
     size_t cap = source_len - start;
     char *buf = malloc(cap + 1);
@@ -77,12 +71,10 @@ static char *next_chunk(const char *source, size_t source_len,
     while (i < source_len) {
         if (source[i] == '!') {
             if (i + 1 < source_len && source[i + 1] == '!') {
-                /* Escaped '!' — emit single '!'. */
                 buf[out++] = '!';
                 i += 2;
             } else {
-                /* Unescaped '!' — end of chunk. */
-                i++; /* skip the '!' */
+                i++;
                 break;
             }
         } else {
@@ -94,7 +86,6 @@ static char *next_chunk(const char *source, size_t source_len,
     buf[out] = '\0';
     *out_len = out;
 
-    /* If the chunk is empty (just whitespace), return empty string. */
     return buf;
 }
 
@@ -105,11 +96,7 @@ static int is_class_definition(const char *chunk) {
            strstr(chunk, "instanceVariableNames:") != NULL;
 }
 
-/* Parse a methodsFor header: "ClassName methodsFor: 'category'"
- * Extracts the class name into out_class (caller-provided buffer).
- * Returns 1 on success, 0 if not a methodsFor header. */
 static int parse_methods_for(const char *chunk, char *out_class, size_t class_buf_len) {
-    /* Pattern: "ClassName methodsFor: 'category'" */
     const char *mf = strstr(chunk, " methodsFor:");
     if (!mf) return 0;
 
@@ -127,8 +114,8 @@ static STA_OOP lookup_class(STA_FileInContext *ctx, const char *name) {
     STA_OOP dict = sta_spc_get(SPC_SMALLTALK);
     if (dict == 0) return 0;
 
-    STA_OOP name_sym = sta_symbol_intern(ctx->immutable_space,
-                                           ctx->symbol_table,
+    STA_OOP name_sym = sta_symbol_intern(&ctx->vm->immutable_space,
+                                           &ctx->vm->symbol_table,
                                            name, strlen(name));
     if (name_sym == 0) return 0;
 
@@ -247,14 +234,12 @@ static uint32_t collect_instvar_names(STA_FileInContext *ctx,
 
 static int execute_class_definition(STA_FileInContext *ctx,
                                       const char *chunk, int chunk_num) {
-    /* Record instvar names for later use by the compiler. */
     record_class_info(ctx, chunk);
     STA_OOP sysdict = sta_spc_get(SPC_SMALLTALK);
 
-    /* Compile the class definition as an expression. */
     STA_CompileResult cr = sta_compile_expression(
-        chunk, ctx->symbol_table, ctx->immutable_space,
-        ctx->heap, sysdict);
+        chunk, &ctx->vm->symbol_table, &ctx->vm->immutable_space,
+        &ctx->vm->heap, sysdict);
 
     if (cr.had_error) {
         snprintf(ctx->error_msg, sizeof(ctx->error_msg),
@@ -263,20 +248,9 @@ static int execute_class_definition(STA_FileInContext *ctx,
         return FILEIN_ERR_COMPILE;
     }
 
-    /* Execute via interpreter. */
-    STA_StackSlab *slab = sta_stack_slab_create(64 * 1024);
-    if (!slab) {
-        snprintf(ctx->error_msg, sizeof(ctx->error_msg),
-                 "chunk %d: out of memory allocating stack slab", chunk_num);
-        return FILEIN_ERR_COMPILE;
-    }
-
-    sta_primitive_set_slab(slab);
     STA_OOP nil_oop = sta_spc_get(SPC_NIL);
-    (void)sta_interpret(slab, ctx->heap, ctx->class_table,
-                         cr.method, nil_oop, NULL, 0);
+    (void)sta_interpret(ctx->vm, cr.method, nil_oop, NULL, 0);
 
-    sta_stack_slab_destroy(slab);
     return FILEIN_OK;
 }
 
@@ -291,7 +265,6 @@ static int install_method(STA_FileInContext *ctx, const char *class_name,
         return FILEIN_ERR_COMPILE;
     }
 
-    /* Parse the method to extract the selector name. */
     STA_Parser parser;
     STA_AstNode *ast = sta_parse_method(source, &parser);
     if (!ast) {
@@ -303,9 +276,8 @@ static int install_method(STA_FileInContext *ctx, const char *class_name,
     }
     const char *selector_str = ast->as.method.selector;
 
-    /* Intern the selector. */
-    STA_OOP selector = sta_symbol_intern(ctx->immutable_space,
-                                           ctx->symbol_table,
+    STA_OOP selector = sta_symbol_intern(&ctx->vm->immutable_space,
+                                           &ctx->vm->symbol_table,
                                            selector_str, strlen(selector_str));
     if (selector == 0) {
         sta_ast_free(ast);
@@ -317,17 +289,15 @@ static int install_method(STA_FileInContext *ctx, const char *class_name,
 
     sta_ast_free(ast);
 
-    /* Collect instvar names for the class (walking superclass chain). */
     const char *ivar_ptrs[64];
     uint32_t ivar_count = collect_instvar_names(ctx, class_name,
                                                   ivar_ptrs, 64);
 
-    /* Compile the method. */
     STA_OOP sysdict = sta_spc_get(SPC_SMALLTALK);
     STA_CompileResult cr = sta_compile_method(
         source, class_oop, ivar_ptrs, ivar_count,
-        ctx->symbol_table, ctx->immutable_space,
-        ctx->heap, sysdict);
+        &ctx->vm->symbol_table, &ctx->vm->immutable_space,
+        &ctx->vm->heap, sysdict);
 
     if (cr.had_error) {
         snprintf(ctx->error_msg, sizeof(ctx->error_msg),
@@ -336,9 +306,8 @@ static int install_method(STA_FileInContext *ctx, const char *class_name,
         return FILEIN_ERR_COMPILE;
     }
 
-    /* Install in the class's method dictionary. */
     STA_OOP md = sta_class_method_dict(class_oop);
-    int rc = sta_method_dict_insert(ctx->heap, md, selector, cr.method);
+    int rc = sta_method_dict_insert(&ctx->vm->heap, md, selector, cr.method);
     if (rc != 0) {
         snprintf(ctx->error_msg, sizeof(ctx->error_msg),
                  "chunk %d: failed to install method in %s", chunk_num, class_name);
@@ -365,7 +334,6 @@ int sta_filein_load(STA_FileInContext *ctx, const char *path) {
     int chunk_num = 0;
     int rc = FILEIN_OK;
 
-    /* State: when inside a methodsFor section, this holds the class name. */
     char current_class[256] = {0};
     int in_methods = 0;
 
@@ -376,7 +344,6 @@ int sta_filein_load(STA_FileInContext *ctx, const char *path) {
 
         chunk_num++;
 
-        /* Skip empty chunks (they terminate method sections). */
         if (chunk_len == 0 ||
             (chunk_len == 1 && (chunk[0] == '\n' || chunk[0] == '\r'))) {
             in_methods = 0;
@@ -384,7 +351,6 @@ int sta_filein_load(STA_FileInContext *ctx, const char *path) {
             continue;
         }
 
-        /* Trim leading/trailing whitespace for identification. */
         const char *trimmed = chunk;
         while (*trimmed == ' ' || *trimmed == '\n' || *trimmed == '\r' ||
                *trimmed == '\t')
@@ -405,7 +371,6 @@ int sta_filein_load(STA_FileInContext *ctx, const char *path) {
         }
 
         if (in_methods) {
-            /* This chunk is a method body for current_class. */
             rc = install_method(ctx, current_class, chunk, chunk_num);
             if (rc != FILEIN_OK) { free(chunk); break; }
         } else if (is_class_definition(chunk)) {
@@ -418,7 +383,6 @@ int sta_filein_load(STA_FileInContext *ctx, const char *path) {
                 current_class[sizeof(current_class) - 1] = '\0';
                 in_methods = 1;
             }
-            /* else: unknown chunk type — skip silently for Phase 1. */
         }
 
         free(chunk);

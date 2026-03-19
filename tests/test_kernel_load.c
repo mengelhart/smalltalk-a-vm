@@ -12,20 +12,18 @@
 #include "vm/heap.h"
 #include "vm/immutable_space.h"
 #include "vm/frame.h"
+#include "vm/vm_state.h"
 #include "bootstrap/bootstrap.h"
 #include "bootstrap/kernel_load.h"
 #include "compiler/compiler.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <assert.h>
 #include <string.h>
 
 /* ── Shared infrastructure ───────────────────────────────────────────── */
 
-static STA_ImmutableSpace *imm;
-static STA_SymbolTable    *syms;
-static STA_Heap           *heap;
-static STA_ClassTable     *ct;
-static STA_StackSlab      *slab;
+static STA_VM *g_vm;
 
 static int tests_run = 0;
 static int tests_passed = 0;
@@ -38,13 +36,19 @@ static int tests_passed = 0;
 } while(0)
 
 static void setup(void) {
-    heap = sta_heap_create(4 * 1024 * 1024);
-    imm  = sta_immutable_space_create(4 * 1024 * 1024);
-    syms = sta_symbol_table_create(512);
-    ct   = sta_class_table_create();
-    slab = sta_stack_slab_create(64 * 1024);
+    g_vm = calloc(1, sizeof(STA_VM));
+    assert(g_vm);
 
-    STA_BootstrapResult br = sta_bootstrap(heap, imm, syms, ct);
+    sta_heap_init(&g_vm->heap, 4 * 1024 * 1024);
+    sta_immutable_space_init(&g_vm->immutable_space, 4 * 1024 * 1024);
+    sta_symbol_table_init(&g_vm->symbol_table, 512);
+    sta_class_table_init(&g_vm->class_table);
+    sta_stack_slab_init(&g_vm->slab, 64 * 1024);
+
+    sta_special_objects_bind(g_vm->specials);
+    sta_primitive_table_init();
+
+    STA_BootstrapResult br = sta_bootstrap(&g_vm->heap, &g_vm->immutable_space, &g_vm->symbol_table, &g_vm->class_table);
     assert(br.status == 0);
 }
 
@@ -52,14 +56,14 @@ static void setup(void) {
 static STA_OOP eval(const char *source) {
     STA_OOP sysdict = sta_spc_get(SPC_SMALLTALK);
     STA_CompileResult cr = sta_compile_expression(
-        source, syms, imm, heap, sysdict);
+        source, &g_vm->symbol_table, &g_vm->immutable_space, &g_vm->heap, sysdict);
     if (cr.had_error) {
         fprintf(stderr, "eval compile error: %s\n  source: %s\n",
                 cr.error_msg, source);
         assert(!cr.had_error);
     }
     STA_OOP nil_oop = sta_spc_get(SPC_NIL);
-    return sta_interpret(slab, heap, ct, cr.method, nil_oop, NULL, 0);
+    return sta_interpret(g_vm, cr.method, nil_oop, NULL, 0);
 }
 
 /* Helper: extract bytes from a String or Symbol OOP. */
@@ -80,9 +84,9 @@ static const char *string_or_symbol_bytes(STA_OOP oop, size_t *out_len) {
 /* ── Tests ─────────────────────────────────────────────────────────────── */
 
 static void test_kernel_load(void) {
-    int rc = sta_kernel_load_all(KERNEL_DIR);
+    int rc = sta_kernel_load_all(g_vm, KERNEL_DIR);
     if (rc != STA_OK) {
-        fprintf(stderr, "kernel_load error: %s\n", sta_vm_last_error(NULL));
+        fprintf(stderr, "kernel_load error: %s\n", sta_vm_last_error(g_vm));
     }
     assert(rc == STA_OK);
 }
@@ -118,7 +122,6 @@ static void test_false_or_true(void) {
 }
 
 static void test_nil_printString(void) {
-    /* printString returns a String (was Symbol before codegen fix). */
     STA_OOP result = eval("nil printString");
     size_t len;
     const char *str = string_or_symbol_bytes(result, &len);
@@ -172,7 +175,6 @@ static void test_nil_ifNil_ifNotNil(void) {
 }
 
 static void test_object_equals_identity(void) {
-    /* For non-SmallInteger objects, = defaults to == (identity). */
     STA_OOP result = eval("true = true");
     assert(result == sta_spc_get(SPC_TRUE));
 }
@@ -212,10 +214,11 @@ int main(void) {
 
     printf("\n%d / %d tests passed\n", tests_passed, tests_run);
 
-    sta_stack_slab_destroy(slab);
-    sta_class_table_destroy(ct);
-    sta_heap_destroy(heap);
-    sta_symbol_table_destroy(syms);
-    sta_immutable_space_destroy(imm);
+    sta_stack_slab_deinit(&g_vm->slab);
+    sta_class_table_deinit(&g_vm->class_table);
+    sta_heap_deinit(&g_vm->heap);
+    sta_symbol_table_deinit(&g_vm->symbol_table);
+    sta_immutable_space_deinit(&g_vm->immutable_space);
+    free(g_vm);
     return (tests_passed == tests_run) ? 0 : 1;
 }

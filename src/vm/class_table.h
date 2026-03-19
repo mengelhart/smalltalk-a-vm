@@ -53,10 +53,20 @@
 #define STA_CLS_SYSTEMDICTIONARY      31u  /* SystemDictionary               */
 #define STA_CLS_RESERVED_COUNT        32u  /* first dynamically-assigned idx */
 
-/* ── Opaque type ────────────────────────────────────────────────────────── */
-typedef struct STA_ClassTable STA_ClassTable;
+/* ── Struct definition (visible for STA_VM embedding) ───────────────────── */
+typedef struct STA_ClassTable {
+    _Atomic(STA_OOP *) entries;   /* atomic pointer for Phase 2 grow-swap */
+    uint32_t           capacity;
+} STA_ClassTable;
 
 /* ── Lifecycle ──────────────────────────────────────────────────────────── */
+
+/* Initialize in-place. Allocates backing entry array.
+ * Returns 0 on success, -1 on failure. */
+int sta_class_table_init(STA_ClassTable *ct);
+
+/* Deinitialize (free backing array). Does not free the struct itself. */
+void sta_class_table_deinit(STA_ClassTable *ct);
 
 /* Create a class table with STA_CLASS_TABLE_INITIAL_CAPACITY entries.
  * All entries initialized to 0 (null OOP). Returns NULL on failure. */
