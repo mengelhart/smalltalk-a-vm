@@ -55,8 +55,7 @@ static void setup(void) {
     STA_BootstrapResult br = sta_bootstrap(&g_vm->heap, &g_vm->immutable_space, &g_vm->symbol_table, &g_vm->class_table);
     assert(br.status == 0);
 
-    /* Reset handler chain to clean state. */
-    sta_handler_set_top(NULL);
+    /* Handler chain starts clean (calloc zeroes handler_top). */
 }
 
 /* Compile an expression, install as Object>>doIt, execute, return result. */

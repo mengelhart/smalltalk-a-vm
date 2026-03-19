@@ -812,16 +812,16 @@ static int prim_on_do(STA_ExecContext *ctx, STA_OOP *args, uint8_t nargs, STA_OO
     entry.saved_slab_sp   = ctx->vm->slab.sp;
 
     if (setjmp(entry.jmp) == 0) {
-        sta_handler_push(&entry);
+        sta_handler_push(ctx->vm, &entry);
         STA_OOP body_result = sta_eval_block(ctx->vm, body_block, NULL, 0);
-        sta_handler_pop();
+        sta_handler_pop(ctx->vm);
         *result = body_result;
         return STA_PRIM_SUCCESS;
     } else {
         ctx->vm->slab.top = entry.saved_slab_top;
         ctx->vm->slab.sp  = entry.saved_slab_sp;
 
-        STA_OOP exc = sta_handler_get_signaled_exception();
+        STA_OOP exc = sta_handler_get_signaled_exception(ctx->vm);
         STA_OOP handler_args[1] = { exc };
         STA_OOP handler_result = sta_eval_block(ctx->vm, handler_block, handler_args, 1);
         *result = handler_result;
@@ -833,10 +833,10 @@ static int prim_signal(STA_ExecContext *ctx, STA_OOP *args, uint8_t nargs, STA_O
     (void)nargs; (void)result;
 
     STA_OOP exception = args[0];
-    STA_HandlerEntry *entry = sta_handler_find(exception, &ctx->vm->class_table);
+    STA_HandlerEntry *entry = sta_handler_find(ctx->vm, exception);
     if (entry) {
-        sta_handler_set_top(entry->prev);
-        sta_handler_set_signaled_exception(exception);
+        ctx->vm->handler_top = entry->prev;
+        sta_handler_set_signaled_exception(ctx->vm, exception);
         longjmp(entry->jmp, 1);
     }
 

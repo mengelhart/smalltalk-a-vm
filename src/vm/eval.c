@@ -1,12 +1,9 @@
 /* src/vm/eval.c
  * Public API: sta_eval, sta_inspect, sta_inspect_cstring.
- * Phase 1, Epic 11.
- *
- * Handle model (Phase 1): STA_Handle* is the raw STA_OOP cast to a pointer.
- * sta_handle_retain/release are no-ops. Phase 2 will introduce a real handle
- * table with reference counting per ADR 013.
+ * Phase 2, Epic 0: real handle table per ADR 013 replaces raw OOP casts.
  */
 #include "vm/vm_state.h"
+#include "vm/handle.h"
 #include "vm/oop.h"
 #include "vm/special_objects.h"
 #include "vm/class_table.h"
@@ -18,16 +15,6 @@
 #include <string.h>
 #include <stdio.h>
 #include <inttypes.h>
-
-/* ── OOP ↔ Handle conversion (Phase 1: raw cast) ──────────────────── */
-
-static STA_Handle *oop_to_handle(STA_OOP oop) {
-    return (STA_Handle *)(uintptr_t)oop;
-}
-
-static STA_OOP handle_to_oop(STA_Handle *h) {
-    return (STA_OOP)(uintptr_t)h;
-}
 
 /* ── sta_eval ──────────────────────────────────────────────────────── */
 
@@ -49,7 +36,7 @@ STA_Handle* sta_eval(STA_VM* vm, const char* expression) {
     STA_OOP nil_oop = sta_spc_get(SPC_NIL);
     STA_OOP result = sta_interpret(vm, cr.method, nil_oop, NULL, 0);
 
-    return oop_to_handle(result);
+    return sta_handle_create(&vm->handles, result);
 }
 
 /* ── sta_inspect (returns handle — stub for Phase 1) ───────────────── */
@@ -90,7 +77,7 @@ static const char *string_raw_bytes(STA_OOP str, size_t *out_len) {
 const char* sta_inspect_cstring(STA_VM* vm, STA_Handle* handle) {
     if (!vm || !handle) return "";
 
-    STA_OOP oop = handle_to_oop(handle);
+    STA_OOP oop = sta_handle_get(handle);
     char *buf = vm->inspect_buffer;
     size_t cap = sizeof(vm->inspect_buffer);
 

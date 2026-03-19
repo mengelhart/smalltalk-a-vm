@@ -1,44 +1,33 @@
 /* src/vm/handler.c
  * Exception handler stack — see handler.h for documentation.
+ * All state lives in STA_VM (handler_top, signaled_exception).
  */
 #include "handler.h"
+#include "vm_state.h"
 #include "interpreter.h"
 #include "special_objects.h"
 
-/* ── Global state (Phase 1: single-threaded) ──────────────────────────── */
-
-static STA_HandlerEntry *g_handler_top = NULL;
-static STA_OOP g_signaled_exception = 0;
-
 /* ── Chain operations ─────────────────────────────────────────────────── */
 
-STA_HandlerEntry *sta_handler_top(void) {
-    return g_handler_top;
+void sta_handler_push(STA_VM *vm, STA_HandlerEntry *entry) {
+    entry->prev = vm->handler_top;
+    vm->handler_top = entry;
 }
 
-void sta_handler_set_top(STA_HandlerEntry *entry) {
-    g_handler_top = entry;
-}
-
-void sta_handler_push(STA_HandlerEntry *entry) {
-    entry->prev = g_handler_top;
-    g_handler_top = entry;
-}
-
-void sta_handler_pop(void) {
-    if (g_handler_top) {
-        g_handler_top = g_handler_top->prev;
+void sta_handler_pop(STA_VM *vm) {
+    if (vm->handler_top) {
+        vm->handler_top = vm->handler_top->prev;
     }
 }
 
 /* ── Signal exception storage ─────────────────────────────────────────── */
 
-void sta_handler_set_signaled_exception(STA_OOP exc) {
-    g_signaled_exception = exc;
+void sta_handler_set_signaled_exception(STA_VM *vm, STA_OOP exc) {
+    vm->signaled_exception = exc;
 }
 
-STA_OOP sta_handler_get_signaled_exception(void) {
-    return g_signaled_exception;
+STA_OOP sta_handler_get_signaled_exception(STA_VM *vm) {
+    return vm->signaled_exception;
 }
 
 /* ── isKindOf: check ──────────────────────────────────────────────────── */
@@ -63,10 +52,10 @@ static bool is_kind_of(STA_OOP obj, STA_OOP target_class, STA_ClassTable *ct) {
 
 /* ── Handler find ─────────────────────────────────────────────────────── */
 
-STA_HandlerEntry *sta_handler_find(STA_OOP exception, STA_ClassTable *ct) {
-    STA_HandlerEntry *entry = g_handler_top;
+STA_HandlerEntry *sta_handler_find(STA_VM *vm, STA_OOP exception) {
+    STA_HandlerEntry *entry = vm->handler_top;
     while (entry) {
-        if (is_kind_of(exception, entry->exception_class, ct)) {
+        if (is_kind_of(exception, entry->exception_class, &vm->class_table)) {
             return entry;
         }
         entry = entry->prev;

@@ -279,6 +279,13 @@ target_compile_definitions(test_image_roundtrip PRIVATE
 target_link_libraries(test_image_roundtrip PRIVATE sta_vm)
 add_test(NAME image_roundtrip COMMAND test_image_roundtrip)
 
+# ── Phase 2 Epic 0: Handle Table ──────────────────────────────────────
+add_executable(test_handle_table test_handle_table.c)
+target_include_directories(test_handle_table PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(test_handle_table PRIVATE sta_vm)
+add_test(NAME handle_table COMMAND test_handle_table)
+
 # ── Phase 1 Epic 11: VM Lifecycle ─────────────────────────────────────
 add_executable(test_vm_lifecycle test_vm_lifecycle.c)
 target_include_directories(test_vm_lifecycle PRIVATE
