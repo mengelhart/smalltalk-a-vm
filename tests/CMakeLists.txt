@@ -319,6 +319,12 @@ target_include_directories(test_actor_heap PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(test_actor_heap PRIVATE sta_vm)
 add_test(NAME actor_heap COMMAND test_actor_heap)
 
+add_executable(test_actor_epic2 test_actor_epic2.c)
+target_include_directories(test_actor_epic2 PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(test_actor_epic2 PRIVATE sta_vm)
+add_test(NAME actor_epic2 COMMAND test_actor_epic2)
+
 # ── Spike 002: MPSC mailbox — TSan correctness gate ───────────────────────
 find_package(Threads REQUIRED)
 
