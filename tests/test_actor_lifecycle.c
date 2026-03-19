@@ -29,7 +29,7 @@ static void test_create_destroy(void) {
     assert(a->state == STA_ACTOR_CREATED);
     assert(a->handler_top == NULL);
     assert(a->signaled_exception == 0);
-    assert(a->mailbox == NULL);
+    assert(sta_mailbox_is_empty(&a->mailbox));
     assert(a->supervisor == NULL);
     assert(a->behavior_class == 0);
     assert(a->vm == NULL);

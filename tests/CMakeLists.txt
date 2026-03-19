@@ -325,6 +325,44 @@ target_include_directories(test_actor_epic2 PRIVATE
 target_link_libraries(test_actor_epic2 PRIVATE sta_vm)
 add_test(NAME actor_epic2 COMMAND test_actor_epic2)
 
+# ── Phase 2 Epic 3: Mailbox & Message Send ──────────────────────────────
+add_executable(test_mailbox test_mailbox.c)
+target_include_directories(test_mailbox PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_mailbox PRIVATE sta_vm)
+add_test(NAME mailbox COMMAND test_mailbox)
+
+add_executable(test_epic3_integration test_epic3_integration.c)
+target_include_directories(test_epic3_integration PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_compile_definitions(test_epic3_integration PRIVATE
+    KERNEL_DIR="${CMAKE_SOURCE_DIR}/kernel")
+target_link_libraries(test_epic3_integration PRIVATE sta_vm)
+add_test(NAME epic3_integration COMMAND test_epic3_integration)
+
+add_executable(test_actor_dispatch test_actor_dispatch.c)
+target_include_directories(test_actor_dispatch PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_compile_definitions(test_actor_dispatch PRIVATE
+    KERNEL_DIR="${CMAKE_SOURCE_DIR}/kernel")
+target_link_libraries(test_actor_dispatch PRIVATE sta_vm)
+add_test(NAME actor_dispatch COMMAND test_actor_dispatch)
+
+add_executable(test_actor_send test_actor_send.c)
+target_include_directories(test_actor_send PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_compile_definitions(test_actor_send PRIVATE
+    KERNEL_DIR="${CMAKE_SOURCE_DIR}/kernel")
+target_link_libraries(test_actor_send PRIVATE sta_vm)
+add_test(NAME actor_send COMMAND test_actor_send)
+
+add_executable(test_deep_copy test_deep_copy.c)
+target_include_directories(test_deep_copy PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_compile_definitions(test_deep_copy PRIVATE
+    KERNEL_DIR="${CMAKE_SOURCE_DIR}/kernel")
+target_link_libraries(test_deep_copy PRIVATE sta_vm)
+add_test(NAME deep_copy COMMAND test_deep_copy)
+
 # ── Spike 002: MPSC mailbox — TSan correctness gate ───────────────────────
 find_package(Threads REQUIRED)
 

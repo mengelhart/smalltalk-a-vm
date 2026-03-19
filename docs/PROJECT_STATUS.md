@@ -126,7 +126,7 @@ These must be resolved before the corresponding component is built:
 6. ~~**Stack slab growth policy**~~ — **Resolved in ADR 014 — linked segments, 512-byte initial, 2 KB growth, deferred allocation.**
 7. ~~**TCO with callee having more locals**~~ — **Resolved in ADR 014 — decline TCO when callee frame does not fit current frame space.**
 8. ~~**Closure and non-local return compatibility**~~ — **Resolved in Epic 1.** Heap contexts, OP_NON_LOCAL_RETURN, BlockCannotReturn safety.
-9. **Deep-copy visited set** (ADR 008) — hash map for cycles/sharing required before Phase 1 copy implementation
+9. ~~**Deep-copy visited set**~~ — **Resolved in Epic 3.** Open-addressing hash map (initial cap 64, 70% load grow) for cycle detection and shared structure preservation.
 10. **`ask:` future on mailbox-full** (ADR 008) — future resolution path, Phase 2
 11. **Transfer buffer allocator** (ADR 008) — replace malloc stub with runtime slab, Phase 1
 12. **Resume point protocol for mid-message I/O suspension** (ADR 011) — define valid suspension points before Phase 2 I/O primitives
@@ -627,6 +627,28 @@ ArrayedCollection, Character, String, Symbol, ByteArray, Array, OrderedCollectio
   - 3.5x more compact than BEAM (2704 bytes)
 - Sanitizers: ASan clean; LSan (detect_leaks) not supported on macOS ARM — deferred to Linux CI with Valgrind
 - Tests: 63 CTest targets passing (27 new actor-specific tests across 3 test files)
+
+### Epic 3: Mailbox & Message Send — COMPLETE
+- GitHub: Epic #271, stories #272–#277 (all closed)
+- Branch: phase2/epic-3-mailbox
+- New files:
+  - `src/actor/mailbox.h`, `src/actor/mailbox.c` — Production MPSC mailbox: Vyukov lock-free linked list with atomic capacity counter, bounded (default 256), drop-newest overflow per ADR 008. STA_Mailbox (32 bytes), internal STA_MbNode separation (node vs message). Enqueue multi-producer safe, dequeue single-consumer.
+  - `src/actor/mailbox_msg.h`, `src/actor/mailbox_msg.c` — Message envelope: STA_MailboxMsg (selector + args + arg_count + sender_id), malloc/free lifecycle.
+  - `src/actor/deep_copy.h`, `src/actor/deep_copy.c` — Cross-actor deep copy engine: recursive graph copier with open-addressing visited set hash map (initial cap 64, 70% load grow). Immediates pass through, immutables shared by pointer, mutable objects deep copied. Byte-indexable objects memcpy'd (not scanned as OOPs). Cycle-safe, sharing-preserving. Resolves open decision #9.
+  - `tests/test_mailbox.c` — 15 mailbox + envelope tests
+  - `tests/test_deep_copy.c` — 15 deep copy tests (cycles, sharing, nesting, byte objects)
+  - `tests/test_actor_send.c` — 9 send API tests (deep copy, isolation, overflow)
+  - `tests/test_actor_dispatch.c` — 6 dispatch tests (method lookup, args, state mutation)
+  - `tests/test_epic3_integration.c` — 9 end-to-end tests (multi-actor chains, edge cases)
+- Modified files:
+  - `src/actor/actor.h` — STA_Actor gains STA_Mailbox (replaces void* placeholder), behavior_obj field, sta_actor_send_msg and sta_actor_process_one declarations
+  - `src/actor/actor.c` — Mailbox init/destroy wired into actor lifecycle; sta_actor_send_msg (deep copy + enqueue); sta_actor_process_one (dequeue + method lookup + dispatch via interpreter)
+  - `src/vm/vm.c` — Root actor mailbox initialized in sta_vm_create
+  - `CMakeLists.txt` — mailbox.c, mailbox_msg.c, deep_copy.c added to sta_vm library
+- Design decisions resolved:
+  - Open decision #9: Deep-copy visited set — open-addressing hash map implemented
+- Tests: 68 CTest targets passing (63 existing + 5 new test files), ASan clean
+- Density: STA_Mailbox adds 32 bytes to STA_Actor; stub sentinel node (16 bytes) allocated separately
 
 ---
 
