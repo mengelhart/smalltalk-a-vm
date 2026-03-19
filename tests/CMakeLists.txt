@@ -286,6 +286,10 @@ target_include_directories(test_handle_table PRIVATE
 target_link_libraries(test_handle_table PRIVATE sta_vm)
 add_test(NAME handle_table COMMAND test_handle_table)
 
+add_executable(test_epic0_verify test_epic0_verify.c)
+target_link_libraries(test_epic0_verify PRIVATE sta_vm)
+add_test(NAME epic0_verify COMMAND test_epic0_verify)
+
 # ── Phase 1 Epic 11: VM Lifecycle ─────────────────────────────────────
 add_executable(test_vm_lifecycle test_vm_lifecycle.c)
 target_include_directories(test_vm_lifecycle PRIVATE
