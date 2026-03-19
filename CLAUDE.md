@@ -85,6 +85,22 @@ Naming conventions:
 Phase 1 epic branches are merged to `main` via squash-merge PR after review.
 
 ---
+## Pacing — pause between stories
+
+After completing each story (tests passing, committed), STOP and report:
+- What was completed
+- Key design choices made
+- Anything surprising or concerning
+- Current test count
+
+Then WAIT for human confirmation before starting the next story.
+Do not ask "shall I continue?" and proceed on a yes — actually stop
+and wait. This gives the human time to review, check context usage,
+ask questions, or adjust direction.
+
+Human can say "please continue" or "continue" which is your signal to move on with the plan.
+
+---
 
 ## Issue tracking — GitHub
 
