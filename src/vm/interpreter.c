@@ -4,6 +4,7 @@
  */
 #include "interpreter.h"
 #include "vm_state.h"
+#include "actor/actor.h"
 #include "compiled_method.h"
 #include "selector.h"
 #include "primitive_table.h"
@@ -68,12 +69,15 @@ static inline STA_OOP *effective_slots(STA_Frame *frame) {
 
 static STA_OOP interpret_loop(STA_VM *vm, STA_Frame *frame)
 {
-    STA_StackSlab *slab = &vm->slab;
-    STA_Heap *heap = &vm->heap;
+    /* Resolve slab and heap from the root actor when available,
+     * fall back to VM for bootstrap-time interpretation. */
+    struct STA_Actor *actor = vm->root_actor;
+    STA_StackSlab *slab = actor ? &actor->slab : &vm->slab;
+    STA_Heap *heap = actor ? &actor->heap : &vm->heap;
     STA_ClassTable *ct = &vm->class_table;
 
     /* Construct execution context on the stack — passed to every primitive. */
-    STA_ExecContext exec_ctx = { .vm = vm, .actor = NULL };
+    STA_ExecContext exec_ctx = { .vm = vm, .actor = actor };
 
     uint32_t reductions = 0;
     STA_OOP result = 0;
@@ -640,10 +644,11 @@ static STA_OOP interpret_loop(STA_VM *vm, STA_Frame *frame)
                     STA_OOP bcr_oop = (STA_OOP)(uintptr_t)bcr_h;
 
                     /* Try to signal the exception via the handler chain. */
-                    STA_HandlerEntry *entry = sta_handler_find(vm, bcr_oop);
+                    STA_HandlerEntry *entry = sta_handler_find_ctx(&exec_ctx, bcr_oop);
                     if (entry) {
-                        vm->handler_top = entry->prev;
-                        sta_handler_set_signaled_exception(vm, bcr_oop);
+                        STA_HandlerEntry **htop = sta_handler_top_ptr(&exec_ctx);
+                        *htop = entry->prev;
+                        sta_handler_set_signaled_ctx(&exec_ctx, bcr_oop);
                         longjmp(entry->jmp, 1);
                     }
                 }
@@ -778,7 +783,12 @@ STA_OOP sta_interpret(STA_VM *vm,
                       STA_OOP method, STA_OOP receiver,
                       STA_OOP *args, uint8_t nargs)
 {
-    STA_Frame *frame = sta_frame_push(&vm->slab, method, receiver, NULL,
+    /* Resolve slab and heap from the root actor when available. */
+    struct STA_Actor *actor = vm->root_actor;
+    STA_StackSlab *slab = actor ? &actor->slab : &vm->slab;
+    STA_Heap *heap = actor ? &actor->heap : &vm->heap;
+
+    STA_Frame *frame = sta_frame_push(slab, method, receiver, NULL,
                                        args, nargs);
     if (!frame) {
         fprintf(stderr, "sta_interpret: failed to push initial frame\n");
@@ -790,7 +800,7 @@ STA_OOP sta_interpret(STA_VM *vm,
     STA_OOP mh = sta_method_header(method);
     if (STA_METHOD_LARGE_FRAME(mh)) {
         uint32_t ctx_size = (uint32_t)frame->arg_count + (uint32_t)frame->local_count;
-        STA_ObjHeader *ctx_h = sta_heap_alloc(&vm->heap, STA_CLS_ARRAY, ctx_size);
+        STA_ObjHeader *ctx_h = sta_heap_alloc(heap, STA_CLS_ARRAY, ctx_size);
         if (!ctx_h) {
             fprintf(stderr, "sta_interpret: failed to allocate context\n");
             abort();
@@ -820,7 +830,11 @@ STA_OOP sta_eval_block(STA_VM *vm,
     /* Check if this is a closure (6-slot) with context. */
     bool has_ctx = (bc_h->size >= 6 && bc_slots[BC_SLOT_CONTEXT] != 0);
 
-    STA_Frame *frame = sta_frame_push(&vm->slab, home_method, receiver, NULL,
+    /* Resolve slab from the root actor when available. */
+    struct STA_Actor *actor = vm->root_actor;
+    STA_StackSlab *use_slab = actor ? &actor->slab : &vm->slab;
+
+    STA_Frame *frame = sta_frame_push(use_slab, home_method, receiver, NULL,
                                        NULL, 0);
     if (!frame) {
         fprintf(stderr, "sta_eval_block: stack overflow\n");

@@ -4,6 +4,7 @@
  */
 #include "vm/vm_state.h"
 #include "vm/special_objects.h"
+#include "actor/actor.h"
 #include "bootstrap/bootstrap.h"
 #include "bootstrap/kernel_load.h"
 #include "bootstrap/filein.h"
@@ -143,6 +144,40 @@ STA_VM* sta_vm_create(const STA_VMConfig* config) {
     }
 
     vm->bootstrapped = true;
+
+    /* Create root actor — all execution runs inside it.
+     * The root actor takes ownership of the VM's heap and slab:
+     * bootstrap objects are in shared immutable space, mutable objects
+     * (from kernel load) are on vm->heap which we transfer. */
+    {
+        struct STA_Actor *root = calloc(1, sizeof(struct STA_Actor));
+        if (!root) {
+            set_error(vm, "failed to allocate root actor");
+            goto fail;
+        }
+        root->vm = vm;
+        root->state = STA_ACTOR_READY;
+        root->actor_id = 1;
+
+        /* Transfer heap: move VM's heap contents to root actor. */
+        root->heap = vm->heap;
+        /* Re-initialize VM heap as empty — bootstrap is done, all future
+         * mutable allocation goes through the root actor's heap. */
+        memset(&vm->heap, 0, sizeof(vm->heap));
+
+        /* Transfer slab: move VM's stack slab to root actor. */
+        root->slab = vm->slab;
+        memset(&vm->slab, 0, sizeof(vm->slab));
+
+        /* Handler chain: move VM's handler state to root actor. */
+        root->handler_top = vm->handler_top;
+        root->signaled_exception = vm->signaled_exception;
+        vm->handler_top = NULL;
+        vm->signaled_exception = 0;
+
+        vm->root_actor = root;
+    }
+
     return vm;
 
 fail:
@@ -166,11 +201,20 @@ void sta_vm_destroy(STA_VM* vm) {
 
     /* Teardown in reverse order of initialization. */
     sta_handle_table_destroy(&vm->handles);
-    sta_stack_slab_deinit(&vm->slab);
+
+    /* Destroy root actor (owns heap and slab). */
+    if (vm->root_actor) {
+        sta_actor_destroy(vm->root_actor);
+        vm->root_actor = NULL;
+    } else {
+        /* No root actor — VM still owns heap and slab (failed early). */
+        sta_stack_slab_deinit(&vm->slab);
+        sta_heap_deinit(&vm->heap);
+    }
+
     sta_class_table_deinit(&vm->class_table);
     sta_symbol_table_deinit(&vm->symbol_table);
     sta_immutable_space_deinit(&vm->immutable_space);
-    sta_heap_deinit(&vm->heap);
 
     /* Reset globals so a subsequent sta_vm_create starts clean. */
     sta_special_objects_bind(NULL);
@@ -190,7 +234,8 @@ const char* sta_vm_last_error(STA_VM* vm) {
 
 int sta_vm_load_image(STA_VM* vm, const char* path) {
     if (!vm || !path) return STA_ERR_INVALID;
-    int rc = sta_image_load_from_file(path, &vm->heap, &vm->immutable_space,
+    STA_Heap *heap = vm->root_actor ? &vm->root_actor->heap : &vm->heap;
+    int rc = sta_image_load_from_file(path, heap, &vm->immutable_space,
                                       &vm->symbol_table, &vm->class_table);
     if (rc != 0) {
         set_error(vm, "image load failed: %s (code %d)", path, rc);
@@ -202,7 +247,8 @@ int sta_vm_load_image(STA_VM* vm, const char* path) {
 
 int sta_vm_save_image(STA_VM* vm, const char* path) {
     if (!vm || !path) return STA_ERR_INVALID;
-    int rc = sta_image_save_to_file(path, &vm->heap, &vm->immutable_space,
+    STA_Heap *heap = vm->root_actor ? &vm->root_actor->heap : &vm->heap;
+    int rc = sta_image_save_to_file(path, heap, &vm->immutable_space,
                                     &vm->symbol_table, &vm->class_table);
     if (rc != 0) {
         set_error(vm, "image save failed: %s (code %d)", path, rc);

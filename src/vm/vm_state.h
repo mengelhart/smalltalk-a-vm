@@ -28,7 +28,7 @@
 /* ── STA_ExecContext ───────────────────────────────────────────────────── */
 
 /* Passed to every primitive function. vm is always valid;
- * actor is NULL until Epic 3 (per-actor scheduling). */
+ * actor is set to root_actor after bootstrap (NULL during bootstrap). */
 typedef struct STA_ExecContext {
     struct STA_VM    *vm;
     struct STA_Actor *actor;
@@ -52,9 +52,13 @@ struct STA_VM {
     /* Execution — stack slab */
     STA_StackSlab        slab;
 
-    /* Exception handler state (moves to STA_Actor in Epic 3) */
+    /* Exception handler state — bootstrap-only fallback.
+     * During normal execution, handlers live on the root actor. */
     STA_HandlerEntry    *handler_top;
     STA_OOP              signaled_exception;
+
+    /* Root actor — created after bootstrap; all execution runs inside it. */
+    struct STA_Actor    *root_actor;
 
     /* Handle table (per ADR 013: reference-counted, growable) */
     STA_HandleTable      handles;
