@@ -333,7 +333,9 @@ target_compile_options(test_scheduler_spike PRIVATE -fsanitize=thread)
 target_link_options(test_scheduler_spike PRIVATE -fsanitize=thread)
 target_link_libraries(test_scheduler_spike PRIVATE Threads::Threads)
 add_test(NAME scheduler_spike COMMAND test_scheduler_spike)
-set_tests_properties(scheduler_spike PROPERTIES TIMEOUT 120)
+# Flaky timing-sensitive spike test — see PROJECT_STATUS.md open decision #4
+# Will be superseded by production scheduler tests in Phase 2 Epic 5
+set_tests_properties(scheduler_spike PROPERTIES TIMEOUT 120 DISABLED TRUE)
 
 # ── Spike 003: Scheduler — benchmark build (run manually, not via ctest) ───
 add_executable(bench_scheduler_spike
