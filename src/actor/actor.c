@@ -51,9 +51,16 @@ struct STA_Actor *sta_actor_create(struct STA_VM *vm,
     actor->state = STA_ACTOR_CREATED;
     actor->actor_id = 0;  /* assigned by VM or scheduler */
 
+    /* Initialize mailbox with default capacity. */
+    if (sta_mailbox_init(&actor->mailbox, STA_MAILBOX_DEFAULT_CAPACITY) != 0) {
+        sta_stack_slab_deinit(&actor->slab);
+        sta_heap_deinit(&actor->heap);
+        free(actor);
+        return NULL;
+    }
+
     /* Placeholders. */
     actor->behavior_class = 0;
-    actor->mailbox = NULL;
     actor->supervisor = NULL;
 
     return actor;
@@ -62,6 +69,7 @@ struct STA_Actor *sta_actor_create(struct STA_VM *vm,
 void sta_actor_destroy(struct STA_Actor *actor) {
     if (!actor) return;
 
+    sta_mailbox_destroy(&actor->mailbox);
     sta_stack_slab_deinit(&actor->slab);
     sta_heap_deinit(&actor->heap);
 

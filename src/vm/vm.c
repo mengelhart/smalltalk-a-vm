@@ -175,6 +175,13 @@ STA_VM* sta_vm_create(const STA_VMConfig* config) {
         vm->handler_top = NULL;
         vm->signaled_exception = 0;
 
+        /* Initialize mailbox (Epic 3). */
+        if (sta_mailbox_init(&root->mailbox, STA_MAILBOX_DEFAULT_CAPACITY) != 0) {
+            free(root);
+            set_error(vm, "failed to initialize root actor mailbox");
+            goto fail;
+        }
+
         vm->root_actor = root;
     }
 

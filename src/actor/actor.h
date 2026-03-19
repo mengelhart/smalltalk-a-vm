@@ -11,6 +11,7 @@
 #include "vm/frame.h"
 #include "vm/handler.h"
 #include "vm/oop.h"
+#include "mailbox.h"
 #include <stdint.h>
 
 /* Forward-declare STA_VM to avoid circular include. */
@@ -49,8 +50,8 @@ struct STA_Actor {
     /* The actor's Smalltalk-level class (for future use) */
     STA_OOP           behavior_class;
 
-    /* Mailbox — NULL placeholder, wired in Epic 3 */
-    void             *mailbox;
+    /* MPSC mailbox — Vyukov linked list, bounded, per ADR 008 */
+    STA_Mailbox       mailbox;
 
     /* Supervisor linkage — NULL placeholder, wired in Epic 6 */
     void             *supervisor;
