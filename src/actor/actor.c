@@ -3,6 +3,9 @@
  * See actor.h for documentation.
  */
 #include "actor.h"
+#include "deep_copy.h"
+#include "mailbox_msg.h"
+#include "vm/vm_state.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -75,4 +78,58 @@ void sta_actor_destroy(struct STA_Actor *actor) {
 
     actor->state = STA_ACTOR_TERMINATED;
     free(actor);
+}
+
+/* ── Messaging ───────────────────────────────────────────────────────── */
+
+int sta_actor_send_msg(struct STA_Actor *sender,
+                       struct STA_Actor *target,
+                       STA_OOP selector,
+                       STA_OOP *args, uint8_t nargs)
+{
+    /* Deep copy each argument from sender's heap to target's heap.
+     * The copied args array is allocated on the target's heap so it
+     * lives alongside the target's other objects. */
+    STA_OOP *copied_args = NULL;
+
+    if (nargs > 0) {
+        /* Allocate an array on the target's heap for the copied args. */
+        STA_ObjHeader *args_h = sta_heap_alloc(&target->heap, STA_CLS_ARRAY,
+                                                (uint32_t)nargs);
+        if (!args_h) return -1;
+        copied_args = sta_payload(args_h);
+
+        /* Resolve class table from VM (sender and target share the same VM). */
+        STA_ClassTable *ct = &sender->vm->class_table;
+
+        for (uint8_t i = 0; i < nargs; i++) {
+            copied_args[i] = sta_deep_copy(args[i],
+                                            &sender->heap,
+                                            &target->heap,
+                                            ct);
+            /* Check for allocation failure during deep copy. */
+            if (copied_args[i] == 0 && args[i] != 0 &&
+                !STA_IS_IMMEDIATE(args[i])) {
+                /* Deep copy failed — but the args array is on the target
+                 * heap and will be reclaimed by GC. No explicit cleanup. */
+                return -1;
+            }
+        }
+    }
+
+    /* Create the message envelope. */
+    STA_MailboxMsg *msg = sta_mailbox_msg_create(
+        selector, copied_args, nargs, sender->actor_id);
+    if (!msg) return -1;
+
+    /* Enqueue in target's mailbox. */
+    int rc = sta_mailbox_enqueue(&target->mailbox, msg);
+    if (rc != 0) {
+        /* Mailbox full — destroy the envelope. The args array on the
+         * target heap will be reclaimed by GC eventually. */
+        sta_mailbox_msg_destroy(msg);
+        return rc;  /* STA_ERR_MAILBOX_FULL */
+    }
+
+    return 0;
 }
