@@ -785,6 +785,24 @@ STA_OOP sta_interpret(STA_VM *vm,
         abort();
     }
 
+    /* If the method needs a context (largeFrame bit), allocate one.
+     * Same logic as the OP_SEND handler for context methods. */
+    STA_OOP mh = sta_method_header(method);
+    if (STA_METHOD_LARGE_FRAME(mh)) {
+        uint32_t ctx_size = (uint32_t)frame->arg_count + (uint32_t)frame->local_count;
+        STA_ObjHeader *ctx_h = sta_heap_alloc(&vm->heap, STA_CLS_ARRAY, ctx_size);
+        if (!ctx_h) {
+            fprintf(stderr, "sta_interpret: failed to allocate context\n");
+            abort();
+        }
+        STA_OOP *ctx_slots = sta_payload(ctx_h);
+        STA_OOP *inline_slots = sta_frame_slots(frame);
+        for (uint32_t i = 0; i < ctx_size; i++)
+            ctx_slots[i] = inline_slots[i];
+        frame->context = (STA_OOP)(uintptr_t)ctx_h;
+        frame->flags |= STA_FRAME_FLAG_MARKER;
+    }
+
     return interpret_loop(vm, frame);
 }
 

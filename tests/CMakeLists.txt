@@ -303,6 +303,11 @@ add_executable(test_capstone test_capstone.c)
 target_link_libraries(test_capstone PRIVATE sta_vm)
 add_test(NAME capstone COMMAND test_capstone)
 
+# ── Phase 2 Epic 1: Closures ──────────────────────────────────────────────
+add_executable(test_closures test_closures.c)
+target_link_libraries(test_closures PRIVATE sta_vm)
+add_test(NAME closures COMMAND test_closures)
+
 # ── Spike 002: MPSC mailbox — TSan correctness gate ───────────────────────
 find_package(Threads REQUIRED)
 
