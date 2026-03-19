@@ -263,6 +263,50 @@ static void test_msg_envelope_fields(void) {
     sta_mailbox_msg_destroy(msg);
 }
 
+static void test_msg_envelope_zero_args(void) {
+    STA_MailboxMsg *msg = sta_mailbox_msg_create(
+        STA_SMALLINT_OOP(5), NULL, 0, 0);
+    assert(msg != NULL);
+    assert(msg->args == NULL);
+    assert(msg->arg_count == 0);
+    assert(msg->sender_id == 0);
+    sta_mailbox_msg_destroy(msg);
+}
+
+static void test_msg_destroy_null_safe(void) {
+    /* Destroying NULL should be a no-op (no crash). */
+    sta_mailbox_msg_destroy(NULL);
+}
+
+static void test_msg_envelope_roundtrip_through_mailbox(void) {
+    STA_Mailbox mb;
+    sta_mailbox_init(&mb, 256);
+
+    /* Create a message with args. */
+    STA_OOP args[3] = {
+        STA_SMALLINT_OOP(10),
+        STA_SMALLINT_OOP(20),
+        STA_SMALLINT_OOP(30)
+    };
+    STA_MailboxMsg *msg = sta_mailbox_msg_create(
+        STA_SMALLINT_OOP(77), args, 3, 42);
+
+    sta_mailbox_enqueue(&mb, msg);
+
+    STA_MailboxMsg *out = sta_mailbox_dequeue(&mb);
+    assert(out != NULL);
+    assert(STA_SMALLINT_VAL(out->selector) == 77);
+    assert(out->arg_count == 3);
+    assert(out->sender_id == 42);
+    assert(out->args == args);
+    assert(STA_SMALLINT_VAL(out->args[0]) == 10);
+    assert(STA_SMALLINT_VAL(out->args[1]) == 20);
+    assert(STA_SMALLINT_VAL(out->args[2]) == 30);
+
+    sta_mailbox_msg_destroy(out);
+    sta_mailbox_destroy(&mb);
+}
+
 /* ── Actor integration ────────────────────────────────────────────── */
 
 /* Minimal check that actors now have working mailboxes. */
@@ -311,6 +355,9 @@ int main(void) {
     RUN_TEST(test_many_enqueue_dequeue);
     RUN_TEST(test_interleaved_enqueue_dequeue);
     RUN_TEST(test_msg_envelope_fields);
+    RUN_TEST(test_msg_envelope_zero_args);
+    RUN_TEST(test_msg_destroy_null_safe);
+    RUN_TEST(test_msg_envelope_roundtrip_through_mailbox);
     RUN_TEST(test_actor_mailbox_wired);
 
     printf("\n%d/%d tests passed\n", tests_passed, tests_run);
