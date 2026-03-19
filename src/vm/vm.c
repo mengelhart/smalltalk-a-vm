@@ -39,6 +39,7 @@ static void set_error(STA_VM *vm, const char *fmt, ...) {
 #define INIT_SYMTAB  (1u << 2)
 #define INIT_CLASSTAB (1u << 3)
 #define INIT_SLAB    (1u << 4)
+#define INIT_HANDLES (1u << 5)
 
 static int file_exists(const char *path) {
     FILE *f = fopen(path, "rb");
@@ -88,11 +89,15 @@ STA_VM* sta_vm_create(const STA_VMConfig* config) {
     }
     inited |= INIT_SLAB;
 
+    if (sta_handle_table_init(&vm->handles) != 0) {
+        set_error(vm, "handle table allocation failed"); goto fail;
+    }
+    inited |= INIT_HANDLES;
+
     /* Bind special objects to this VM's inline array. */
     sta_special_objects_bind(vm->specials);
 
-    /* Reset global handler state for clean startup. */
-    sta_handler_set_top(NULL);
+    /* Handler state starts clean (calloc zeroes handler_top and signaled_exception). */
 
     /* Startup pipeline: load image or bootstrap from scratch. */
     if (config->image_path && file_exists(config->image_path)) {
@@ -141,6 +146,7 @@ STA_VM* sta_vm_create(const STA_VMConfig* config) {
     return vm;
 
 fail:
+    if (inited & INIT_HANDLES) sta_handle_table_destroy(&vm->handles);
     if (inited & INIT_SLAB)     sta_stack_slab_deinit(&vm->slab);
     if (inited & INIT_CLASSTAB) sta_class_table_deinit(&vm->class_table);
     if (inited & INIT_SYMTAB)   sta_symbol_table_deinit(&vm->symbol_table);
@@ -159,6 +165,7 @@ void sta_vm_destroy(STA_VM* vm) {
     vm->destroyed = true;
 
     /* Teardown in reverse order of initialization. */
+    sta_handle_table_destroy(&vm->handles);
     sta_stack_slab_deinit(&vm->slab);
     sta_class_table_deinit(&vm->class_table);
     sta_symbol_table_deinit(&vm->symbol_table);
@@ -166,7 +173,6 @@ void sta_vm_destroy(STA_VM* vm) {
     sta_heap_deinit(&vm->heap);
 
     /* Reset globals so a subsequent sta_vm_create starts clean. */
-    sta_handler_set_top(NULL);
     sta_special_objects_bind(NULL);
     sta_special_objects_init();
 

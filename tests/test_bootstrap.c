@@ -382,11 +382,11 @@ static void test_dnu_fires(void) {
     entry.handler_block = 0; /* unused — we handle in C */
     entry.saved_slab_top = g_vm->slab.top;
     entry.saved_slab_sp  = g_vm->slab.sp;
-    sta_handler_set_top(NULL);
+    g_vm->handler_top = NULL;
 
     int caught = 0;
     if (setjmp(entry.jmp) == 0) {
-        sta_handler_push(&entry);
+        sta_handler_push(g_vm, &entry);
         (void)sta_interpret(g_vm, method,
                             STA_SMALLINT_OOP(0), NULL, 0);
     } else {
@@ -395,11 +395,11 @@ static void test_dnu_fires(void) {
         g_vm->slab.top = entry.saved_slab_top;
         g_vm->slab.sp  = entry.saved_slab_sp;
     }
-    sta_handler_set_top(NULL);
+    g_vm->handler_top = NULL;
     assert(caught);
 
     /* Verify the signaled exception is a MessageNotUnderstood. */
-    STA_OOP exc = sta_handler_get_signaled_exception();
+    STA_OOP exc = sta_handler_get_signaled_exception(g_vm);
     assert(STA_IS_HEAP(exc));
 
     printf(" ok\n");

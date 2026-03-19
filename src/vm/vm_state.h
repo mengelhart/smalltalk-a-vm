@@ -21,6 +21,7 @@
 #include "special_objects.h"
 #include "primitive_table.h"
 #include "handler.h"
+#include "handle.h"
 #include <sta/vm.h>
 #include <stdbool.h>
 
@@ -54,6 +55,9 @@ struct STA_VM {
     /* Exception handler state (moves to STA_Actor in Epic 3) */
     STA_HandlerEntry    *handler_top;
     STA_OOP              signaled_exception;
+
+    /* Handle table (per ADR 013: reference-counted, growable) */
+    STA_HandleTable      handles;
 
     /* Error reporting */
     char                 last_error[512];

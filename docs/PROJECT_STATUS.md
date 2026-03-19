@@ -563,6 +563,25 @@ ArrayedCollection, Character, String, Symbol, ByteArray, Array, OrderedCollectio
 
 ---
 
+## Phase 2 progress
+
+### Epic 0: Per-Instance VM State — COMPLETE
+- Branch: phase2/epic-0-per-instance-vm-state (Stories 1-3)
+- Branch: phase2/epic-0-stories-4-6 (Stories 4-6)
+- Key changes:
+  - STA_VM flat struct owns all runtime state
+  - STA_ExecContext passed to all primitives (vm + actor pointers)
+  - 9 mutable globals eliminated; 5 g_prim_* setter functions deleted
+  - Real handle table per ADR 013 (reference-counted, growable slab allocator)
+  - Handler state (handler_top, signaled_exception) on STA_VM
+    (moves to STA_Actor in Epic 3)
+- Tests: 59 CTest targets passing, ASan clean
+- Remaining mutable statics (approved):
+  - g_last_error (vm.c) — pre-VM-creation error reporting
+  - g_fallback_specials (special_objects.c) — fallback before VM exists
+
+---
+
 ## Current phase
 **Phase 2 — Actor Runtime and Headless**
 Scheduler, supervision, async I/O, headless lifecycle.
@@ -585,8 +604,8 @@ Epic ordering (actual, all 11 complete):
 - **OrderedCollection** — needs instance variable tracking and grow-on-add semantics.
 - **do: with mutable-capture blocks** — requires Phase 2 closure support. collect:/select:/reject:/detect:ifNone: work with clean blocks (pure functions of their arg).
 - **ensure: during exception unwinding** — longjmp bypasses ensure: blocks. Phase 2 will fix this.
-- **Real handle table** — Phase 1 uses raw OOP cast. Phase 2 will implement ADR 013 handle lifecycle.
-- **Per-instance state** — 9 globals prevent multiple VM instances. Phase 2 will move to per-instance state for actor runtime.
+- ~~**Real handle table**~~ — **Done in Epic 0.** Slab-based, reference-counted, growable per ADR 013.
+- ~~**Per-instance state**~~ — **Done in Epic 0.** All mutable globals migrated to STA_VM struct.
 
 For Phase 2 work: paste `CLAUDE.md` + this file + the relevant ADRs for the
 component being built (ADR 008 for mailbox, ADR 009 for scheduler,
