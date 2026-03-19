@@ -38,3 +38,29 @@ STA_OOP sta_compiled_method_create(STA_ImmutableSpace *sp,
 
     return (STA_OOP)(uintptr_t)h;
 }
+
+STA_OOP sta_compiled_method_create_with_header(STA_ImmutableSpace *sp,
+    STA_OOP header,
+    const STA_OOP *literals, uint8_t numLiterals,
+    const uint8_t *bytecodes, uint32_t numBytecodes)
+{
+    uint32_t bytecode_words = (numBytecodes + 7u) / 8u;
+    uint32_t nwords = 1 + (uint32_t)numLiterals + bytecode_words;
+
+    STA_ObjHeader *h = sta_immutable_alloc(sp, STA_CLS_COMPILEDMETHOD, nwords);
+    if (!h) return 0;
+
+    STA_OOP *payload = sta_payload(h);
+    payload[0] = header;
+
+    for (uint8_t i = 0; i < numLiterals; i++) {
+        payload[1 + i] = literals[i];
+    }
+
+    if (numBytecodes > 0) {
+        uint8_t *bc_dest = (uint8_t *)&payload[1 + numLiterals];
+        memcpy(bc_dest, bytecodes, numBytecodes);
+    }
+
+    return (STA_OOP)(uintptr_t)h;
+}

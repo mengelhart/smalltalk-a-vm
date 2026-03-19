@@ -93,3 +93,11 @@ STA_OOP sta_compiled_method_create(STA_ImmutableSpace *sp,
     uint8_t numArgs, uint8_t numTemps, uint8_t primIndex,
     const STA_OOP *literals, uint8_t numLiterals,
     const uint8_t *bytecodes, uint32_t numBytecodes);
+
+/* Create a CompiledMethod with an explicit header word.
+ * Used when the codegen needs to set specific header flags (e.g.,
+ * largeFrame/needsContext). Returns 0 on allocation failure. */
+STA_OOP sta_compiled_method_create_with_header(STA_ImmutableSpace *sp,
+    STA_OOP header,
+    const STA_OOP *literals, uint8_t numLiterals,
+    const uint8_t *bytecodes, uint32_t numBytecodes);

@@ -77,6 +77,7 @@ STA_Frame *sta_frame_push(STA_StackSlab *slab, STA_OOP method,
     frame->receiver    = receiver;
     frame->sender      = sender;
     frame->saved_sp    = slab->sp;   /* save sender's expression stack position */
+    frame->context     = 0;          /* no context by default; set by caller */
     frame->pc          = 0;
     frame->arg_count   = nargs;
     frame->local_count = local_count;
@@ -116,6 +117,8 @@ void sta_frame_gc_roots(STA_Frame *frame, STA_StackSlab *slab,
     while (frame) {
         visitor(&frame->method, ctx);
         visitor(&frame->receiver, ctx);
+        if (frame->context != 0)
+            visitor(&frame->context, ctx);
 
         STA_OOP *slots = sta_frame_slots(frame);
         uint32_t slot_count = sta_frame_slot_count(frame);

@@ -13,20 +13,27 @@
 #include <stdint.h>
 #include <stddef.h>
 
-/* ── Frame struct (48 bytes; ADR 010 specified 40, grown by +8 for saved_sp) */
-/*    saved_sp records the sender's expression stack position so that        */
-/*    sta_frame_pop can restore slab->sp correctly when the callee returns.  */
+/* ── Frame struct (56 bytes; ADR 010 specified 40, grown for saved_sp + context) */
+/*    saved_sp records the sender's expression stack position so that           */
+/*    sta_frame_pop can restore slab->sp correctly when the callee returns.     */
+/*                                                                              */
+/*    context: heap-allocated context object for captured variables (Phase 2).   */
+/*    When non-zero, temp reads/writes go through the context's payload instead  */
+/*    of the inline frame slots. The inline slots still exist on the slab to     */
+/*    provide space for the expression stack — they are not used for temp        */
+/*    storage when a context is present.                                         */
 
 typedef struct STA_Frame {
     STA_OOP           method;         /* CompiledMethod OOP                 */
     STA_OOP           receiver;       /* receiver OOP (self)                */
     struct STA_Frame *sender;         /* calling frame (NULL for bottom)    */
     uint8_t          *saved_sp;       /* sender's slab->sp at push time    */
+    STA_OOP           context;        /* heap context object (0 = none)     */
     uint32_t          pc;             /* program counter (byte offset)      */
     uint16_t          arg_count;      /* number of argument slots           */
     uint16_t          local_count;    /* number of temp slots               */
     uint32_t          flags;          /* bit 0: marker, others reserved     */
-} STA_Frame;                          /* sizeof = 48 bytes                  */
+} STA_Frame;                          /* sizeof = 56 bytes                  */
 
 /* ── Stack slab ────────────────────────────────────────────────────────── */
 
