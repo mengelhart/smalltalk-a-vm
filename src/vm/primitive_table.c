@@ -812,16 +812,16 @@ static int prim_on_do(STA_ExecContext *ctx, STA_OOP *args, uint8_t nargs, STA_OO
     entry.saved_slab_sp   = ctx->vm->slab.sp;
 
     if (setjmp(entry.jmp) == 0) {
-        sta_handler_push(ctx->vm, &entry);
+        sta_handler_push_ctx(ctx, &entry);
         STA_OOP body_result = sta_eval_block(ctx->vm, body_block, NULL, 0);
-        sta_handler_pop(ctx->vm);
+        sta_handler_pop_ctx(ctx);
         *result = body_result;
         return STA_PRIM_SUCCESS;
     } else {
         ctx->vm->slab.top = entry.saved_slab_top;
         ctx->vm->slab.sp  = entry.saved_slab_sp;
 
-        STA_OOP exc = sta_handler_get_signaled_exception(ctx->vm);
+        STA_OOP exc = sta_handler_get_signaled_ctx(ctx);
         STA_OOP handler_args[1] = { exc };
         STA_OOP handler_result = sta_eval_block(ctx->vm, handler_block, handler_args, 1);
         *result = handler_result;
@@ -833,18 +833,19 @@ static int prim_signal(STA_ExecContext *ctx, STA_OOP *args, uint8_t nargs, STA_O
     (void)nargs; (void)result;
 
     STA_OOP exception = args[0];
+    STA_HandlerEntry **top_ptr = sta_handler_top_ptr(ctx);
 
     /* First, find the target on:do: handler (skip ensure: entries). */
     STA_HandlerEntry *target = NULL;
     {
-        STA_HandlerEntry *e = ctx->vm->handler_top;
+        STA_HandlerEntry *e = *top_ptr;
         while (e) {
             if (!e->is_ensure) {
                 /* Check if this on:do: handler matches the exception. */
-                STA_HandlerEntry *saved_top = ctx->vm->handler_top;
-                ctx->vm->handler_top = e;
-                STA_HandlerEntry *match = sta_handler_find(ctx->vm, exception);
-                ctx->vm->handler_top = saved_top;
+                STA_HandlerEntry *saved_top = *top_ptr;
+                *top_ptr = e;
+                STA_HandlerEntry *match = sta_handler_find_ctx(ctx, exception);
+                *top_ptr = saved_top;
                 if (match == e) {
                     target = e;
                     break;
@@ -856,16 +857,16 @@ static int prim_signal(STA_ExecContext *ctx, STA_OOP *args, uint8_t nargs, STA_O
 
     if (target) {
         /* Fire all ensure: blocks between handler_top and target. */
-        while (ctx->vm->handler_top != target) {
-            STA_HandlerEntry *top = ctx->vm->handler_top;
-            ctx->vm->handler_top = top->prev;
+        while (*top_ptr != target) {
+            STA_HandlerEntry *top = *top_ptr;
+            *top_ptr = top->prev;
             if (top->is_ensure) {
                 (void)sta_eval_block(ctx->vm, top->ensure_block, NULL, 0);
             }
         }
         /* Now handler_top == target. Pop it and longjmp. */
-        ctx->vm->handler_top = target->prev;
-        sta_handler_set_signaled_exception(ctx->vm, exception);
+        *top_ptr = target->prev;
+        sta_handler_set_signaled_ctx(ctx, exception);
         longjmp(target->jmp, 1);
     }
 
@@ -890,9 +891,9 @@ static int prim_ensure(STA_ExecContext *ctx, STA_OOP *args, uint8_t nargs, STA_O
     entry.is_ensure     = true;
     entry.ensure_block  = ensure_block;
 
-    sta_handler_push(ctx->vm, &entry);
+    sta_handler_push_ctx(ctx, &entry);
     STA_OOP body_result = sta_eval_block(ctx->vm, body_block, NULL, 0);
-    sta_handler_pop(ctx->vm);
+    sta_handler_pop_ctx(ctx);
 
     /* Normal completion: fire ensure block. */
     (void)sta_eval_block(ctx->vm, ensure_block, NULL, 0);

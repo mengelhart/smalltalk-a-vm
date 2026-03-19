@@ -640,10 +640,11 @@ static STA_OOP interpret_loop(STA_VM *vm, STA_Frame *frame)
                     STA_OOP bcr_oop = (STA_OOP)(uintptr_t)bcr_h;
 
                     /* Try to signal the exception via the handler chain. */
-                    STA_HandlerEntry *entry = sta_handler_find(vm, bcr_oop);
+                    STA_HandlerEntry *entry = sta_handler_find_ctx(&exec_ctx, bcr_oop);
                     if (entry) {
-                        vm->handler_top = entry->prev;
-                        sta_handler_set_signaled_exception(vm, bcr_oop);
+                        STA_HandlerEntry **htop = sta_handler_top_ptr(&exec_ctx);
+                        *htop = entry->prev;
+                        sta_handler_set_signaled_ctx(&exec_ctx, bcr_oop);
                         longjmp(entry->jmp, 1);
                     }
                 }
