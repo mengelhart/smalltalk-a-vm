@@ -331,6 +331,14 @@ target_include_directories(test_mailbox PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(test_mailbox PRIVATE sta_vm)
 add_test(NAME mailbox COMMAND test_mailbox)
 
+add_executable(test_epic3_integration test_epic3_integration.c)
+target_include_directories(test_epic3_integration PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_compile_definitions(test_epic3_integration PRIVATE
+    KERNEL_DIR="${CMAKE_SOURCE_DIR}/kernel")
+target_link_libraries(test_epic3_integration PRIVATE sta_vm)
+add_test(NAME epic3_integration COMMAND test_epic3_integration)
+
 add_executable(test_actor_dispatch test_actor_dispatch.c)
 target_include_directories(test_actor_dispatch PRIVATE
     ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
