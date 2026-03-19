@@ -308,6 +308,12 @@ add_executable(test_closures test_closures.c)
 target_link_libraries(test_closures PRIVATE sta_vm)
 add_test(NAME closures COMMAND test_closures)
 
+# ── Phase 2 Epic 2: Actor Struct ──────────────────────────────────────────
+add_executable(test_actor_lifecycle test_actor_lifecycle.c)
+target_include_directories(test_actor_lifecycle PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_actor_lifecycle PRIVATE sta_vm)
+add_test(NAME actor_lifecycle COMMAND test_actor_lifecycle)
+
 # ── Spike 002: MPSC mailbox — TSan correctness gate ───────────────────────
 find_package(Threads REQUIRED)
 
