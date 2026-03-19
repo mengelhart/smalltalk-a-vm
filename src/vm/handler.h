@@ -27,6 +27,8 @@ typedef struct STA_HandlerEntry {
     jmp_buf  jmp;                   /* setjmp/longjmp buffer              */
     uint8_t *saved_slab_top;        /* slab->top before body evaluation   */
     uint8_t *saved_slab_sp;         /* slab->sp before body evaluation    */
+    bool     is_ensure;             /* true = ensure: entry (Phase 2)     */
+    STA_OOP  ensure_block;          /* ensure: block to evaluate on unwind*/
     struct STA_HandlerEntry *prev;  /* previous handler in chain          */
 } STA_HandlerEntry;
 

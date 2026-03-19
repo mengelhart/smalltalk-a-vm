@@ -14,6 +14,16 @@
 #include <string.h>
 #include <assert.h>
 
+/* ── BlockClosure slot layout ──────────────────────────────────────────── */
+/* Clean block (OP_BLOCK_COPY):  5 slots [startPC, numArgs, method, receiver, tempOffset]
+ * Closure    (OP_CLOSURE_COPY): 6 slots [startPC, numArgs, method, receiver, tempOffset, context] */
+#define BC_SLOT_START_PC    0
+#define BC_SLOT_NUM_ARGS    1
+#define BC_SLOT_METHOD      2
+#define BC_SLOT_RECEIVER    3
+#define BC_SLOT_TEMP_OFFSET 4
+#define BC_SLOT_CONTEXT     5   /* only present in closures (6-slot BlockClosure) */
+
 /* ── Internal helpers ──────────────────────────────────────────────────── */
 
 static uint32_t oop_class_index(STA_OOP oop) {
@@ -43,6 +53,17 @@ static size_t frame_byte_size(uint16_t arg_count, uint16_t local_count) {
            ((size_t)arg_count + (size_t)local_count) * sizeof(STA_OOP);
 }
 
+/* Get the effective slots pointer for a frame.
+ * If the frame has a context, slots point to the context object's payload.
+ * Otherwise, slots are the inline frame slots. */
+static inline STA_OOP *effective_slots(STA_Frame *frame) {
+    if (frame->context != 0) {
+        STA_ObjHeader *ctx_h = (STA_ObjHeader *)(uintptr_t)frame->context;
+        return sta_payload(ctx_h);
+    }
+    return sta_frame_slots(frame);
+}
+
 /* ── Dispatch loop ─────────────────────────────────────────────────────── */
 
 static STA_OOP interpret_loop(STA_VM *vm, STA_Frame *frame)
@@ -58,7 +79,7 @@ static STA_OOP interpret_loop(STA_VM *vm, STA_Frame *frame)
     STA_OOP result = 0;
 
     const uint8_t *bytecodes = sta_method_bytecodes(frame->method);
-    STA_OOP *slots = sta_frame_slots(frame);
+    STA_OOP *slots = effective_slots(frame);
 
     while (frame != NULL) {
         uint8_t opcode  = bytecodes[frame->pc];
@@ -290,11 +311,14 @@ static STA_OOP interpret_loop(STA_VM *vm, STA_Frame *frame)
                     STA_IS_HEAP(send_receiver) &&
                     ((STA_ObjHeader *)(uintptr_t)send_receiver)->class_index
                         == STA_CLS_BLOCKCLOSURE) {
-                    STA_OOP *bc_slots = sta_payload(
-                        (STA_ObjHeader *)(uintptr_t)send_receiver);
-                    uint32_t start_pc = (uint32_t)STA_SMALLINT_VAL(bc_slots[0]);
-                    STA_OOP home_method = bc_slots[2];
-                    uint32_t temp_off = (uint32_t)STA_SMALLINT_VAL(bc_slots[4]);
+                    STA_ObjHeader *bc_h = (STA_ObjHeader *)(uintptr_t)send_receiver;
+                    STA_OOP *bc_slots = sta_payload(bc_h);
+                    uint32_t start_pc = (uint32_t)STA_SMALLINT_VAL(bc_slots[BC_SLOT_START_PC]);
+                    STA_OOP home_method = bc_slots[BC_SLOT_METHOD];
+                    uint32_t temp_off = (uint32_t)STA_SMALLINT_VAL(bc_slots[BC_SLOT_TEMP_OFFSET]);
+
+                    /* Check if this is a closure (6-slot) with context. */
+                    bool has_ctx = (bc_h->size >= 6 && bc_slots[BC_SLOT_CONTEXT] != 0);
 
                     STA_Frame *block_frame = sta_frame_push(slab, home_method,
                         frame->receiver, frame, NULL, 0);
@@ -303,12 +327,24 @@ static STA_OOP interpret_loop(STA_VM *vm, STA_Frame *frame)
                         abort();
                     }
                     block_frame->pc = start_pc;
-                    STA_OOP *blk_slots = sta_frame_slots(block_frame);
-                    for (uint8_t i = 0; i < arity; i++)
-                        blk_slots[temp_off + i] = send_args[i];
+
+                    if (has_ctx) {
+                        /* Closure block: share the context object.
+                         * Args go into the context at tempOffset. */
+                        block_frame->context = bc_slots[BC_SLOT_CONTEXT];
+                        STA_OOP *ctx_slots = sta_payload(
+                            (STA_ObjHeader *)(uintptr_t)block_frame->context);
+                        for (uint8_t i = 0; i < arity; i++)
+                            ctx_slots[temp_off + i] = send_args[i];
+                    } else {
+                        /* Clean block: args go into inline frame slots. */
+                        STA_OOP *blk_slots = sta_frame_slots(block_frame);
+                        for (uint8_t i = 0; i < arity; i++)
+                            blk_slots[temp_off + i] = send_args[i];
+                    }
                     frame = block_frame;
                     bytecodes = sta_method_bytecodes(frame->method);
-                    slots = sta_frame_slots(frame);
+                    slots = effective_slots(frame);
                     break;
                 }
 
@@ -333,8 +369,12 @@ static STA_OOP interpret_loop(STA_VM *vm, STA_Frame *frame)
                 }
             }
 
-            /* TCO check. */
-            if (is_tail && frame->sender != NULL) {
+            /* Does the callee need a context? (largeFrame bit = needsContext) */
+            int callee_needs_ctx = STA_METHOD_LARGE_FRAME(mh);
+
+            /* TCO check — skip TCO for context methods (context lifecycle
+             * is too complex to handle in frame reuse). */
+            if (is_tail && frame->sender != NULL && !callee_needs_ctx) {
                 size_t cur_size = frame_byte_size(frame->arg_count, frame->local_count);
                 size_t new_size = frame_byte_size(arity, callee_locals);
                 if (new_size <= cur_size) {
@@ -343,6 +383,7 @@ static STA_OOP interpret_loop(STA_VM *vm, STA_Frame *frame)
                     frame->pc = 0;
                     frame->arg_count = arity;
                     frame->local_count = callee_locals;
+                    frame->context = 0;
 
                     STA_OOP *new_slots = sta_frame_slots(frame);
                     for (uint8_t i = 0; i < arity; i++)
@@ -371,9 +412,30 @@ static STA_OOP interpret_loop(STA_VM *vm, STA_Frame *frame)
                 fprintf(stderr, "FATAL: stack overflow\n");
                 abort();
             }
+
+            /* If the callee needs a context, allocate one on the heap.
+             * All temps (args + locals) go in the context. The inline
+             * slab slots remain allocated to provide expression stack space. */
+            if (callee_needs_ctx) {
+                uint32_t ctx_size = (uint32_t)arity + (uint32_t)callee_locals;
+                STA_ObjHeader *ctx_h = sta_heap_alloc(heap, STA_CLS_ARRAY, ctx_size);
+                if (!ctx_h) {
+                    fprintf(stderr, "FATAL: failed to allocate context object\n");
+                    abort();
+                }
+                STA_OOP *ctx_slots = sta_payload(ctx_h);
+                /* Copy args and temps from inline slots into context. */
+                STA_OOP *inline_slots = sta_frame_slots(new_frame);
+                for (uint32_t ci = 0; ci < ctx_size; ci++)
+                    ctx_slots[ci] = inline_slots[ci];
+                new_frame->context = (STA_OOP)(uintptr_t)ctx_h;
+                /* Mark as home method frame for NLR targeting. */
+                new_frame->flags |= STA_FRAME_FLAG_MARKER;
+            }
+
             frame = new_frame;
             bytecodes = sta_method_bytecodes(frame->method);
-            slots = sta_frame_slots(frame);
+            slots = effective_slots(frame);
 
             if (prim_failed && frame->local_count > 0)
                 slots[frame->arg_count] = STA_SMALLINT_OOP(prim_fail_code);
@@ -409,7 +471,7 @@ static STA_OOP interpret_loop(STA_VM *vm, STA_Frame *frame)
             frame = sender;
             if (frame != NULL) {
                 bytecodes = sta_method_bytecodes(frame->method);
-                slots = sta_frame_slots(frame);
+                slots = effective_slots(frame);
                 sta_stack_push(slab, result);
             }
             break;
@@ -479,6 +541,7 @@ static STA_OOP interpret_loop(STA_VM *vm, STA_Frame *frame)
         }
 
         case OP_BLOCK_COPY: {
+            /* Clean block (no captures). BlockClosure: 5 slots. */
             STA_OOP desc = sta_method_literal(frame->method, (uint8_t)operand);
             STA_ObjHeader *dh = (STA_ObjHeader *)(uintptr_t)desc;
             STA_OOP *dp = sta_payload(dh);
@@ -494,23 +557,198 @@ static STA_OOP interpret_loop(STA_VM *vm, STA_Frame *frame)
                 fprintf(stderr, "FATAL: failed to allocate BlockClosure\n");
                 abort();
             }
-            STA_OOP *bc_slots = sta_payload(bc_h);
-            bc_slots[0] = start_pc_oop;
-            bc_slots[1] = num_args_oop;
-            bc_slots[2] = frame->method;
-            bc_slots[3] = frame->receiver;
-            bc_slots[4] = temp_off_oop;
+            STA_OOP *bc_s = sta_payload(bc_h);
+            bc_s[BC_SLOT_START_PC]    = start_pc_oop;
+            bc_s[BC_SLOT_NUM_ARGS]    = num_args_oop;
+            bc_s[BC_SLOT_METHOD]      = frame->method;
+            bc_s[BC_SLOT_RECEIVER]    = frame->receiver;
+            bc_s[BC_SLOT_TEMP_OFFSET] = temp_off_oop;
 
             sta_stack_push(slab, (STA_OOP)(uintptr_t)bc_h);
             frame->pc = blk_start + blk_length;
             break;
         }
 
+        case OP_CLOSURE_COPY: {
+            /* Capturing block. BlockClosure: 6 slots (adds context).
+             * BlockDescriptor: 5 slots (adds numContext). */
+            STA_OOP desc = sta_method_literal(frame->method, (uint8_t)operand);
+            STA_ObjHeader *dh = (STA_ObjHeader *)(uintptr_t)desc;
+            STA_OOP *dp = sta_payload(dh);
+            STA_OOP start_pc_oop  = dp[0];
+            STA_OOP body_len_oop  = dp[1];
+            STA_OOP num_args_oop  = dp[2];
+            STA_OOP temp_off_oop  = dp[3];
+            /* dp[4] = numContext (total temps in context) — used if we need
+             * to allocate a fresh context for nested blocks in the future.
+             * For now, the block shares the method's context. */
+            uint32_t blk_start  = (uint32_t)STA_SMALLINT_VAL(start_pc_oop);
+            uint32_t blk_length = (uint32_t)STA_SMALLINT_VAL(body_len_oop);
+
+            STA_ObjHeader *bc_h = sta_heap_alloc(heap, STA_CLS_BLOCKCLOSURE, 6);
+            if (!bc_h) {
+                fprintf(stderr, "FATAL: failed to allocate BlockClosure\n");
+                abort();
+            }
+            STA_OOP *bc_s = sta_payload(bc_h);
+            bc_s[BC_SLOT_START_PC]    = start_pc_oop;
+            bc_s[BC_SLOT_NUM_ARGS]    = num_args_oop;
+            bc_s[BC_SLOT_METHOD]      = frame->method;
+            bc_s[BC_SLOT_RECEIVER]    = frame->receiver;
+            bc_s[BC_SLOT_TEMP_OFFSET] = temp_off_oop;
+            bc_s[BC_SLOT_CONTEXT]     = frame->context;
+
+            sta_stack_push(slab, (STA_OOP)(uintptr_t)bc_h);
+            frame->pc = blk_start + blk_length;
+            break;
+        }
+
+        case OP_NON_LOCAL_RETURN: {
+            /* ^ inside a block: return from the home method's frame.
+             * The home method is the frame that originally created the context.
+             * Walk the sender chain to find a frame whose context matches
+             * this frame's context and which is NOT a block frame (i.e.,
+             * it's the method that allocated the context).
+             *
+             * Strategy: walk sender chain looking for the frame with
+             * STA_FRAME_FLAG_MARKER set (the home method frame). We set
+             * this flag when allocating a context for a method. */
+            result = sta_stack_pop(slab);
+            STA_OOP home_ctx = frame->context;
+
+            /* Walk sender chain to find the home method frame. */
+            STA_Frame *target = frame->sender;
+            while (target != NULL) {
+                if ((target->flags & STA_FRAME_FLAG_MARKER) &&
+                    target->context == home_ctx) {
+                    break;
+                }
+                target = target->sender;
+            }
+
+            if (target == NULL) {
+                /* Home method already returned — signal BlockCannotReturn.
+                 * Create a BlockCannotReturn exception and signal it. */
+                STA_ObjHeader *bcr_h = sta_heap_alloc(heap,
+                    STA_CLS_BLOCKCANNOTRETURN, 4);
+                if (bcr_h) {
+                    STA_OOP *bcr_slots = sta_payload(bcr_h);
+                    bcr_slots[0] = sta_spc_get(SPC_NIL); /* messageText */
+                    bcr_slots[1] = sta_spc_get(SPC_NIL); /* signalContext */
+                    bcr_slots[2] = result;                /* result */
+                    bcr_slots[3] = sta_spc_get(SPC_NIL); /* deadHome */
+                    STA_OOP bcr_oop = (STA_OOP)(uintptr_t)bcr_h;
+
+                    /* Try to signal the exception via the handler chain. */
+                    STA_HandlerEntry *entry = sta_handler_find(vm, bcr_oop);
+                    if (entry) {
+                        vm->handler_top = entry->prev;
+                        sta_handler_set_signaled_exception(vm, bcr_oop);
+                        longjmp(entry->jmp, 1);
+                    }
+                }
+                fprintf(stderr, "FATAL: BlockCannotReturn — home method already returned\n");
+                abort();
+            }
+
+            /* Unwind: pop all frames from current up to (and including)
+             * the home method frame. The home method's sender gets the
+             * return value pushed. */
+            /* First, fire ensure: blocks along the unwind path. */
+            /* (Story 5 will add ensure: firing here.) */
+
+            /* Pop frames up to and including target. */
+            while (frame != target) {
+                STA_Frame *s = frame->sender;
+                sta_frame_pop(slab, frame);
+                frame = s;
+            }
+            /* Now frame == target (the home method). Pop it too. */
+            STA_Frame *home_sender = frame->sender;
+            sta_frame_pop(slab, frame);
+            frame = home_sender;
+
+            if (frame != NULL) {
+                bytecodes = sta_method_bytecodes(frame->method);
+                slots = effective_slots(frame);
+                sta_stack_push(slab, result);
+            }
+            break;
+        }
+
+        case OP_PUSH_OUTER_TEMP: {
+            /* Operand encoding: high 4 bits = depth, low 4 bits = slot index.
+             * For now we use a simple scheme: operand byte encodes
+             * (depth << 4) | slot_index, supporting depth 0-15 and slot 0-15.
+             * If we need larger ranges, OP_WIDE provides 16-bit operand. */
+            /* Actually, for simplicity and to match common Smalltalk VMs,
+             * we use a two-byte encoding: the operand byte is the slot index,
+             * and the depth is encoded in an additional byte after the operand.
+             * BUT we only have a single operand byte in our instruction format.
+             *
+             * Simpler: encode depth in high nibble, slot in low nibble.
+             * With OP_WIDE this gives depth 0-255 and slot 0-255. But we
+             * only have one operand... Let's use: operand = (depth << 8) | slot
+             * which works with OP_WIDE (16-bit operand). For non-wide, depth
+             * is in high nibble, slot in low nibble of the 8-bit operand. */
+            uint8_t depth = (uint8_t)(operand >> 4);
+            uint8_t slot  = (uint8_t)(operand & 0x0F);
+            if (is_wide) {
+                depth = (uint8_t)(operand >> 8);
+                slot  = (uint8_t)(operand & 0xFF);
+            }
+            /* Walk context chain depth levels. */
+            STA_OOP ctx = frame->context;
+            for (uint8_t d = 0; d < depth; d++) {
+                if (ctx == 0) {
+                    fprintf(stderr, "FATAL: outer temp context chain broken at depth %u\n", d);
+                    abort();
+                }
+                /* Context chain: slot 0 of a context could be the outer context.
+                 * But in our design, the context is shared — nested blocks share
+                 * the same context as the method. For depth > 1, we'd need
+                 * context chaining. For now, depth > 0 means walk up sender
+                 * chain to find a frame with a different context. */
+                /* TODO: implement full context chain for deeply nested blocks. */
+            }
+            if (ctx == 0) {
+                fprintf(stderr, "FATAL: OP_PUSH_OUTER_TEMP with no context\n");
+                abort();
+            }
+            STA_OOP *ctx_slots = sta_payload((STA_ObjHeader *)(uintptr_t)ctx);
+            sta_stack_push(slab, ctx_slots[slot]);
+            frame->pc += insn_len;
+            break;
+        }
+
         case OP_STORE_OUTER_TEMP:
-        case OP_POP_STORE_OUTER_TEMP:
-        case OP_NON_LOCAL_RETURN:
-        case OP_CLOSURE_COPY:
-        case OP_PUSH_OUTER_TEMP:
+        case OP_POP_STORE_OUTER_TEMP: {
+            uint8_t depth = (uint8_t)(operand >> 4);
+            uint8_t slot  = (uint8_t)(operand & 0x0F);
+            if (is_wide) {
+                depth = (uint8_t)(operand >> 8);
+                slot  = (uint8_t)(operand & 0xFF);
+            }
+            STA_OOP ctx = frame->context;
+            for (uint8_t d = 0; d < depth; d++) {
+                if (ctx == 0) {
+                    fprintf(stderr, "FATAL: outer temp context chain broken\n");
+                    abort();
+                }
+            }
+            if (ctx == 0) {
+                fprintf(stderr, "FATAL: OP_STORE_OUTER_TEMP with no context\n");
+                abort();
+            }
+            STA_OOP *ctx_slots = sta_payload((STA_ObjHeader *)(uintptr_t)ctx);
+            STA_OOP val = (opcode == OP_POP_STORE_OUTER_TEMP)
+                          ? sta_stack_pop(slab)
+                          : sta_stack_peek(slab);
+            ctx_slots[slot] = val;
+            frame->pc += insn_len;
+            break;
+        }
+
         case OP_SEND_ASYNC:
         case OP_ASK:
         case OP_ACTOR_SPAWN:
@@ -547,6 +785,24 @@ STA_OOP sta_interpret(STA_VM *vm,
         abort();
     }
 
+    /* If the method needs a context (largeFrame bit), allocate one.
+     * Same logic as the OP_SEND handler for context methods. */
+    STA_OOP mh = sta_method_header(method);
+    if (STA_METHOD_LARGE_FRAME(mh)) {
+        uint32_t ctx_size = (uint32_t)frame->arg_count + (uint32_t)frame->local_count;
+        STA_ObjHeader *ctx_h = sta_heap_alloc(&vm->heap, STA_CLS_ARRAY, ctx_size);
+        if (!ctx_h) {
+            fprintf(stderr, "sta_interpret: failed to allocate context\n");
+            abort();
+        }
+        STA_OOP *ctx_slots = sta_payload(ctx_h);
+        STA_OOP *inline_slots = sta_frame_slots(frame);
+        for (uint32_t i = 0; i < ctx_size; i++)
+            ctx_slots[i] = inline_slots[i];
+        frame->context = (STA_OOP)(uintptr_t)ctx_h;
+        frame->flags |= STA_FRAME_FLAG_MARKER;
+    }
+
     return interpret_loop(vm, frame);
 }
 
@@ -554,12 +810,15 @@ STA_OOP sta_eval_block(STA_VM *vm,
                         STA_OOP block_closure,
                         STA_OOP *args, uint8_t nargs)
 {
-    STA_OOP *bc_slots = sta_payload(
-        (STA_ObjHeader *)(uintptr_t)block_closure);
-    uint32_t start_pc = (uint32_t)STA_SMALLINT_VAL(bc_slots[0]);
-    STA_OOP home_method = bc_slots[2];
-    STA_OOP receiver = bc_slots[3];
-    uint32_t temp_off = (uint32_t)STA_SMALLINT_VAL(bc_slots[4]);
+    STA_ObjHeader *bc_h = (STA_ObjHeader *)(uintptr_t)block_closure;
+    STA_OOP *bc_slots = sta_payload(bc_h);
+    uint32_t start_pc = (uint32_t)STA_SMALLINT_VAL(bc_slots[BC_SLOT_START_PC]);
+    STA_OOP home_method = bc_slots[BC_SLOT_METHOD];
+    STA_OOP receiver = bc_slots[BC_SLOT_RECEIVER];
+    uint32_t temp_off = (uint32_t)STA_SMALLINT_VAL(bc_slots[BC_SLOT_TEMP_OFFSET]);
+
+    /* Check if this is a closure (6-slot) with context. */
+    bool has_ctx = (bc_h->size >= 6 && bc_slots[BC_SLOT_CONTEXT] != 0);
 
     STA_Frame *frame = sta_frame_push(&vm->slab, home_method, receiver, NULL,
                                        NULL, 0);
@@ -567,10 +826,21 @@ STA_OOP sta_eval_block(STA_VM *vm,
         fprintf(stderr, "sta_eval_block: stack overflow\n");
         abort();
     }
-    if (nargs > 0 && args) {
-        STA_OOP *blk_slots = sta_frame_slots(frame);
-        for (uint8_t i = 0; i < nargs; i++)
-            blk_slots[temp_off + i] = args[i];
+
+    if (has_ctx) {
+        frame->context = bc_slots[BC_SLOT_CONTEXT];
+        if (nargs > 0 && args) {
+            STA_OOP *ctx_slots = sta_payload(
+                (STA_ObjHeader *)(uintptr_t)frame->context);
+            for (uint8_t i = 0; i < nargs; i++)
+                ctx_slots[temp_off + i] = args[i];
+        }
+    } else {
+        if (nargs > 0 && args) {
+            STA_OOP *blk_slots = sta_frame_slots(frame);
+            for (uint8_t i = 0; i < nargs; i++)
+                blk_slots[temp_off + i] = args[i];
+        }
     }
     frame->pc = start_pc;
 

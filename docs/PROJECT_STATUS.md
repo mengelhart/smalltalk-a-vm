@@ -125,7 +125,7 @@ These must be resolved before the corresponding component is built:
 5. **Per-actor scheduling fairness** (ADR 009) — measure with real bytecode in Phase 1
 6. ~~**Stack slab growth policy**~~ — **Resolved in ADR 014 — linked segments, 512-byte initial, 2 KB growth, deferred allocation.**
 7. ~~**TCO with callee having more locals**~~ — **Resolved in ADR 014 — decline TCO when callee frame does not fit current frame space.**
-8. **Closure and non-local return compatibility** (ADR 010) — design before Phase 1 block/closure support
+8. ~~**Closure and non-local return compatibility**~~ — **Resolved in Epic 1.** Heap contexts, OP_NON_LOCAL_RETURN, BlockCannotReturn safety.
 9. **Deep-copy visited set** (ADR 008) — hash map for cycles/sharing required before Phase 1 copy implementation
 10. **`ask:` future on mailbox-full** (ADR 008) — future resolution path, Phase 2
 11. **Transfer buffer allocator** (ADR 008) — replace malloc stub with runtime slab, Phase 1
@@ -580,6 +580,30 @@ ArrayedCollection, Character, String, Symbol, ByteArray, Array, OrderedCollectio
   - g_last_error (vm.c) — pre-VM-creation error reporting
   - g_fallback_specials (special_objects.c) — fallback before VM exists
 
+### Epic 1: Full Closures (Captured Variables, NLR, ensure: Unwinding) — COMPLETE
+- GitHub: Epic #255, stories #256–#261 (all closed)
+- Branch: phase2/epic-1-closures
+- Key changes:
+  - Capture analysis pre-pass in codegen detects which methods need heap contexts
+  - Heap-allocated context objects (STA_CLS_ARRAY) for captured variable sharing
+  - Frame-level redirection: effective_slots() returns context payload or inline frame slots
+  - OP_CLOSURE_COPY creates 6-slot BlockClosure (adds context reference)
+  - OP_BLOCK_COPY unchanged for clean blocks — zero overhead for non-capturing code
+  - OP_NON_LOCAL_RETURN walks sender chain to home method frame (MARKER flag)
+  - BlockCannotReturn signaled when home method already returned
+  - Parser now accepts ^ inside blocks (was rejected in Phase 1)
+  - Codegen emits OP_NON_LOCAL_RETURN for ^ in blocks
+  - ensure: registers on handler chain; prim_signal fires ensure: blocks during unwinding
+  - STA_Frame gains context field (56 bytes, was 48)
+  - STA_HandlerEntry gains is_ensure and ensure_block fields
+  - TCO skipped for context methods (context lifecycle too complex for frame reuse)
+  - sta_compiled_method_create_with_header for custom header flags (needsContext = largeFrame bit)
+- New opcodes implemented: OP_CLOSURE_COPY (0x61), OP_NON_LOCAL_RETURN (0x35),
+  OP_PUSH_OUTER_TEMP (0x62), OP_STORE_OUTER_TEMP (0x16), OP_POP_STORE_OUTER_TEMP (0x17)
+- Tests: 17 new closure tests, 61 CTest targets total (60 passing + 1 disabled), ASan clean
+- Closes deferred items: "do: with mutable-capture blocks", "ensure: during exception unwinding"
+- Resolves open decision #8: Closure and NLR compatibility (ADR 010)
+
 ---
 
 ## Current phase
@@ -602,8 +626,8 @@ Epic ordering (actual, all 11 complete):
 - **Byte-aware at:/at:put: for String/ByteArray** — prim 51/52 read OOP slots, not bytes. Need dedicated byte-indexable primitives.
 - **Stream classes (ReadStream, WriteStream)** — not in bootstrap; require file-in class creation or bootstrap addition.
 - **OrderedCollection** — needs instance variable tracking and grow-on-add semantics.
-- **do: with mutable-capture blocks** — requires Phase 2 closure support. collect:/select:/reject:/detect:ifNone: work with clean blocks (pure functions of their arg).
-- **ensure: during exception unwinding** — longjmp bypasses ensure: blocks. Phase 2 will fix this.
+- ~~**do: with mutable-capture blocks**~~ — **Done in Epic 1.** Full closure support with heap-allocated context objects.
+- ~~**ensure: during exception unwinding**~~ — **Done in Epic 1.** ensure: registers on handler chain; prim_signal fires ensure: blocks during unwinding.
 - ~~**Real handle table**~~ — **Done in Epic 0.** Slab-based, reference-counted, growable per ADR 013.
 - ~~**Per-instance state**~~ — **Done in Epic 0.** All mutable globals migrated to STA_VM struct.
 

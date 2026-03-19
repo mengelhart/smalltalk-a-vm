@@ -284,13 +284,19 @@ static void test_nested_send(void) {
     sta_ast_free(m);
 }
 
-static void test_non_local_return_in_block_rejected(void) {
-    /* "foo [:x | ^x]" → parse error */
+static void test_non_local_return_in_block_accepted(void) {
+    /* "foo [:x | ^x]" → now accepted (Phase 2 closures).
+     * The block body should contain a NODE_RETURN. */
     STA_Parser p;
     STA_AstNode *m = sta_parse_method("foo [:x | ^x]", &p);
-    assert(m == NULL);
-    assert(p.had_error);
-    assert(strstr(p.error_msg, "non-local return") != NULL);
+    assert(m != NULL);
+    assert(!p.had_error);
+    assert(m->as.method.body_count == 1);
+    STA_AstNode *blk = m->as.method.body[0];
+    assert(blk->type == NODE_BLOCK);
+    assert(blk->as.method.body_count == 1);
+    assert(blk->as.method.body[0]->type == NODE_RETURN);
+    sta_ast_free(m);
 }
 
 static void test_empty_method_body(void) {
@@ -427,7 +433,7 @@ int main(void) {
     RUN(test_self);
     RUN(test_super);
     RUN(test_nested_send);
-    RUN(test_non_local_return_in_block_rejected);
+    RUN(test_non_local_return_in_block_accepted);
     RUN(test_empty_method_body);
     RUN(test_multiple_statements);
     RUN(test_chained_unary);

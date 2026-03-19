@@ -16,12 +16,6 @@ static void parser_error(STA_Parser *p, const char *msg) {
              p->current.line, msg);
 }
 
-static void parser_error_at(STA_Parser *p, uint32_t line, const char *msg) {
-    if (p->had_error) return;
-    p->had_error = true;
-    snprintf(p->error_msg, sizeof(p->error_msg), "line %u: %s", line, msg);
-}
-
 static void advance_token(STA_Parser *p) {
     p->previous = p->current;
     p->current = sta_scanner_next(&p->scanner);
@@ -347,13 +341,18 @@ static STA_AstNode *parse_block(STA_Parser *p) {
     while (!check(p, TOKEN_RBRACKET) && !check(p, TOKEN_EOF) && !p->had_error) {
         STA_AstNode *stmt = NULL;
 
-        /* Check for return inside block — reject non-local return. */
+        /* Non-local return (^) inside blocks: parse as NODE_RETURN.
+         * The codegen will emit OP_NON_LOCAL_RETURN instead of OP_RETURN_TOP. */
         if (check(p, TOKEN_RETURN)) {
-            parser_error(p, "non-local return (^) inside block is not supported in Phase 1");
-            break;
+            advance_token(p);
+            uint32_t ret_line = p->previous.line;
+            STA_AstNode *expr = parse_expression(p);
+            if (!expr) break;
+            stmt = alloc_node(NODE_RETURN, ret_line);
+            if (stmt) stmt->as.ret.expr = expr;
+        } else {
+            stmt = parse_expression(p);
         }
-
-        stmt = parse_expression(p);
         if (!stmt) break;
         ptr_array_push(&body, stmt);
 
@@ -759,13 +758,6 @@ static STA_AstNode *parse_statement(STA_Parser *p) {
     /* Return statement. */
     if (match(p, TOKEN_RETURN)) {
         uint32_t line = p->previous.line;
-
-        /* Check for non-local return in block. */
-        if (p->block_depth > 0) {
-            parser_error_at(p, line,
-                "non-local return (^) inside block is not supported in Phase 1");
-            return NULL;
-        }
 
         STA_AstNode *expr = parse_expression(p);
         if (!expr) return NULL;

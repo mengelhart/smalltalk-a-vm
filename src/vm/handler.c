@@ -55,7 +55,9 @@ static bool is_kind_of(STA_OOP obj, STA_OOP target_class, STA_ClassTable *ct) {
 STA_HandlerEntry *sta_handler_find(STA_VM *vm, STA_OOP exception) {
     STA_HandlerEntry *entry = vm->handler_top;
     while (entry) {
-        if (is_kind_of(exception, entry->exception_class, &vm->class_table)) {
+        /* Skip ensure: entries — they're not exception handlers. */
+        if (!entry->is_ensure &&
+            is_kind_of(exception, entry->exception_class, &vm->class_table)) {
             return entry;
         }
         entry = entry->prev;

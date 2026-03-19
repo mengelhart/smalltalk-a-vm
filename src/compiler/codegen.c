@@ -130,6 +130,163 @@ static uint16_t lb_add_unique(LitBuf *l, STA_OOP oop) {
     return idx;
 }
 
+/* ── Capture analysis ────────────────────────────────────────────────── */
+
+/* Walk an AST to determine if any non-inline block references a variable
+ * defined in an outer scope.  This tells us whether the method needs a
+ * heap-allocated context object.
+ *
+ * We also detect if any block contains a non-local return (NODE_RETURN
+ * inside NODE_BLOCK), which requires the closure to carry a home-context
+ * reference so the NLR knows where to return to.
+ *
+ * The analysis is conservative: if ANY non-inline block references a temp
+ * from an outer scope, the method needs a context. */
+
+typedef struct {
+    /* Names of temps/args visible at method level. */
+    const char **method_temps;
+    uint32_t     method_temp_count;
+    bool         has_captures;     /* set true if any block captures */
+    bool         has_nlr;          /* set true if any block has ^ */
+} CaptureAnalysis;
+
+static void capture_walk(CaptureAnalysis *ca, STA_AstNode *node,
+                          int block_depth);
+
+static void capture_walk_stmts(CaptureAnalysis *ca, STA_AstNode **stmts,
+                                uint32_t count, int block_depth) {
+    for (uint32_t i = 0; i < count; i++)
+        capture_walk(ca, stmts[i], block_depth);
+}
+
+/* Check if name matches any method-level temp. */
+static bool is_method_temp(CaptureAnalysis *ca, const char *name) {
+    for (uint32_t i = 0; i < ca->method_temp_count; i++) {
+        if (strcmp(ca->method_temps[i], name) == 0) return true;
+    }
+    return false;
+}
+
+/* Check if a send is an inlinable control structure (blocks inlined,
+ * not real closures). We must match the same set as the codegen. */
+static bool is_inlinable_send(STA_AstNode *node) {
+    if (node->type != NODE_SEND) return false;
+    const char *sel = node->as.send.selector;
+    if (strcmp(sel, "ifTrue:") == 0 || strcmp(sel, "ifFalse:") == 0 ||
+        strcmp(sel, "ifTrue:ifFalse:") == 0 || strcmp(sel, "ifFalse:ifTrue:") == 0 ||
+        strcmp(sel, "whileTrue:") == 0 || strcmp(sel, "whileFalse:") == 0 ||
+        strcmp(sel, "whileTrue") == 0 || strcmp(sel, "whileFalse") == 0 ||
+        strcmp(sel, "and:") == 0 || strcmp(sel, "or:") == 0 ||
+        strcmp(sel, "timesRepeat:") == 0)
+        return true;
+    return false;
+}
+
+/* Check if a block arg is inlined (part of an inlinable send). */
+static bool is_inlined_block(STA_AstNode *block, STA_AstNode *parent) {
+    if (!parent || !block || block->type != NODE_BLOCK) return false;
+    if (!is_inlinable_send(parent)) return false;
+    /* For loop sends, receiver block is also inlined. */
+    if (block == parent->as.send.receiver) return true;
+    for (uint32_t i = 0; i < parent->as.send.arg_count; i++) {
+        if (block == parent->as.send.args[i]) return true;
+    }
+    return false;
+}
+
+static void capture_walk_with_parent(CaptureAnalysis *ca, STA_AstNode *node,
+                                      int block_depth, STA_AstNode *parent) {
+    if (!node) return;
+
+    switch (node->type) {
+    case NODE_VARIABLE:
+        /* If we're inside a non-inline block and this variable is a
+         * method-level temp, it's a capture. */
+        if (block_depth > 0 && is_method_temp(ca, node->as.variable.name))
+            ca->has_captures = true;
+        break;
+
+    case NODE_ASSIGN:
+        capture_walk_with_parent(ca, node->as.assign.variable, block_depth, node);
+        capture_walk_with_parent(ca, node->as.assign.value, block_depth, node);
+        break;
+
+    case NODE_RETURN:
+        if (block_depth > 0)
+            ca->has_nlr = true;
+        capture_walk_with_parent(ca, node->as.ret.expr, block_depth, node);
+        break;
+
+    case NODE_SEND:
+    case NODE_SUPER_SEND: {
+        capture_walk_with_parent(ca, node->as.send.receiver, block_depth, node);
+        for (uint32_t i = 0; i < node->as.send.arg_count; i++)
+            capture_walk_with_parent(ca, node->as.send.args[i], block_depth, node);
+        break;
+    }
+
+    case NODE_CASCADE:
+        capture_walk_with_parent(ca, node->as.cascade.receiver, block_depth, node);
+        for (uint32_t i = 0; i < node->as.cascade.msg_count; i++) {
+            STA_CascadeMsg *m = &node->as.cascade.messages[i];
+            for (uint32_t j = 0; j < m->arg_count; j++)
+                capture_walk_with_parent(ca, m->args[j], block_depth, node);
+        }
+        break;
+
+    case NODE_BLOCK:
+        /* If this block is inlined as part of an inlinable send, it doesn't
+         * create a real closure — treat it at same depth. */
+        if (is_inlined_block(node, parent)) {
+            capture_walk_stmts(ca, node->as.method.body,
+                               node->as.method.body_count, block_depth);
+        } else {
+            /* Real closure block — increase depth. */
+            capture_walk_stmts(ca, node->as.method.body,
+                               node->as.method.body_count, block_depth + 1);
+        }
+        break;
+
+    default:
+        break;
+    }
+}
+
+static void capture_walk(CaptureAnalysis *ca, STA_AstNode *node,
+                          int block_depth) {
+    capture_walk_with_parent(ca, node, block_depth, NULL);
+}
+
+/* Top-level analysis: does this method need a context object? */
+static void analyze_captures(CaptureAnalysis *ca, STA_AstNode *method_ast) {
+    ca->has_captures = false;
+    ca->has_nlr = false;
+
+    /* Build the list of method-level temp names (args + declared temps). */
+    uint32_t total = method_ast->as.method.arg_count + method_ast->as.method.temp_count;
+    const char **names = NULL;
+    if (total > 0) {
+        names = malloc(total * sizeof(char *));
+        if (!names) return;
+        for (uint32_t i = 0; i < method_ast->as.method.arg_count; i++)
+            names[i] = method_ast->as.method.args[i];
+        for (uint32_t i = 0; i < method_ast->as.method.temp_count; i++)
+            names[method_ast->as.method.arg_count + i] = method_ast->as.method.temps[i];
+    }
+    ca->method_temps = names;
+    ca->method_temp_count = total;
+
+    /* Walk the body. We need to pass parent context for inlined-block detection.
+     * Walk each statement at method level (depth=0). For sends with block args,
+     * the capture_walk_with_parent handles inlining detection. */
+    for (uint32_t i = 0; i < method_ast->as.method.body_count; i++)
+        capture_walk_with_parent(ca, method_ast->as.method.body[i], 0, NULL);
+
+    free(names);
+    ca->method_temps = NULL;
+}
+
 /* ── Codegen state ───────────────────────────────────────────────────── */
 
 typedef struct {
@@ -146,6 +303,11 @@ typedef struct {
     uint32_t  num_args;      /* method arg count */
     uint32_t  num_method_temps; /* declared method temps (excluding args) */
     uint32_t  peak_temp_count; /* track max temp_count for numTemps header */
+
+    /* Closure support (Phase 2). */
+    bool     needs_context;   /* method needs a heap context object */
+    bool     has_nlr;         /* method contains non-local return in a block */
+    int      block_depth;     /* 0 = method level, >0 = inside real block */
 } Codegen;
 
 static void cg_init(Codegen *cg, STA_CodegenContext *ctx) {
@@ -158,6 +320,9 @@ static void cg_init(Codegen *cg, STA_CodegenContext *ctx) {
     cg->num_args = 0;
     cg->num_method_temps = 0;
     cg->peak_temp_count = 0;
+    cg->needs_context = false;
+    cg->has_nlr = false;
+    cg->block_depth = 0;
 }
 
 static void cg_free(Codegen *cg) {
@@ -771,21 +936,31 @@ static void emit_cascade(Codegen *cg, STA_AstNode *node, bool for_value) {
 }
 
 static void emit_block(Codegen *cg, STA_AstNode *node) {
-    /* Create a block descriptor (startPC, bodyLength, numArgs) and add
-     * it to the literal frame. The block body is emitted inline and
-     * the interpreter jumps past it. */
+    /* Create a block descriptor and add it to the literal frame.
+     * The block body is emitted inline and the interpreter jumps past it.
+     *
+     * If the method needs a context (cg->needs_context), emit OP_CLOSURE_COPY
+     * instead of OP_BLOCK_COPY. The difference:
+     * - OP_BLOCK_COPY: clean block (no captures). BlockClosure has 5 slots.
+     * - OP_CLOSURE_COPY: capturing block. BlockClosure has 6 slots (adds context).
+     *   BlockDescriptor has 5 slots (adds numContext for context temp count). */
 
     /* Reserve literal slot for the block descriptor (we'll patch it). */
     uint16_t desc_idx = lb_add_unique(&cg->literals, 0); /* placeholder */
 
-    /* Emit OP_BLOCK_COPY. */
-    bb_emit_wide(&cg->code, OP_BLOCK_COPY, desc_idx);
+    /* Choose opcode based on whether the method has captures. */
+    bool use_closure = cg->needs_context;
+    uint8_t copy_op = use_closure ? OP_CLOSURE_COPY : OP_BLOCK_COPY;
+    bb_emit_wide(&cg->code, copy_op, desc_idx);
 
     /* Record block body start. */
     uint32_t body_start = cg->code.count;
 
     /* Allocate temp indices for block args and temps. */
     uint32_t saved_temp_count = cg->temp_count;
+    int saved_depth = cg->block_depth;
+    cg->block_depth++;
+
     for (uint32_t i = 0; i < node->as.method.arg_count; i++) {
         cg_add_temp(cg, node->as.method.args[i]);
     }
@@ -805,16 +980,16 @@ static void emit_block(Codegen *cg, STA_AstNode *node) {
     uint32_t body_end = cg->code.count;
     uint32_t body_length = body_end - body_start;
 
-    /* Restore temp scope. */
+    /* Restore temp scope and block depth. */
     for (uint32_t i = saved_temp_count; i < cg->temp_count; i++)
         free(cg->temp_names[i]);
     cg->temp_count = saved_temp_count;
+    cg->block_depth = saved_depth;
 
-    /* Create BlockDescriptor object:
-     * 4 slots: startPC, bodyLength, numArgs, tempOffset (all SmallInt).
-     * tempOffset is the temp index where the first block arg should go. */
+    /* Create BlockDescriptor object. */
+    uint32_t desc_slots = use_closure ? 5 : 4;
     STA_ObjHeader *bd = sta_heap_alloc(cg->ctx->heap,
-                                        STA_CLS_BLOCKDESCRIPTOR, 4);
+                                        STA_CLS_BLOCKDESCRIPTOR, desc_slots);
     if (!bd) {
         cg_error(cg, "failed to allocate block descriptor");
         return;
@@ -824,6 +999,12 @@ static void emit_block(Codegen *cg, STA_AstNode *node) {
     bdp[1] = STA_SMALLINT_OOP(body_length);
     bdp[2] = STA_SMALLINT_OOP(node->as.method.arg_count);
     bdp[3] = STA_SMALLINT_OOP(saved_temp_count);
+    if (use_closure) {
+        /* numContext: total number of temps in the method's context object.
+         * This is the method's peak temp count (all temps go in the context
+         * when the method has any captures). */
+        bdp[4] = STA_SMALLINT_OOP(cg->num_args + cg->num_method_temps);
+    }
 
     /* Patch the literal slot. */
     cg->literals.items[desc_idx] = (STA_OOP)(uintptr_t)bd;
@@ -832,7 +1013,15 @@ static void emit_block(Codegen *cg, STA_AstNode *node) {
 static void emit_return(Codegen *cg, STA_AstNode *node) {
     STA_AstNode *expr = node->as.ret.expr;
 
-    /* Optimized returns for common constants. */
+    /* If we're inside a real block (block_depth > 0), this is a non-local
+     * return. Emit the value then OP_NON_LOCAL_RETURN. */
+    if (cg->block_depth > 0) {
+        emit_node(cg, expr, true);
+        bb_emit(&cg->code, OP_NON_LOCAL_RETURN, 0x00);
+        return;
+    }
+
+    /* Optimized returns for common constants (method level only). */
     if (expr->type == NODE_LITERAL_NIL) {
         bb_emit(&cg->code, OP_RETURN_NIL, 0x00);
         return;
@@ -1064,8 +1253,16 @@ STA_OOP sta_codegen(STA_AstNode *method_ast, STA_CodegenContext *ctx) {
         return 0;
     }
 
+    /* Phase 2: capture analysis — determine if any blocks capture outer
+     * temps or contain non-local returns. */
+    CaptureAnalysis ca;
+    memset(&ca, 0, sizeof(ca));
+    analyze_captures(&ca, method_ast);
+
     Codegen cg;
     cg_init(&cg, ctx);
+    cg.needs_context = ca.has_captures || ca.has_nlr;
+    cg.has_nlr = ca.has_nlr;
 
     /* Set up temp index mapping: args first, then declared temps. */
     cg.num_args = method_ast->as.method.arg_count;
@@ -1127,17 +1324,31 @@ STA_OOP sta_codegen(STA_AstNode *method_ast, STA_CodegenContext *ctx) {
      * temps — and the peak tracks the high-water mark. */
     uint32_t num_temps = cg.peak_temp_count;
 
-    /* Build the CompiledMethod. */
+    /* Build the CompiledMethod.
+     * If the method needs a context, set largeFrame bit (used as
+     * needsContext flag — the interpreter allocates a heap context
+     * when this bit is set). */
     uint8_t n_args = (uint8_t)cg.num_args;
     uint8_t n_lits = (uint8_t)cg.literals.count;
 
-    STA_OOP method = sta_compiled_method_create(
-        ctx->immutable_space,
-        n_args,
-        (uint8_t)num_temps,
-        0, /* no primitive index */
-        cg.literals.items, n_lits,
-        cg.code.bytes, cg.code.count);
+    STA_OOP method;
+    if (cg.needs_context) {
+        /* Build header manually with largeFrame=1 to signal needsContext. */
+        STA_OOP header = STA_METHOD_HEADER(n_args, (uint8_t)num_temps,
+                                            n_lits, 0, 0, 1);
+        method = sta_compiled_method_create_with_header(
+            ctx->immutable_space, header,
+            cg.literals.items, n_lits,
+            cg.code.bytes, cg.code.count);
+    } else {
+        method = sta_compiled_method_create(
+            ctx->immutable_space,
+            n_args,
+            (uint8_t)num_temps,
+            0, /* no primitive index */
+            cg.literals.items, n_lits,
+            cg.code.bytes, cg.code.count);
+    }
 
     cg_free(&cg);
 

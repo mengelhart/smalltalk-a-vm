@@ -833,11 +833,40 @@ static int prim_signal(STA_ExecContext *ctx, STA_OOP *args, uint8_t nargs, STA_O
     (void)nargs; (void)result;
 
     STA_OOP exception = args[0];
-    STA_HandlerEntry *entry = sta_handler_find(ctx->vm, exception);
-    if (entry) {
-        ctx->vm->handler_top = entry->prev;
+
+    /* First, find the target on:do: handler (skip ensure: entries). */
+    STA_HandlerEntry *target = NULL;
+    {
+        STA_HandlerEntry *e = ctx->vm->handler_top;
+        while (e) {
+            if (!e->is_ensure) {
+                /* Check if this on:do: handler matches the exception. */
+                STA_HandlerEntry *saved_top = ctx->vm->handler_top;
+                ctx->vm->handler_top = e;
+                STA_HandlerEntry *match = sta_handler_find(ctx->vm, exception);
+                ctx->vm->handler_top = saved_top;
+                if (match == e) {
+                    target = e;
+                    break;
+                }
+            }
+            e = e->prev;
+        }
+    }
+
+    if (target) {
+        /* Fire all ensure: blocks between handler_top and target. */
+        while (ctx->vm->handler_top != target) {
+            STA_HandlerEntry *top = ctx->vm->handler_top;
+            ctx->vm->handler_top = top->prev;
+            if (top->is_ensure) {
+                (void)sta_eval_block(ctx->vm, top->ensure_block, NULL, 0);
+            }
+        }
+        /* Now handler_top == target. Pop it and longjmp. */
+        ctx->vm->handler_top = target->prev;
         sta_handler_set_signaled_exception(ctx->vm, exception);
-        longjmp(entry->jmp, 1);
+        longjmp(target->jmp, 1);
     }
 
     fprintf(stderr, "Unhandled exception (class index %u)\n",
@@ -853,7 +882,19 @@ static int prim_ensure(STA_ExecContext *ctx, STA_OOP *args, uint8_t nargs, STA_O
     STA_OOP body_block   = args[0];
     STA_OOP ensure_block = args[1];
 
+    /* Register on the handler chain so exception unwinding fires this
+     * ensure: block. prim_signal walks the chain and fires ensure: entries
+     * it encounters before the target on:do: handler. */
+    STA_HandlerEntry entry;
+    memset(&entry, 0, sizeof(entry));
+    entry.is_ensure     = true;
+    entry.ensure_block  = ensure_block;
+
+    sta_handler_push(ctx->vm, &entry);
     STA_OOP body_result = sta_eval_block(ctx->vm, body_block, NULL, 0);
+    sta_handler_pop(ctx->vm);
+
+    /* Normal completion: fire ensure block. */
     (void)sta_eval_block(ctx->vm, ensure_block, NULL, 0);
 
     *result = body_result;
