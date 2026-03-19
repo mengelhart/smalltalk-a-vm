@@ -7,14 +7,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* ── Symbol table structure ────────────────────────────────────────────── */
-
-struct STA_SymbolTable {
-    STA_OOP  *slots;      /* open-addressing hash table of Symbol OOPs   */
-    uint32_t  capacity;   /* number of slots                              */
-    uint32_t  count;      /* number of occupied slots                     */
-};
-
 /* ── FNV-1a (32-bit) ───────────────────────────────────────────────────── */
 
 #define FNV_OFFSET_BASIS  2166136261u
@@ -31,34 +23,49 @@ uint32_t sta_symbol_hash(const char *utf8, size_t len) {
 
 /* ── Table lifecycle ───────────────────────────────────────────────────── */
 
+static uint32_t round_up_pow2(uint32_t v) {
+    if (v == 0) return 16;
+    v--;
+    v |= v >> 1;
+    v |= v >> 2;
+    v |= v >> 4;
+    v |= v >> 8;
+    v |= v >> 16;
+    v++;
+    return v;
+}
+
+int sta_symbol_table_init(STA_SymbolTable *st, uint32_t initial_capacity) {
+    uint32_t cap = round_up_pow2(initial_capacity);
+    st->slots = calloc(cap, sizeof(STA_OOP));
+    if (!st->slots) return -1;
+    st->capacity = cap;
+    st->count    = 0;
+    return 0;
+}
+
+void sta_symbol_table_deinit(STA_SymbolTable *st) {
+    if (!st) return;
+    free(st->slots);
+    st->slots = NULL;
+    st->capacity = 0;
+    st->count = 0;
+}
+
 STA_SymbolTable *sta_symbol_table_create(uint32_t initial_capacity) {
-    if (initial_capacity == 0) initial_capacity = 16;
-
-    /* Round up to next power of two (required for bitmask probing). */
-    uint32_t cap = initial_capacity;
-    cap--;
-    cap |= cap >> 1;
-    cap |= cap >> 2;
-    cap |= cap >> 4;
-    cap |= cap >> 8;
-    cap |= cap >> 16;
-    cap++;
-    initial_capacity = cap;
-
     STA_SymbolTable *st = malloc(sizeof(*st));
     if (!st) return NULL;
 
-    st->slots = calloc(initial_capacity, sizeof(STA_OOP));
-    if (!st->slots) { free(st); return NULL; }
-
-    st->capacity = initial_capacity;
-    st->count    = 0;
+    if (sta_symbol_table_init(st, initial_capacity) != 0) {
+        free(st);
+        return NULL;
+    }
     return st;
 }
 
 void sta_symbol_table_destroy(STA_SymbolTable *st) {
     if (!st) return;
-    free(st->slots);
+    sta_symbol_table_deinit(st);
     free(st);
 }
 

@@ -19,8 +19,21 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* ── Symbol table (opaque) ─────────────────────────────────────────────── */
-typedef struct STA_SymbolTable STA_SymbolTable;
+/* ── Symbol table ──────────────────────────────────────────────────────── */
+
+/* Struct definition (visible for STA_VM embedding). */
+typedef struct STA_SymbolTable {
+    STA_OOP  *slots;      /* open-addressing hash table of Symbol OOPs   */
+    uint32_t  capacity;   /* number of slots                              */
+    uint32_t  count;      /* number of occupied slots                     */
+} STA_SymbolTable;
+
+/* Initialize in-place. Allocates backing slot array.
+ * Returns 0 on success, -1 on failure. */
+int sta_symbol_table_init(STA_SymbolTable *st, uint32_t initial_capacity);
+
+/* Deinitialize (free backing array). Does not free the struct itself. */
+void sta_symbol_table_deinit(STA_SymbolTable *st);
 
 /* Create a symbol table with the given initial capacity (number of slots).
  * Returns NULL on allocation failure. */

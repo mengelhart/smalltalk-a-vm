@@ -2,6 +2,7 @@
  * Tests for primitive table and kernel primitives.
  */
 #include "vm/primitive_table.h"
+#include "vm/vm_state.h"
 #include "vm/special_objects.h"
 #include "vm/immutable_space.h"
 #include "vm/heap.h"
@@ -9,12 +10,21 @@
 #include <stdio.h>
 #include <assert.h>
 #include <limits.h>
+#include <string.h>
 
-/* Helper: set up special objects for boolean results. */
+/* Minimal VM for primitive testing — only specials, heap, class_table needed. */
+static STA_VM g_vm;
+static STA_ExecContext g_ctx;
 static STA_ImmutableSpace *g_sp;
+
 static void setup_specials(void) {
-    sta_special_objects_init();
+    memset(&g_vm, 0, sizeof(g_vm));
+
     g_sp = sta_immutable_space_create(64 * 1024);
+
+    /* Bind specials to VM struct. */
+    sta_special_objects_bind(g_vm.specials);
+    sta_special_objects_init();
 
     /* Allocate nil, true, false objects. */
     STA_ObjHeader *nil_h = sta_immutable_alloc(g_sp, STA_CLS_UNDEFINEDOBJ, 0);
@@ -26,26 +36,29 @@ static void setup_specials(void) {
     sta_spc_set(SPC_FALSE, (STA_OOP)(uintptr_t)false_h);
 
     sta_primitive_table_init();
+
+    g_ctx.vm = &g_vm;
+    g_ctx.actor = NULL;
 }
+
+#define PRIM(idx, a, n, r) sta_primitives[idx](&g_ctx, a, n, r)
 
 static void test_smallint_add(void) {
     printf("  SmallInt #+...");
     STA_OOP args[] = { STA_SMALLINT_OOP(3), STA_SMALLINT_OOP(4) };
     STA_OOP result;
-    int rc = sta_primitives[1](args, 1, &result);
+    int rc = PRIM(1, args, 1, &result);
     assert(rc == 0);
     assert(result == STA_SMALLINT_OOP(7));
 
-    /* Negative. */
     args[0] = STA_SMALLINT_OOP(-5);
     args[1] = STA_SMALLINT_OOP(3);
-    rc = sta_primitives[1](args, 1, &result);
+    rc = PRIM(1, args, 1, &result);
     assert(rc == 0);
     assert(STA_SMALLINT_VAL(result) == -2);
 
-    /* Type mismatch. */
     args[0] = STA_CHAR_OOP('A');
-    rc = sta_primitives[1](args, 1, &result);
+    rc = PRIM(1, args, 1, &result);
     assert(rc == STA_PRIM_BAD_RECEIVER);
 
     printf(" ok\n");
@@ -55,7 +68,7 @@ static void test_smallint_sub(void) {
     printf("  SmallInt #-...");
     STA_OOP args[] = { STA_SMALLINT_OOP(10), STA_SMALLINT_OOP(3) };
     STA_OOP result;
-    int rc = sta_primitives[2](args, 1, &result);
+    int rc = PRIM(2, args, 1, &result);
     assert(rc == 0);
     assert(result == STA_SMALLINT_OOP(7));
     printf(" ok\n");
@@ -65,7 +78,7 @@ static void test_smallint_mul(void) {
     printf("  SmallInt #*...");
     STA_OOP args[] = { STA_SMALLINT_OOP(6), STA_SMALLINT_OOP(7) };
     STA_OOP result;
-    int rc = sta_primitives[9](args, 1, &result);
+    int rc = PRIM(9, args, 1, &result);
     assert(rc == 0);
     assert(result == STA_SMALLINT_OOP(42));
     printf(" ok\n");
@@ -75,13 +88,13 @@ static void test_smallint_lt(void) {
     printf("  SmallInt #<...");
     STA_OOP args[] = { STA_SMALLINT_OOP(3), STA_SMALLINT_OOP(5) };
     STA_OOP result;
-    int rc = sta_primitives[3](args, 1, &result);
+    int rc = PRIM(3, args, 1, &result);
     assert(rc == 0);
     assert(result == sta_spc_get(SPC_TRUE));
 
     args[0] = STA_SMALLINT_OOP(5);
     args[1] = STA_SMALLINT_OOP(3);
-    rc = sta_primitives[3](args, 1, &result);
+    rc = PRIM(3, args, 1, &result);
     assert(rc == 0);
     assert(result == sta_spc_get(SPC_FALSE));
     printf(" ok\n");
@@ -91,7 +104,7 @@ static void test_smallint_gt(void) {
     printf("  SmallInt #>...");
     STA_OOP args[] = { STA_SMALLINT_OOP(5), STA_SMALLINT_OOP(3) };
     STA_OOP result;
-    int rc = sta_primitives[4](args, 1, &result);
+    int rc = PRIM(4, args, 1, &result);
     assert(rc == 0);
     assert(result == sta_spc_get(SPC_TRUE));
     printf(" ok\n");
@@ -101,12 +114,12 @@ static void test_smallint_eq(void) {
     printf("  SmallInt #=...");
     STA_OOP args[] = { STA_SMALLINT_OOP(42), STA_SMALLINT_OOP(42) };
     STA_OOP result;
-    int rc = sta_primitives[7](args, 1, &result);
+    int rc = PRIM(7, args, 1, &result);
     assert(rc == 0);
     assert(result == sta_spc_get(SPC_TRUE));
 
     args[1] = STA_SMALLINT_OOP(99);
-    rc = sta_primitives[7](args, 1, &result);
+    rc = PRIM(7, args, 1, &result);
     assert(rc == 0);
     assert(result == sta_spc_get(SPC_FALSE));
     printf(" ok\n");
@@ -116,12 +129,12 @@ static void test_identity(void) {
     printf("  Object #==...");
     STA_OOP args[] = { STA_SMALLINT_OOP(5), STA_SMALLINT_OOP(5) };
     STA_OOP result;
-    int rc = sta_primitives[29](args, 1, &result);
+    int rc = PRIM(29, args, 1, &result);
     assert(rc == 0);
     assert(result == sta_spc_get(SPC_TRUE));
 
     args[1] = STA_SMALLINT_OOP(6);
-    rc = sta_primitives[29](args, 1, &result);
+    rc = PRIM(29, args, 1, &result);
     assert(rc == 0);
     assert(result == sta_spc_get(SPC_FALSE));
     printf(" ok\n");
@@ -139,26 +152,22 @@ static void test_array_at(void) {
     STA_OOP arr_oop = (STA_OOP)(uintptr_t)arr;
     STA_OOP result;
 
-    /* at: 1 → 10 */
     STA_OOP args_at[] = { arr_oop, STA_SMALLINT_OOP(1) };
-    int rc = sta_primitives[51](args_at, 1, &result);
+    int rc = PRIM(51, args_at, 1, &result);
     assert(rc == 0);
     assert(result == STA_SMALLINT_OOP(10));
 
-    /* at: 3 → 30 */
     args_at[1] = STA_SMALLINT_OOP(3);
-    rc = sta_primitives[51](args_at, 1, &result);
+    rc = PRIM(51, args_at, 1, &result);
     assert(rc == 0);
     assert(result == STA_SMALLINT_OOP(30));
 
-    /* Bounds check: at: 0 → fail */
     args_at[1] = STA_SMALLINT_OOP(0);
-    rc = sta_primitives[51](args_at, 1, &result);
+    rc = PRIM(51, args_at, 1, &result);
     assert(rc == STA_PRIM_OUT_OF_RANGE);
 
-    /* Bounds check: at: 4 → fail */
     args_at[1] = STA_SMALLINT_OOP(4);
-    rc = sta_primitives[51](args_at, 1, &result);
+    rc = PRIM(51, args_at, 1, &result);
     assert(rc == STA_PRIM_OUT_OF_RANGE);
 
     sta_heap_destroy(heap);
@@ -173,7 +182,7 @@ static void test_array_at_put(void) {
     STA_OOP result;
 
     STA_OOP args_atp[] = { arr_oop, STA_SMALLINT_OOP(1), STA_SMALLINT_OOP(99) };
-    int rc = sta_primitives[52](args_atp, 2, &result);
+    int rc = PRIM(52, args_atp, 2, &result);
     assert(rc == 0);
     assert(result == STA_SMALLINT_OOP(99));
     assert(sta_payload(arr)[0] == STA_SMALLINT_OOP(99));
@@ -190,7 +199,7 @@ static void test_array_size(void) {
     STA_OOP result;
 
     STA_OOP args_sz[] = { arr_oop };
-    int rc = sta_primitives[53](args_sz, 0, &result);
+    int rc = PRIM(53, args_sz, 0, &result);
     assert(rc == 0);
     assert(result == STA_SMALLINT_OOP(5));
 
@@ -214,6 +223,7 @@ int main(void) {
     test_array_size();
 
     sta_immutable_space_destroy(g_sp);
+    sta_special_objects_bind(NULL);
     printf("All primitive_table tests passed.\n");
     return 0;
 }

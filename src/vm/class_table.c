@@ -6,27 +6,36 @@
 #include <stdlib.h>
 #include <string.h>
 
-struct STA_ClassTable {
-    _Atomic(STA_OOP *) entries;   /* atomic pointer for Phase 2 grow-swap */
-    uint32_t           capacity;
-};
+int sta_class_table_init(STA_ClassTable *ct) {
+    STA_OOP *entries = calloc(STA_CLASS_TABLE_INITIAL_CAPACITY, sizeof(STA_OOP));
+    if (!entries) return -1;
+    atomic_init(&ct->entries, entries);
+    ct->capacity = STA_CLASS_TABLE_INITIAL_CAPACITY;
+    return 0;
+}
+
+void sta_class_table_deinit(STA_ClassTable *ct) {
+    if (!ct) return;
+    STA_OOP *entries = atomic_load_explicit(&ct->entries, memory_order_relaxed);
+    free(entries);
+    atomic_init(&ct->entries, (STA_OOP *)NULL);
+    ct->capacity = 0;
+}
 
 STA_ClassTable *sta_class_table_create(void) {
     STA_ClassTable *ct = malloc(sizeof(*ct));
     if (!ct) return NULL;
 
-    STA_OOP *entries = calloc(STA_CLASS_TABLE_INITIAL_CAPACITY, sizeof(STA_OOP));
-    if (!entries) { free(ct); return NULL; }
-
-    atomic_init(&ct->entries, entries);
-    ct->capacity = STA_CLASS_TABLE_INITIAL_CAPACITY;
+    if (sta_class_table_init(ct) != 0) {
+        free(ct);
+        return NULL;
+    }
     return ct;
 }
 
 void sta_class_table_destroy(STA_ClassTable *ct) {
     if (!ct) return;
-    STA_OOP *entries = atomic_load_explicit(&ct->entries, memory_order_relaxed);
-    free(entries);
+    sta_class_table_deinit(ct);
     free(ct);
 }
 

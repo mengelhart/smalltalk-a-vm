@@ -11,33 +11,42 @@
 #include "vm/interpreter.h"
 #include "vm/primitive_table.h"
 #include "vm/special_objects.h"
+#include "vm/vm_state.h"
 #include "bootstrap/bootstrap.h"
 #include <stdio.h>
 #include <assert.h>
 #include <string.h>
+#include <stdlib.h>
 
 /* ── Shared test infrastructure ────────────────────────────────────────── */
 
-static STA_ImmutableSpace *g_sp;
-static STA_SymbolTable    *g_st;
-static STA_Heap           *g_heap;
-static STA_ClassTable     *g_ct;
+static STA_VM *g_vm;
+static STA_ExecContext g_ctx;
 
 static void setup(void) {
-    g_sp   = sta_immutable_space_create(512 * 1024);
-    g_st   = sta_symbol_table_create(512);
-    g_heap = sta_heap_create(512 * 1024);
-    g_ct   = sta_class_table_create();
+    g_vm = calloc(1, sizeof(STA_VM));
+    assert(g_vm);
+    sta_heap_init(&g_vm->heap, 512 * 1024);
+    sta_immutable_space_init(&g_vm->immutable_space, 512 * 1024);
+    sta_symbol_table_init(&g_vm->symbol_table, 512);
+    sta_class_table_init(&g_vm->class_table);
+    sta_special_objects_bind(g_vm->specials);
 
-    STA_BootstrapResult r = sta_bootstrap(g_heap, g_sp, g_st, g_ct);
+    STA_BootstrapResult r = sta_bootstrap(&g_vm->heap, &g_vm->immutable_space,
+                                           &g_vm->symbol_table, &g_vm->class_table);
     assert(r.status == 0);
+    sta_primitive_table_init();
+    g_ctx.vm = g_vm;
+    g_ctx.actor = NULL;
 }
 
 static void teardown(void) {
-    sta_class_table_destroy(g_ct);
-    sta_heap_destroy(g_heap);
-    sta_symbol_table_destroy(g_st);
-    sta_immutable_space_destroy(g_sp);
+    sta_class_table_deinit(&g_vm->class_table);
+    sta_heap_deinit(&g_vm->heap);
+    sta_symbol_table_deinit(&g_vm->symbol_table);
+    sta_immutable_space_deinit(&g_vm->immutable_space);
+    sta_special_objects_bind(NULL);
+    free(g_vm);
 }
 
 /* Helper: call prim 32 with receiver = class OOP, arg = size. */
@@ -45,14 +54,14 @@ static int call_basic_new_size(STA_OOP class_oop, intptr_t size, STA_OOP *result
     STA_PrimFn prim = sta_primitives[32];
     assert(prim != NULL);
     STA_OOP args[2] = { class_oop, STA_SMALLINT_OOP(size) };
-    return prim(args, 1, result);
+    return prim(&g_ctx, args, 1, result);
 }
 
 /* ── Test 1: Array new: 5 — 5 pointer slots, all nil ──────────────────── */
 
 static void test_array_new_5(void) {
     printf("  Array new: 5...");
-    STA_OOP arr_cls = sta_class_table_get(g_ct, STA_CLS_ARRAY);
+    STA_OOP arr_cls = sta_class_table_get(&g_vm->class_table, STA_CLS_ARRAY);
     STA_OOP result;
     int rc = call_basic_new_size(arr_cls, 5, &result);
     assert(rc == STA_PRIM_SUCCESS);
@@ -75,7 +84,7 @@ static void test_array_new_5(void) {
 
 static void test_array_new_0(void) {
     printf("  Array new: 0...");
-    STA_OOP arr_cls = sta_class_table_get(g_ct, STA_CLS_ARRAY);
+    STA_OOP arr_cls = sta_class_table_get(&g_vm->class_table, STA_CLS_ARRAY);
     STA_OOP result;
     int rc = call_basic_new_size(arr_cls, 0, &result);
     assert(rc == STA_PRIM_SUCCESS);
@@ -90,7 +99,7 @@ static void test_array_new_0(void) {
 
 static void test_bytearray_new_16(void) {
     printf("  ByteArray new: 16...");
-    STA_OOP ba_cls = sta_class_table_get(g_ct, STA_CLS_BYTEARRAY);
+    STA_OOP ba_cls = sta_class_table_get(&g_vm->class_table, STA_CLS_BYTEARRAY);
     STA_OOP result;
     int rc = call_basic_new_size(ba_cls, 16, &result);
     assert(rc == STA_PRIM_SUCCESS);
@@ -117,7 +126,7 @@ static void test_bytearray_new_16(void) {
 
 static void test_bytearray_new_7(void) {
     printf("  ByteArray new: 7...");
-    STA_OOP ba_cls = sta_class_table_get(g_ct, STA_CLS_BYTEARRAY);
+    STA_OOP ba_cls = sta_class_table_get(&g_vm->class_table, STA_CLS_BYTEARRAY);
     STA_OOP result;
     int rc = call_basic_new_size(ba_cls, 7, &result);
     assert(rc == STA_PRIM_SUCCESS);
@@ -137,7 +146,7 @@ static void test_bytearray_new_7(void) {
 
 static void test_bytearray_new_0(void) {
     printf("  ByteArray new: 0...");
-    STA_OOP ba_cls = sta_class_table_get(g_ct, STA_CLS_BYTEARRAY);
+    STA_OOP ba_cls = sta_class_table_get(&g_vm->class_table, STA_CLS_BYTEARRAY);
     STA_OOP result;
     int rc = call_basic_new_size(ba_cls, 0, &result);
     assert(rc == STA_PRIM_SUCCESS);
@@ -153,7 +162,7 @@ static void test_bytearray_new_0(void) {
 
 static void test_string_new_10(void) {
     printf("  String new: 10...");
-    STA_OOP str_cls = sta_class_table_get(g_ct, STA_CLS_STRING);
+    STA_OOP str_cls = sta_class_table_get(&g_vm->class_table, STA_CLS_STRING);
     STA_OOP result;
     int rc = call_basic_new_size(str_cls, 10, &result);
     assert(rc == STA_PRIM_SUCCESS);
@@ -179,7 +188,7 @@ static void test_string_new_10(void) {
 
 static void test_bytearray_new_1(void) {
     printf("  ByteArray new: 1...");
-    STA_OOP ba_cls = sta_class_table_get(g_ct, STA_CLS_BYTEARRAY);
+    STA_OOP ba_cls = sta_class_table_get(&g_vm->class_table, STA_CLS_BYTEARRAY);
     STA_OOP result;
     int rc = call_basic_new_size(ba_cls, 1, &result);
     assert(rc == STA_PRIM_SUCCESS);
@@ -198,7 +207,7 @@ static void test_bytearray_new_1(void) {
 
 static void test_bytearray_new_8(void) {
     printf("  ByteArray new: 8...");
-    STA_OOP ba_cls = sta_class_table_get(g_ct, STA_CLS_BYTEARRAY);
+    STA_OOP ba_cls = sta_class_table_get(&g_vm->class_table, STA_CLS_BYTEARRAY);
     STA_OOP result;
     int rc = call_basic_new_size(ba_cls, 8, &result);
     assert(rc == STA_PRIM_SUCCESS);
@@ -216,7 +225,7 @@ static void test_bytearray_new_8(void) {
 
 static void test_object_new_size_fails(void) {
     printf("  Object new: 5 fails...");
-    STA_OOP obj_cls = sta_class_table_get(g_ct, STA_CLS_OBJECT);
+    STA_OOP obj_cls = sta_class_table_get(&g_vm->class_table, STA_CLS_OBJECT);
     STA_OOP result;
     int rc = call_basic_new_size(obj_cls, 5, &result);
     assert(rc == STA_PRIM_BAD_RECEIVER);
@@ -227,7 +236,7 @@ static void test_object_new_size_fails(void) {
 
 static void test_array_negative_size_fails(void) {
     printf("  Array new: -1 fails...");
-    STA_OOP arr_cls = sta_class_table_get(g_ct, STA_CLS_ARRAY);
+    STA_OOP arr_cls = sta_class_table_get(&g_vm->class_table, STA_CLS_ARRAY);
     STA_OOP result;
     int rc = call_basic_new_size(arr_cls, -1, &result);
     assert(rc == STA_PRIM_OUT_OF_RANGE);
@@ -238,7 +247,7 @@ static void test_array_negative_size_fails(void) {
 
 static void test_smallint_new_size_fails(void) {
     printf("  SmallInteger new: 3 fails...");
-    STA_OOP si_cls = sta_class_table_get(g_ct, STA_CLS_SMALLINTEGER);
+    STA_OOP si_cls = sta_class_table_get(&g_vm->class_table, STA_CLS_SMALLINTEGER);
     STA_OOP result;
     int rc = call_basic_new_size(si_cls, 3, &result);
     assert(rc == STA_PRIM_BAD_RECEIVER);
@@ -251,19 +260,19 @@ static void test_class_index_correct(void) {
     printf("  class_index correct on all created objects...");
     STA_OOP result;
 
-    STA_OOP arr_cls = sta_class_table_get(g_ct, STA_CLS_ARRAY);
+    STA_OOP arr_cls = sta_class_table_get(&g_vm->class_table, STA_CLS_ARRAY);
     assert(call_basic_new_size(arr_cls, 3, &result) == STA_PRIM_SUCCESS);
     assert(((STA_ObjHeader *)(uintptr_t)result)->class_index == STA_CLS_ARRAY);
 
-    STA_OOP ba_cls = sta_class_table_get(g_ct, STA_CLS_BYTEARRAY);
+    STA_OOP ba_cls = sta_class_table_get(&g_vm->class_table, STA_CLS_BYTEARRAY);
     assert(call_basic_new_size(ba_cls, 5, &result) == STA_PRIM_SUCCESS);
     assert(((STA_ObjHeader *)(uintptr_t)result)->class_index == STA_CLS_BYTEARRAY);
 
-    STA_OOP str_cls = sta_class_table_get(g_ct, STA_CLS_STRING);
+    STA_OOP str_cls = sta_class_table_get(&g_vm->class_table, STA_CLS_STRING);
     assert(call_basic_new_size(str_cls, 20, &result) == STA_PRIM_SUCCESS);
     assert(((STA_ObjHeader *)(uintptr_t)result)->class_index == STA_CLS_STRING);
 
-    STA_OOP sym_cls = sta_class_table_get(g_ct, STA_CLS_SYMBOL);
+    STA_OOP sym_cls = sta_class_table_get(&g_vm->class_table, STA_CLS_SYMBOL);
     assert(call_basic_new_size(sym_cls, 4, &result) == STA_PRIM_SUCCESS);
     assert(((STA_ObjHeader *)(uintptr_t)result)->class_index == STA_CLS_SYMBOL);
 
@@ -274,7 +283,7 @@ static void test_class_index_correct(void) {
 
 static void test_large_array(void) {
     printf("  Array new: 1000...");
-    STA_OOP arr_cls = sta_class_table_get(g_ct, STA_CLS_ARRAY);
+    STA_OOP arr_cls = sta_class_table_get(&g_vm->class_table, STA_CLS_ARRAY);
     STA_OOP result;
     int rc = call_basic_new_size(arr_cls, 1000, &result);
     assert(rc == STA_PRIM_SUCCESS);
@@ -295,18 +304,17 @@ static void test_large_array(void) {
 
 static void test_allocation_failure(void) {
     printf("  allocation failure on full heap...");
-    STA_Heap *tiny = sta_heap_create(256);
-    assert(tiny != NULL);
-    sta_primitive_set_heap(tiny);
+    STA_Heap saved_heap = g_vm->heap;
+    sta_heap_init(&g_vm->heap, 256);
 
-    STA_OOP arr_cls = sta_class_table_get(g_ct, STA_CLS_ARRAY);
+    STA_OOP arr_cls = sta_class_table_get(&g_vm->class_table, STA_CLS_ARRAY);
     STA_OOP result;
     /* Request a huge array that can't fit in 256 bytes. */
     int rc = call_basic_new_size(arr_cls, 1000, &result);
     assert(rc == STA_PRIM_NO_MEMORY);
 
-    sta_primitive_set_heap(g_heap);
-    sta_heap_destroy(tiny);
+    sta_heap_deinit(&g_vm->heap);
+    g_vm->heap = saved_heap;
     printf(" ok\n");
 }
 
@@ -315,11 +323,11 @@ static void test_allocation_failure(void) {
 static void test_non_smallint_arg_fails(void) {
     printf("  non-SmallInt argument fails...");
     STA_PrimFn prim = sta_primitives[32];
-    STA_OOP arr_cls = sta_class_table_get(g_ct, STA_CLS_ARRAY);
+    STA_OOP arr_cls = sta_class_table_get(&g_vm->class_table, STA_CLS_ARRAY);
     /* Pass a heap OOP (the class itself) as the size argument. */
     STA_OOP args[2] = { arr_cls, arr_cls };
     STA_OOP result;
-    int rc = prim(args, 1, &result);
+    int rc = prim(&g_ctx, args, 1, &result);
     assert(rc == STA_PRIM_BAD_ARGUMENT);
     printf(" ok\n");
 }

@@ -12,7 +12,19 @@
 #include "oop.h"
 #include <stddef.h>
 
-typedef struct STA_Heap STA_Heap;
+/* Struct definition (visible for STA_VM embedding). */
+typedef struct STA_Heap {
+    char  *base;      /* 16-byte aligned slab */
+    size_t capacity;  /* total usable bytes   */
+    size_t used;      /* bytes consumed       */
+} STA_Heap;
+
+/* Initialize a heap struct in-place. Allocates the backing slab.
+ * Returns 0 on success, -1 on allocation failure. */
+int sta_heap_init(STA_Heap *heap, size_t nursery_capacity);
+
+/* Deinitialize a heap (free backing slab). Does not free the struct itself. */
+void sta_heap_deinit(STA_Heap *heap);
 
 /* Create a heap with the given nursery capacity in bytes.
  * Capacity is rounded up to a multiple of 16.

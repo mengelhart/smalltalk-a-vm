@@ -31,12 +31,21 @@
 /* Indices 12–31: reserved for future well-known objects, initialized to 0. */
 
 /* ── The table ─────────────────────────────────────────────────────────── */
-extern STA_OOP sta_special_objects[STA_SPECIAL_OBJECTS_COUNT];
+
+/* Global pointer to the active VM's specials array.
+ * In Phase 2 this pointer is set to &vm->specials[0] at VM creation.
+ * All callers use sta_spc_get/set which dereference this pointer. */
+extern STA_OOP *sta_special_objects;
 
 /* ── Bootstrap API ─────────────────────────────────────────────────────── */
 
-/* Initialize all 32 entries to 0 (null OOP). Call once at bootstrap start. */
+/* Initialize all 32 entries to 0 (null OOP). Call once at bootstrap start.
+ * If sta_special_objects points to a VM specials array, that array is zeroed.
+ * If sta_special_objects is NULL, uses the internal fallback array. */
 void sta_special_objects_init(void);
+
+/* Bind the global pointer to a VM's specials array. */
+void sta_special_objects_bind(STA_OOP *specials_array);
 
 /* Set the special object at index. idx must be < STA_SPECIAL_OBJECTS_COUNT. */
 static inline void sta_spc_set(uint32_t idx, STA_OOP oop) {

@@ -826,12 +826,6 @@ STA_BootstrapResult sta_bootstrap(
     if (step7_methods(&bs) != 0)
         return (STA_BootstrapResult){ -1, "step 7: failed to install kernel methods" };
 
-    /* Set the class table, heap, symbol table, and immutable space for primitives. */
-    sta_primitive_set_class_table(class_table);
-    sta_primitive_set_heap(heap);
-    sta_primitive_set_symbol_table(symbol_table);
-    sta_primitive_set_immutable_space(immutable_space);
-
     if (step8_exception_methods(&bs) != 0)
         return (STA_BootstrapResult){ -1, "step 8: failed to install exception methods" };
 

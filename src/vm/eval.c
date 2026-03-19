@@ -6,7 +6,7 @@
  * sta_handle_retain/release are no-ops. Phase 2 will introduce a real handle
  * table with reference counting per ADR 013.
  */
-#include "vm/vm_internal.h"
+#include "vm/vm_state.h"
 #include "vm/oop.h"
 #include "vm/special_objects.h"
 #include "vm/class_table.h"
@@ -37,8 +37,8 @@ STA_Handle* sta_eval(STA_VM* vm, const char* expression) {
     STA_OOP sysdict = sta_spc_get(SPC_SMALLTALK);
 
     STA_CompileResult cr = sta_compile_expression(
-        expression, vm->symbol_table, vm->immutable_space,
-        vm->heap, sysdict);
+        expression, &vm->symbol_table, &vm->immutable_space,
+        &vm->heap, sysdict);
 
     if (cr.had_error) {
         snprintf(vm->last_error, sizeof(vm->last_error),
@@ -47,8 +47,7 @@ STA_Handle* sta_eval(STA_VM* vm, const char* expression) {
     }
 
     STA_OOP nil_oop = sta_spc_get(SPC_NIL);
-    STA_OOP result = sta_interpret(vm->stack_slab, vm->heap, vm->class_table,
-                                    cr.method, nil_oop, NULL, 0);
+    STA_OOP result = sta_interpret(vm, cr.method, nil_oop, NULL, 0);
 
     return oop_to_handle(result);
 }
@@ -171,7 +170,7 @@ const char* sta_inspect_cstring(STA_VM* vm, STA_Handle* handle) {
         return buf;
     }
     default: {
-        const char *name = class_name_for_index(vm->class_table, h->class_index);
+        const char *name = class_name_for_index(&vm->class_table, h->class_index);
         /* "a Foo" or "an Array" — use "an" for vowel start. */
         char article = 'a';
         if (name[0] == 'A' || name[0] == 'E' || name[0] == 'I' ||

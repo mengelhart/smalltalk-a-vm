@@ -13,37 +13,45 @@
 #include "vm/primitive_table.h"
 #include "vm/special_objects.h"
 #include "vm/frame.h"
+#include "vm/vm_state.h"
 #include "bootstrap/bootstrap.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <assert.h>
 #include <string.h>
 
 /* ── Shared test infrastructure ────────────────────────────────────────── */
 
-static STA_ImmutableSpace *g_sp;
-static STA_SymbolTable    *g_st;
-static STA_Heap           *g_heap;
-static STA_ClassTable     *g_ct;
+static STA_VM *g_vm;
 
 static STA_OOP sym(const char *name) {
-    return sta_symbol_intern(g_sp, g_st, name, strlen(name));
+    return sta_symbol_intern(&g_vm->immutable_space, &g_vm->symbol_table, name, strlen(name));
 }
 
 static void setup(void) {
-    g_sp   = sta_immutable_space_create(512 * 1024);
-    g_st   = sta_symbol_table_create(512);
-    g_heap = sta_heap_create(512 * 1024);
-    g_ct   = sta_class_table_create();
+    g_vm = calloc(1, sizeof(STA_VM));
+    assert(g_vm);
 
-    STA_BootstrapResult r = sta_bootstrap(g_heap, g_sp, g_st, g_ct);
+    sta_heap_init(&g_vm->heap, 512 * 1024);
+    sta_immutable_space_init(&g_vm->immutable_space, 512 * 1024);
+    sta_symbol_table_init(&g_vm->symbol_table, 512);
+    sta_class_table_init(&g_vm->class_table);
+    sta_stack_slab_init(&g_vm->slab, 65536);
+
+    sta_special_objects_bind(g_vm->specials);
+    sta_primitive_table_init();
+
+    STA_BootstrapResult r = sta_bootstrap(&g_vm->heap, &g_vm->immutable_space, &g_vm->symbol_table, &g_vm->class_table);
     assert(r.status == 0);
 }
 
 static void teardown(void) {
-    sta_class_table_destroy(g_ct);
-    sta_heap_destroy(g_heap);
-    sta_symbol_table_destroy(g_st);
-    sta_immutable_space_destroy(g_sp);
+    sta_stack_slab_deinit(&g_vm->slab);
+    sta_class_table_deinit(&g_vm->class_table);
+    sta_heap_deinit(&g_vm->heap);
+    sta_symbol_table_deinit(&g_vm->symbol_table);
+    sta_immutable_space_deinit(&g_vm->immutable_space);
+    free(g_vm);
 }
 
 /* ── Test 1: Association new via interpreter ────────────────────────────── */
@@ -52,7 +60,7 @@ static void teardown(void) {
 static void test_association_new(void) {
     printf("  Association new via interpreter...");
 
-    STA_OOP assoc_cls = sta_class_table_get(g_ct, STA_CLS_ASSOCIATION);
+    STA_OOP assoc_cls = sta_class_table_get(&g_vm->class_table, STA_CLS_ASSOCIATION);
     STA_OOP new_sel = sym("new");
 
     /* Method: push Association, send #new, return top. */
@@ -62,12 +70,11 @@ static void test_association_new(void) {
         OP_SEND,         0x01,   /* send #new (lit 1)        */
         OP_RETURN_TOP,   0x00,
     };
-    STA_OOP method = sta_compiled_method_create(g_sp, 0, 0, 0,
+    STA_OOP method = sta_compiled_method_create(&g_vm->immutable_space, 0, 0, 0,
         lits, 2, bc, sizeof(bc));
     assert(method);
 
-    STA_StackSlab *slab = sta_stack_slab_create(65536);
-    STA_OOP result = sta_interpret(slab, g_heap, g_ct, method,
+    STA_OOP result = sta_interpret(g_vm, method,
                                     STA_SMALLINT_OOP(0), NULL, 0);
 
     /* Result should be a new Association. */
@@ -82,7 +89,6 @@ static void test_association_new(void) {
     assert(slots[0] == nil_oop);
     assert(slots[1] == nil_oop);
 
-    sta_stack_slab_destroy(slab);
     printf(" ok\n");
 }
 
@@ -92,7 +98,7 @@ static void test_association_new(void) {
 static void test_array_new_size(void) {
     printf("  Array new: 10 via interpreter...");
 
-    STA_OOP arr_cls = sta_class_table_get(g_ct, STA_CLS_ARRAY);
+    STA_OOP arr_cls = sta_class_table_get(&g_vm->class_table, STA_CLS_ARRAY);
     STA_OOP newSize_sel = sym("new:");
 
     /* Method: push Array, push 10, send #new:, return top. */
@@ -103,12 +109,11 @@ static void test_array_new_size(void) {
         OP_SEND,           0x01,   /* send #new: (lit 1)     */
         OP_RETURN_TOP,     0x00,
     };
-    STA_OOP method = sta_compiled_method_create(g_sp, 0, 0, 0,
+    STA_OOP method = sta_compiled_method_create(&g_vm->immutable_space, 0, 0, 0,
         lits, 2, bc, sizeof(bc));
     assert(method);
 
-    STA_StackSlab *slab = sta_stack_slab_create(65536);
-    STA_OOP result = sta_interpret(slab, g_heap, g_ct, method,
+    STA_OOP result = sta_interpret(g_vm, method,
                                     STA_SMALLINT_OOP(0), NULL, 0);
 
     /* Result should be a 10-element Array. */
@@ -124,7 +129,6 @@ static void test_array_new_size(void) {
         assert(slots[i] == nil_oop);
     }
 
-    sta_stack_slab_destroy(slab);
     printf(" ok\n");
 }
 
@@ -134,7 +138,7 @@ static void test_array_new_size(void) {
 static void test_object_new(void) {
     printf("  Object new via interpreter...");
 
-    STA_OOP obj_cls = sta_class_table_get(g_ct, STA_CLS_OBJECT);
+    STA_OOP obj_cls = sta_class_table_get(&g_vm->class_table, STA_CLS_OBJECT);
     STA_OOP new_sel = sym("new");
 
     STA_OOP lits[] = { obj_cls, new_sel };
@@ -143,12 +147,11 @@ static void test_object_new(void) {
         OP_SEND,         0x01,
         OP_RETURN_TOP,   0x00,
     };
-    STA_OOP method = sta_compiled_method_create(g_sp, 0, 0, 0,
+    STA_OOP method = sta_compiled_method_create(&g_vm->immutable_space, 0, 0, 0,
         lits, 2, bc, sizeof(bc));
     assert(method);
 
-    STA_StackSlab *slab = sta_stack_slab_create(65536);
-    STA_OOP result = sta_interpret(slab, g_heap, g_ct, method,
+    STA_OOP result = sta_interpret(g_vm, method,
                                     STA_SMALLINT_OOP(0), NULL, 0);
 
     /* Object has 0 ivars. */
@@ -157,76 +160,67 @@ static void test_object_new(void) {
     assert(h->class_index == STA_CLS_OBJECT);
     assert(h->size == 0);
 
-    sta_stack_slab_destroy(slab);
     printf(" ok\n");
 }
 
 /* ── Test 4: Association new returns a distinct object each time ────────── */
-/* Equivalent Smalltalk: | a b | a := Association new. b := Association new. a == b → false */
 
 static void test_new_returns_distinct(void) {
     printf("  new returns distinct objects...");
 
-    STA_OOP assoc_cls = sta_class_table_get(g_ct, STA_CLS_ASSOCIATION);
+    STA_OOP assoc_cls = sta_class_table_get(&g_vm->class_table, STA_CLS_ASSOCIATION);
     STA_OOP new_sel = sym("new");
     STA_OOP eq_sel  = sym("==");
 
-    /* push Association, send #new, push Association, send #new, send #==, return top */
     STA_OOP lits[] = { assoc_cls, new_sel, eq_sel };
     uint8_t bc[] = {
-        OP_PUSH_LIT,    0x00,   /* push Association        */
-        OP_SEND,         0x01,   /* send #new → obj a       */
-        OP_PUSH_LIT,    0x00,   /* push Association        */
-        OP_SEND,         0x01,   /* send #new → obj b       */
-        OP_SEND,         0x02,   /* send #== (a == b)       */
+        OP_PUSH_LIT,    0x00,
+        OP_SEND,         0x01,
+        OP_PUSH_LIT,    0x00,
+        OP_SEND,         0x01,
+        OP_SEND,         0x02,
         OP_RETURN_TOP,   0x00,
     };
-    STA_OOP method = sta_compiled_method_create(g_sp, 0, 0, 0,
+    STA_OOP method = sta_compiled_method_create(&g_vm->immutable_space, 0, 0, 0,
         lits, 3, bc, sizeof(bc));
     assert(method);
 
-    STA_StackSlab *slab = sta_stack_slab_create(65536);
-    STA_OOP result = sta_interpret(slab, g_heap, g_ct, method,
+    STA_OOP result = sta_interpret(g_vm, method,
                                     STA_SMALLINT_OOP(0), NULL, 0);
 
     assert(result == sta_spc_get(SPC_FALSE));
 
-    sta_stack_slab_destroy(slab);
     printf(" ok\n");
 }
 
 /* ── Test 5: #class on a new object returns its class ──────────────────── */
-/* Equivalent Smalltalk: Association new class == Association → true */
 
 static void test_new_object_class(void) {
     printf("  new object class is correct...");
 
-    STA_OOP assoc_cls = sta_class_table_get(g_ct, STA_CLS_ASSOCIATION);
+    STA_OOP assoc_cls = sta_class_table_get(&g_vm->class_table, STA_CLS_ASSOCIATION);
     STA_OOP new_sel   = sym("new");
     STA_OOP class_sel = sym("class");
     STA_OOP eq_sel    = sym("==");
 
-    /* push Association, send #new, send #class, push Association, send #== */
     STA_OOP lits[] = { assoc_cls, new_sel, class_sel, eq_sel };
     uint8_t bc[] = {
-        OP_PUSH_LIT,    0x00,   /* push Association          */
-        OP_SEND,         0x01,   /* send #new → new obj       */
-        OP_SEND,         0x02,   /* send #class → Association */
-        OP_PUSH_LIT,    0x00,   /* push Association          */
-        OP_SEND,         0x03,   /* send #== → true           */
+        OP_PUSH_LIT,    0x00,
+        OP_SEND,         0x01,
+        OP_SEND,         0x02,
+        OP_PUSH_LIT,    0x00,
+        OP_SEND,         0x03,
         OP_RETURN_TOP,   0x00,
     };
-    STA_OOP method = sta_compiled_method_create(g_sp, 0, 0, 0,
+    STA_OOP method = sta_compiled_method_create(&g_vm->immutable_space, 0, 0, 0,
         lits, 4, bc, sizeof(bc));
     assert(method);
 
-    STA_StackSlab *slab = sta_stack_slab_create(65536);
-    STA_OOP result = sta_interpret(slab, g_heap, g_ct, method,
+    STA_OOP result = sta_interpret(g_vm, method,
                                     STA_SMALLINT_OOP(0), NULL, 0);
 
     assert(result == sta_spc_get(SPC_TRUE));
 
-    sta_stack_slab_destroy(slab);
     printf(" ok\n");
 }
 
@@ -235,7 +229,7 @@ static void test_new_object_class(void) {
 static void test_bytearray_new_size(void) {
     printf("  ByteArray new: 8 via interpreter...");
 
-    STA_OOP ba_cls = sta_class_table_get(g_ct, STA_CLS_BYTEARRAY);
+    STA_OOP ba_cls = sta_class_table_get(&g_vm->class_table, STA_CLS_BYTEARRAY);
     STA_OOP newSize_sel = sym("new:");
 
     STA_OOP lits[] = { ba_cls, newSize_sel };
@@ -245,12 +239,11 @@ static void test_bytearray_new_size(void) {
         OP_SEND,           0x01,
         OP_RETURN_TOP,     0x00,
     };
-    STA_OOP method = sta_compiled_method_create(g_sp, 0, 0, 0,
+    STA_OOP method = sta_compiled_method_create(&g_vm->immutable_space, 0, 0, 0,
         lits, 2, bc, sizeof(bc));
     assert(method);
 
-    STA_StackSlab *slab = sta_stack_slab_create(65536);
-    STA_OOP result = sta_interpret(slab, g_heap, g_ct, method,
+    STA_OOP result = sta_interpret(g_vm, method,
                                     STA_SMALLINT_OOP(0), NULL, 0);
 
     assert(STA_IS_HEAP(result));
@@ -260,7 +253,6 @@ static void test_bytearray_new_size(void) {
     assert(h->size == 1);
     assert(STA_BYTE_PADDING(h) == 0);
 
-    sta_stack_slab_destroy(slab);
     printf(" ok\n");
 }
 
@@ -269,7 +261,7 @@ static void test_bytearray_new_size(void) {
 static void test_responds_to_new(void) {
     printf("  classes respond to #new and #basicNew...");
 
-    STA_OOP assoc_cls = sta_class_table_get(g_ct, STA_CLS_ASSOCIATION);
+    STA_OOP assoc_cls = sta_class_table_get(&g_vm->class_table, STA_CLS_ASSOCIATION);
     STA_OOP responds_sel = sym("respondsTo:");
     STA_OOP new_sel      = sym("new");
     STA_OOP basicNew_sel = sym("basicNew");
@@ -278,20 +270,18 @@ static void test_responds_to_new(void) {
     {
         STA_OOP lits[] = { assoc_cls, new_sel, responds_sel };
         uint8_t bc[] = {
-            OP_PUSH_LIT, 0x00,   /* push Association        */
-            OP_PUSH_LIT, 0x01,   /* push #new               */
-            OP_SEND,      0x02,   /* send #respondsTo:       */
+            OP_PUSH_LIT, 0x00,
+            OP_PUSH_LIT, 0x01,
+            OP_SEND,      0x02,
             OP_RETURN_TOP, 0x00,
         };
-        STA_OOP method = sta_compiled_method_create(g_sp, 0, 0, 0,
+        STA_OOP method = sta_compiled_method_create(&g_vm->immutable_space, 0, 0, 0,
             lits, 3, bc, sizeof(bc));
         assert(method);
 
-        STA_StackSlab *slab = sta_stack_slab_create(65536);
-        STA_OOP result = sta_interpret(slab, g_heap, g_ct, method,
+        STA_OOP result = sta_interpret(g_vm, method,
                                         STA_SMALLINT_OOP(0), NULL, 0);
         assert(result == sta_spc_get(SPC_TRUE));
-        sta_stack_slab_destroy(slab);
     }
 
     /* Association respondsTo: #basicNew → true */
@@ -303,15 +293,13 @@ static void test_responds_to_new(void) {
             OP_SEND,      0x02,
             OP_RETURN_TOP, 0x00,
         };
-        STA_OOP method = sta_compiled_method_create(g_sp, 0, 0, 0,
+        STA_OOP method = sta_compiled_method_create(&g_vm->immutable_space, 0, 0, 0,
             lits, 3, bc, sizeof(bc));
         assert(method);
 
-        STA_StackSlab *slab = sta_stack_slab_create(65536);
-        STA_OOP result = sta_interpret(slab, g_heap, g_ct, method,
+        STA_OOP result = sta_interpret(g_vm, method,
                                         STA_SMALLINT_OOP(0), NULL, 0);
         assert(result == sta_spc_get(SPC_TRUE));
-        sta_stack_slab_destroy(slab);
     }
 
     printf(" ok\n");

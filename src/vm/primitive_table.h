@@ -1,9 +1,10 @@
 /* src/vm/primitive_table.h
- * Primitive function table — Phase 1 kernel primitives.
- * Phase 1 — permanent. See bytecode spec §8.
+ * Primitive function table — Phase 2 calling convention.
+ * See bytecode spec §8.
  *
  * Primitive function signature:
- *   int fn(STA_OOP *args, uint8_t nargs, STA_OOP *result)
+ *   int fn(STA_ExecContext *ctx, STA_OOP *args, uint8_t nargs, STA_OOP *result)
+ *   ctx->vm provides access to all VM state.
  *   args[0] = receiver, args[1..nargs] = arguments.
  *   Returns 0 on success (result written), non-zero failure code.
  *
@@ -24,9 +25,13 @@
 #include "immutable_space.h"
 #include <stdint.h>
 
+/* Forward declaration — full definition in vm_state.h */
+typedef struct STA_ExecContext STA_ExecContext;
+
 /* ── Primitive function pointer type ───────────────────────────────────── */
 
-typedef int (*STA_PrimFn)(STA_OOP *args, uint8_t nargs, STA_OOP *result);
+typedef int (*STA_PrimFn)(STA_ExecContext *ctx,
+                          STA_OOP *args, uint8_t nargs, STA_OOP *result);
 
 /* ── Primitive table (256 entries for header-addressable range) ─────────── */
 
@@ -48,32 +53,3 @@ void sta_primitive_table_init(void);
 #define STA_PRIM_OUT_OF_RANGE     3
 #define STA_PRIM_NO_MEMORY        4
 #define STA_PRIM_NOT_AVAILABLE    5
-
-/* ── Class table context for primitives ───────────────────────────────── */
-
-/* Set the class table used by primitives that need class lookup
- * (e.g. #class, #respondsTo:). Called by bootstrap. */
-void sta_primitive_set_class_table(STA_ClassTable *ct);
-
-/* Set the heap used by allocation primitives (e.g. #basicNew, #basicNew:).
- * Called by bootstrap after heap is ready. */
-void sta_primitive_set_heap(STA_Heap *heap);
-
-/* Set the stack slab used by exception primitives (on:do:, ensure:).
- * Called by the interpreter at dispatch loop entry. */
-void sta_primitive_set_slab(STA_StackSlab *slab);
-
-/* Set the symbol table used by class-creation primitive.
- * Called by bootstrap after symbol table is ready. */
-void sta_primitive_set_symbol_table(STA_SymbolTable *st);
-
-/* Set the immutable space used by class-creation primitive.
- * Called by bootstrap after immutable space is ready. */
-void sta_primitive_set_immutable_space(STA_ImmutableSpace *sp);
-
-/* ── Getters for kernel context (used by sta_vm_load_source) ───────────── */
-
-STA_ClassTable     *sta_primitive_get_class_table(void);
-STA_Heap           *sta_primitive_get_heap(void);
-STA_SymbolTable    *sta_primitive_get_symbol_table(void);
-STA_ImmutableSpace *sta_primitive_get_immutable_space(void);

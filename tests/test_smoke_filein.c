@@ -13,19 +13,18 @@
 #include "vm/immutable_space.h"
 #include "vm/frame.h"
 #include "vm/format.h"
+#include "vm/vm_state.h"
 #include "bootstrap/bootstrap.h"
 #include "compiler/compiler.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <assert.h>
 #include <string.h>
 
 /* ── Shared infrastructure ───────────────────────────────────────────── */
 
-static STA_ImmutableSpace *imm;
-static STA_SymbolTable    *syms;
-static STA_Heap           *heap;
-static STA_ClassTable     *ct;
-static STA_StackSlab      *slab;
+static STA_VM *g_vm;
+static STA_ExecContext g_ectx;
 
 static int tests_run = 0;
 static int tests_passed = 0;
@@ -38,20 +37,29 @@ static int tests_passed = 0;
 } while(0)
 
 static void setup(void) {
-    heap = sta_heap_create(4 * 1024 * 1024);
-    imm  = sta_immutable_space_create(4 * 1024 * 1024);
-    syms = sta_symbol_table_create(512);
-    ct   = sta_class_table_create();
-    slab = sta_stack_slab_create(64 * 1024);
+    g_vm = calloc(1, sizeof(STA_VM));
+    assert(g_vm);
 
-    STA_BootstrapResult br = sta_bootstrap(heap, imm, syms, ct);
+    sta_heap_init(&g_vm->heap, 4 * 1024 * 1024);
+    sta_immutable_space_init(&g_vm->immutable_space, 4 * 1024 * 1024);
+    sta_symbol_table_init(&g_vm->symbol_table, 512);
+    sta_class_table_init(&g_vm->class_table);
+    sta_stack_slab_init(&g_vm->slab, 64 * 1024);
+
+    sta_special_objects_bind(g_vm->specials);
+    sta_primitive_table_init();
+    g_ectx.vm = g_vm;
+    g_ectx.actor = NULL;
+
+    STA_BootstrapResult br = sta_bootstrap(&g_vm->heap, &g_vm->immutable_space, &g_vm->symbol_table, &g_vm->class_table);
     assert(br.status == 0);
+    g_vm->bootstrapped = true;
 }
 
 /* Helper: look up a class in SystemDictionary by name. */
 static STA_OOP sysdict_lookup(const char *name) {
     STA_OOP dict = sta_spc_get(SPC_SMALLTALK);
-    STA_OOP name_sym = sta_symbol_intern(imm, syms, name, strlen(name));
+    STA_OOP name_sym = sta_symbol_intern(&g_vm->immutable_space, &g_vm->symbol_table, name, strlen(name));
     STA_ObjHeader *dh = (STA_ObjHeader *)(uintptr_t)dict;
     STA_OOP arr = sta_payload(dh)[1];
     STA_ObjHeader *ah = (STA_ObjHeader *)(uintptr_t)arr;
@@ -75,9 +83,9 @@ static STA_OOP sysdict_lookup(const char *name) {
 static STA_OOP tp_cls;
 
 static void test_load_smoke(void) {
-    int rc = sta_vm_load_source(NULL, FIXTURES_DIR "/smoke.st");
+    int rc = sta_vm_load_source(g_vm, FIXTURES_DIR "/smoke.st");
     if (rc != STA_OK) {
-        fprintf(stderr, "load error: %s\n", sta_vm_last_error(NULL));
+        fprintf(stderr, "load error: %s\n", sta_vm_last_error(g_vm));
     }
     assert(rc == STA_OK);
 
@@ -92,7 +100,7 @@ static void test_create_instance(void) {
 
     STA_OOP prim_args[1] = { tp_cls };
     STA_OOP instance = 0;
-    int prc = sta_primitives[31](prim_args, 0, &instance);
+    int prc = sta_primitives[31](&g_ectx, prim_args, 0, &instance);
     assert(prc == 0);
     assert(instance != 0);
     assert(!STA_IS_IMMEDIATE(instance));
@@ -102,42 +110,41 @@ static void test_setter_getter(void) {
     /* Create instance via primitives, call methods via interpreter. */
     STA_OOP prim_args[1] = { tp_cls };
     STA_OOP instance = 0;
-    int prc = sta_primitives[31](prim_args, 0, &instance);
+    int prc = sta_primitives[31](&g_ectx, prim_args, 0, &instance);
     assert(prc == 0);
 
     STA_OOP md = sta_class_method_dict(tp_cls);
 
     /* Call x: with argument 3 */
-    STA_OOP sel_x_put = sta_symbol_intern(imm, syms, "x:", 2);
+    STA_OOP sel_x_put = sta_symbol_intern(&g_vm->immutable_space, &g_vm->symbol_table, "x:", 2);
     STA_OOP method_x_put = sta_method_dict_lookup(md, sel_x_put);
     assert(method_x_put != 0);
 
     STA_OOP arg3 = STA_SMALLINT_OOP(3);
-    sta_primitive_set_slab(slab);
-    sta_interpret(slab, heap, ct, method_x_put, instance, &arg3, 1);
+    sta_interpret(g_vm, method_x_put, instance, &arg3, 1);
 
     /* Call x getter — should return 3 */
-    STA_OOP sel_x = sta_symbol_intern(imm, syms, "x", 1);
+    STA_OOP sel_x = sta_symbol_intern(&g_vm->immutable_space, &g_vm->symbol_table, "x", 1);
     STA_OOP method_x = sta_method_dict_lookup(md, sel_x);
     assert(method_x != 0);
 
-    STA_OOP result = sta_interpret(slab, heap, ct, method_x, instance, NULL, 0);
+    STA_OOP result = sta_interpret(g_vm, method_x, instance, NULL, 0);
     assert(STA_IS_SMALLINT(result));
     assert(STA_SMALLINT_VAL(result) == 3);
 
     /* Call y: with argument 7, then y getter */
-    STA_OOP sel_y_put = sta_symbol_intern(imm, syms, "y:", 2);
+    STA_OOP sel_y_put = sta_symbol_intern(&g_vm->immutable_space, &g_vm->symbol_table, "y:", 2);
     STA_OOP method_y_put = sta_method_dict_lookup(md, sel_y_put);
     assert(method_y_put != 0);
 
     STA_OOP arg7 = STA_SMALLINT_OOP(7);
-    sta_interpret(slab, heap, ct, method_y_put, instance, &arg7, 1);
+    sta_interpret(g_vm, method_y_put, instance, &arg7, 1);
 
-    STA_OOP sel_y = sta_symbol_intern(imm, syms, "y", 1);
+    STA_OOP sel_y = sta_symbol_intern(&g_vm->immutable_space, &g_vm->symbol_table, "y", 1);
     STA_OOP method_y = sta_method_dict_lookup(md, sel_y);
     assert(method_y != 0);
 
-    STA_OOP ry = sta_interpret(slab, heap, ct, method_y, instance, NULL, 0);
+    STA_OOP ry = sta_interpret(g_vm, method_y, instance, NULL, 0);
     assert(STA_IS_SMALLINT(ry));
     assert(STA_SMALLINT_VAL(ry) == 7);
 }
@@ -148,14 +155,14 @@ static void test_eval_simple(void) {
     /* Single expression: 3 + 4 */
     STA_OOP sysdict = sta_spc_get(SPC_SMALLTALK);
     STA_CompileResult cr = sta_compile_expression(
-        "3 + 4", syms, imm, heap, sysdict);
+        "3 + 4", &g_vm->symbol_table, &g_vm->immutable_space, &g_vm->heap, sysdict);
     if (cr.had_error) {
         fprintf(stderr, "compile error: %s\n", cr.error_msg);
     }
     assert(!cr.had_error);
 
     STA_OOP nil_oop = sta_spc_get(SPC_NIL);
-    STA_OOP result = sta_interpret(slab, heap, ct, cr.method, nil_oop, NULL, 0);
+    STA_OOP result = sta_interpret(g_vm, cr.method, nil_oop, NULL, 0);
     assert(STA_IS_SMALLINT(result));
     assert(STA_SMALLINT_VAL(result) == 7);
 }
@@ -165,14 +172,14 @@ static void test_eval_multi_statement(void) {
     STA_OOP sysdict = sta_spc_get(SPC_SMALLTALK);
     STA_CompileResult cr = sta_compile_expression(
         "| p | p := TestPoint new. p x: 3. p x",
-        syms, imm, heap, sysdict);
+        &g_vm->symbol_table, &g_vm->immutable_space, &g_vm->heap, sysdict);
     if (cr.had_error) {
         fprintf(stderr, "compile error: %s\n", cr.error_msg);
     }
     assert(!cr.had_error);
 
     STA_OOP nil_oop = sta_spc_get(SPC_NIL);
-    STA_OOP result = sta_interpret(slab, heap, ct, cr.method, nil_oop, NULL, 0);
+    STA_OOP result = sta_interpret(g_vm, cr.method, nil_oop, NULL, 0);
     assert(STA_IS_SMALLINT(result));
     assert(STA_SMALLINT_VAL(result) == 3);
 }
@@ -198,10 +205,11 @@ int main(void) {
 
     printf("\n%d / %d tests passed\n", tests_passed, tests_run);
 
-    sta_stack_slab_destroy(slab);
-    sta_class_table_destroy(ct);
-    sta_heap_destroy(heap);
-    sta_symbol_table_destroy(syms);
-    sta_immutable_space_destroy(imm);
+    sta_stack_slab_deinit(&g_vm->slab);
+    sta_class_table_deinit(&g_vm->class_table);
+    sta_heap_deinit(&g_vm->heap);
+    sta_symbol_table_deinit(&g_vm->symbol_table);
+    sta_immutable_space_deinit(&g_vm->immutable_space);
+    free(g_vm);
     return (tests_passed == tests_run) ? 0 : 1;
 }

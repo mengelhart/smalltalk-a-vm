@@ -3,7 +3,7 @@
  * Phase 1, Epic 11, Story 6.
  */
 #include <sta/vm.h>
-#include "vm/vm_internal.h"
+#include "vm/vm_state.h"
 #include "vm/oop.h"
 #include "vm/special_objects.h"
 #include "vm/symbol_table.h"
@@ -28,15 +28,14 @@ static int tests_passed = 0;
 static STA_OOP eval(STA_VM *vm, const char *source) {
     STA_OOP sysdict = sta_spc_get(SPC_SMALLTALK);
     STA_CompileResult cr = sta_compile_expression(
-        source, vm->symbol_table, vm->immutable_space, vm->heap, sysdict);
+        source, &vm->symbol_table, &vm->immutable_space, &vm->heap, sysdict);
     if (cr.had_error) {
         fprintf(stderr, "eval compile error: %s\n  source: %s\n",
                 cr.error_msg, source);
         assert(!cr.had_error);
     }
     STA_OOP nil_oop = sta_spc_get(SPC_NIL);
-    return sta_interpret(vm->stack_slab, vm->heap, vm->class_table,
-                         cr.method, nil_oop, NULL, 0);
+    return sta_interpret(vm, cr.method, nil_oop, NULL, 0);
 }
 
 /* ── Test 1: Create with bootstrap (no image) ─────────────────────── */

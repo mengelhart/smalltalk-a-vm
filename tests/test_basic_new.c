@@ -10,33 +10,42 @@
 #include "vm/interpreter.h"
 #include "vm/primitive_table.h"
 #include "vm/special_objects.h"
+#include "vm/vm_state.h"
 #include "bootstrap/bootstrap.h"
 #include <stdio.h>
 #include <assert.h>
 #include <string.h>
+#include <stdlib.h>
 
 /* ── Shared test infrastructure ────────────────────────────────────────── */
 
-static STA_ImmutableSpace *g_sp;
-static STA_SymbolTable    *g_st;
-static STA_Heap           *g_heap;
-static STA_ClassTable     *g_ct;
+static STA_VM *g_vm;
+static STA_ExecContext g_ctx;
 
 static void setup(void) {
-    g_sp   = sta_immutable_space_create(512 * 1024);
-    g_st   = sta_symbol_table_create(512);
-    g_heap = sta_heap_create(512 * 1024);
-    g_ct   = sta_class_table_create();
+    g_vm = calloc(1, sizeof(STA_VM));
+    assert(g_vm);
+    sta_heap_init(&g_vm->heap, 512 * 1024);
+    sta_immutable_space_init(&g_vm->immutable_space, 512 * 1024);
+    sta_symbol_table_init(&g_vm->symbol_table, 512);
+    sta_class_table_init(&g_vm->class_table);
+    sta_special_objects_bind(g_vm->specials);
 
-    STA_BootstrapResult r = sta_bootstrap(g_heap, g_sp, g_st, g_ct);
+    STA_BootstrapResult r = sta_bootstrap(&g_vm->heap, &g_vm->immutable_space,
+                                           &g_vm->symbol_table, &g_vm->class_table);
     assert(r.status == 0);
+    sta_primitive_table_init();
+    g_ctx.vm = g_vm;
+    g_ctx.actor = NULL;
 }
 
 static void teardown(void) {
-    sta_class_table_destroy(g_ct);
-    sta_heap_destroy(g_heap);
-    sta_symbol_table_destroy(g_st);
-    sta_immutable_space_destroy(g_sp);
+    sta_class_table_deinit(&g_vm->class_table);
+    sta_heap_deinit(&g_vm->heap);
+    sta_symbol_table_deinit(&g_vm->symbol_table);
+    sta_immutable_space_deinit(&g_vm->immutable_space);
+    sta_special_objects_bind(NULL);
+    free(g_vm);
 }
 
 /* Helper: call prim 31 with receiver = class OOP. */
@@ -44,14 +53,14 @@ static int call_basic_new(STA_OOP class_oop, STA_OOP *result) {
     STA_PrimFn prim = sta_primitives[31];
     assert(prim != NULL);
     STA_OOP args[1] = { class_oop };
-    return prim(args, 0, result);
+    return prim(&g_ctx, args, 0, result);
 }
 
 /* ── Test 1: Object basicNew — 0 instance variables ────────────────────── */
 
 static void test_object_basic_new(void) {
     printf("  Object basicNew...");
-    STA_OOP obj_cls = sta_class_table_get(g_ct, STA_CLS_OBJECT);
+    STA_OOP obj_cls = sta_class_table_get(&g_vm->class_table, STA_CLS_OBJECT);
     STA_OOP result;
     int rc = call_basic_new(obj_cls, &result);
     assert(rc == STA_PRIM_SUCCESS);
@@ -73,7 +82,7 @@ static void test_object_basic_new(void) {
 
 static void test_association_basic_new(void) {
     printf("  Association basicNew...");
-    STA_OOP assoc_cls = sta_class_table_get(g_ct, STA_CLS_ASSOCIATION);
+    STA_OOP assoc_cls = sta_class_table_get(&g_vm->class_table, STA_CLS_ASSOCIATION);
     STA_OOP result;
     int rc = call_basic_new(assoc_cls, &result);
     assert(rc == STA_PRIM_SUCCESS);
@@ -95,7 +104,7 @@ static void test_association_basic_new(void) {
 
 static void test_blockclosure_basic_new(void) {
     printf("  BlockClosure basicNew...");
-    STA_OOP bc_cls = sta_class_table_get(g_ct, STA_CLS_BLOCKCLOSURE);
+    STA_OOP bc_cls = sta_class_table_get(&g_vm->class_table, STA_CLS_BLOCKCLOSURE);
     STA_OOP result;
     int rc = call_basic_new(bc_cls, &result);
     assert(rc == STA_PRIM_SUCCESS);
@@ -117,7 +126,7 @@ static void test_blockclosure_basic_new(void) {
 
 static void test_message_basic_new(void) {
     printf("  Message basicNew...");
-    STA_OOP msg_cls = sta_class_table_get(g_ct, STA_CLS_MESSAGE);
+    STA_OOP msg_cls = sta_class_table_get(&g_vm->class_table, STA_CLS_MESSAGE);
     STA_OOP result;
     int rc = call_basic_new(msg_cls, &result);
     assert(rc == STA_PRIM_SUCCESS);
@@ -139,7 +148,7 @@ static void test_message_basic_new(void) {
 
 static void test_array_basic_new_fails(void) {
     printf("  Array basicNew fails...");
-    STA_OOP arr_cls = sta_class_table_get(g_ct, STA_CLS_ARRAY);
+    STA_OOP arr_cls = sta_class_table_get(&g_vm->class_table, STA_CLS_ARRAY);
     STA_OOP result;
     int rc = call_basic_new(arr_cls, &result);
     assert(rc == STA_PRIM_BAD_RECEIVER);
@@ -150,7 +159,7 @@ static void test_array_basic_new_fails(void) {
 
 static void test_string_basic_new_fails(void) {
     printf("  String basicNew fails...");
-    STA_OOP str_cls = sta_class_table_get(g_ct, STA_CLS_STRING);
+    STA_OOP str_cls = sta_class_table_get(&g_vm->class_table, STA_CLS_STRING);
     STA_OOP result;
     int rc = call_basic_new(str_cls, &result);
     assert(rc == STA_PRIM_BAD_RECEIVER);
@@ -161,7 +170,7 @@ static void test_string_basic_new_fails(void) {
 
 static void test_smallint_basic_new_fails(void) {
     printf("  SmallInteger basicNew fails...");
-    STA_OOP si_cls = sta_class_table_get(g_ct, STA_CLS_SMALLINTEGER);
+    STA_OOP si_cls = sta_class_table_get(&g_vm->class_table, STA_CLS_SMALLINTEGER);
     STA_OOP result;
     int rc = call_basic_new(si_cls, &result);
     assert(rc == STA_PRIM_BAD_RECEIVER);
@@ -172,7 +181,7 @@ static void test_smallint_basic_new_fails(void) {
 
 static void test_float_basic_new_fails(void) {
     printf("  Float basicNew fails...");
-    STA_OOP flt_cls = sta_class_table_get(g_ct, STA_CLS_FLOAT);
+    STA_OOP flt_cls = sta_class_table_get(&g_vm->class_table, STA_CLS_FLOAT);
     STA_OOP result;
     int rc = call_basic_new(flt_cls, &result);
     assert(rc == STA_PRIM_BAD_RECEIVER);
@@ -183,7 +192,7 @@ static void test_float_basic_new_fails(void) {
 
 static void test_compiled_method_basic_new_fails(void) {
     printf("  CompiledMethod basicNew fails...");
-    STA_OOP cm_cls = sta_class_table_get(g_ct, STA_CLS_COMPILEDMETHOD);
+    STA_OOP cm_cls = sta_class_table_get(&g_vm->class_table, STA_CLS_COMPILEDMETHOD);
     STA_OOP result;
     int rc = call_basic_new(cm_cls, &result);
     assert(rc == STA_PRIM_BAD_RECEIVER);
@@ -194,7 +203,7 @@ static void test_compiled_method_basic_new_fails(void) {
 
 static void test_multiple_allocations_distinct(void) {
     printf("  multiple allocations distinct...");
-    STA_OOP assoc_cls = sta_class_table_get(g_ct, STA_CLS_ASSOCIATION);
+    STA_OOP assoc_cls = sta_class_table_get(&g_vm->class_table, STA_CLS_ASSOCIATION);
     STA_OOP a, b;
     assert(call_basic_new(assoc_cls, &a) == STA_PRIM_SUCCESS);
     assert(call_basic_new(assoc_cls, &b) == STA_PRIM_SUCCESS);
@@ -214,16 +223,13 @@ static void test_multiple_allocations_distinct(void) {
 static void test_allocation_failure(void) {
     printf("  allocation failure on full heap...");
 
-    /* Create a tiny heap and bootstrap-free primitive context. */
-    STA_Heap *tiny = sta_heap_create(128);  /* just 128 bytes */
-    assert(tiny != NULL);
-
-    /* Save and swap the global heap. */
-    sta_primitive_set_heap(tiny);
+    /* Save the original heap and swap in a tiny one. */
+    STA_Heap saved_heap = g_vm->heap;
+    sta_heap_init(&g_vm->heap, 128);  /* just 128 bytes */
 
     /* Association needs 2 slots = 16 + 16 = 32 bytes per object.
      * 128 bytes should fit a few, then fail. */
-    STA_OOP assoc_cls = sta_class_table_get(g_ct, STA_CLS_ASSOCIATION);
+    STA_OOP assoc_cls = sta_class_table_get(&g_vm->class_table, STA_CLS_ASSOCIATION);
     STA_OOP result;
     int rc;
     int count = 0;
@@ -236,8 +242,8 @@ static void test_allocation_failure(void) {
     assert(count > 0);  /* should have allocated at least one */
 
     /* Restore original heap. */
-    sta_primitive_set_heap(g_heap);
-    sta_heap_destroy(tiny);
+    sta_heap_deinit(&g_vm->heap);
+    g_vm->heap = saved_heap;
 
     printf(" ok (allocated %d before failure)\n", count);
 }
@@ -248,21 +254,21 @@ static void test_class_table_index_of(void) {
     printf("  class_table_index_of...");
 
     /* Spot-check a few. */
-    STA_OOP obj_cls = sta_class_table_get(g_ct, STA_CLS_OBJECT);
-    assert(sta_class_table_index_of(g_ct, obj_cls) == STA_CLS_OBJECT);
+    STA_OOP obj_cls = sta_class_table_get(&g_vm->class_table, STA_CLS_OBJECT);
+    assert(sta_class_table_index_of(&g_vm->class_table, obj_cls) == STA_CLS_OBJECT);
 
-    STA_OOP arr_cls = sta_class_table_get(g_ct, STA_CLS_ARRAY);
-    assert(sta_class_table_index_of(g_ct, arr_cls) == STA_CLS_ARRAY);
+    STA_OOP arr_cls = sta_class_table_get(&g_vm->class_table, STA_CLS_ARRAY);
+    assert(sta_class_table_index_of(&g_vm->class_table, arr_cls) == STA_CLS_ARRAY);
 
-    STA_OOP assoc_cls = sta_class_table_get(g_ct, STA_CLS_ASSOCIATION);
-    assert(sta_class_table_index_of(g_ct, assoc_cls) == STA_CLS_ASSOCIATION);
+    STA_OOP assoc_cls = sta_class_table_get(&g_vm->class_table, STA_CLS_ASSOCIATION);
+    assert(sta_class_table_index_of(&g_vm->class_table, assoc_cls) == STA_CLS_ASSOCIATION);
 
-    STA_OOP si_cls = sta_class_table_get(g_ct, STA_CLS_SMALLINTEGER);
-    assert(sta_class_table_index_of(g_ct, si_cls) == STA_CLS_SMALLINTEGER);
+    STA_OOP si_cls = sta_class_table_get(&g_vm->class_table, STA_CLS_SMALLINTEGER);
+    assert(sta_class_table_index_of(&g_vm->class_table, si_cls) == STA_CLS_SMALLINTEGER);
 
     /* Not-found case. */
-    assert(sta_class_table_index_of(g_ct, 0) == 0);
-    assert(sta_class_table_index_of(g_ct, 0xDEADBEEF) == 0);
+    assert(sta_class_table_index_of(&g_vm->class_table, 0) == 0);
+    assert(sta_class_table_index_of(&g_vm->class_table, 0xDEADBEEF) == 0);
 
     printf(" ok\n");
 }

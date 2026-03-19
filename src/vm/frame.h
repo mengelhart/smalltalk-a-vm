@@ -37,6 +37,13 @@ typedef struct STA_StackSlab {
     uint8_t  *sp;          /* stack pointer for expression stack ops       */
 } STA_StackSlab;
 
+/* Initialize a slab in-place. Allocates backing memory.
+ * Returns 0 on success, -1 on failure. */
+int sta_stack_slab_init(STA_StackSlab *slab, size_t capacity);
+
+/* Deinitialize (free backing memory). Does not free the struct itself. */
+void sta_stack_slab_deinit(STA_StackSlab *slab);
+
 /* Create a slab with the given capacity in bytes. Returns NULL on failure. */
 STA_StackSlab *sta_stack_slab_create(size_t capacity);
 

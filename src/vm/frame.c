@@ -9,23 +9,40 @@
 
 /* ── Stack slab ────────────────────────────────────────────────────────── */
 
-STA_StackSlab *sta_stack_slab_create(size_t capacity) {
-    STA_StackSlab *slab = malloc(sizeof(*slab));
-    if (!slab) return NULL;
-
+int sta_stack_slab_init(STA_StackSlab *slab, size_t capacity) {
     slab->base = malloc(capacity);
-    if (!slab->base) { free(slab); return NULL; }
+    if (!slab->base) return -1;
 
     memset(slab->base, 0, capacity);
     slab->end = slab->base + capacity;
     slab->top = slab->base;
     slab->sp  = slab->base;
+    return 0;
+}
+
+void sta_stack_slab_deinit(STA_StackSlab *slab) {
+    if (!slab) return;
+    free(slab->base);
+    slab->base = NULL;
+    slab->end = NULL;
+    slab->top = NULL;
+    slab->sp = NULL;
+}
+
+STA_StackSlab *sta_stack_slab_create(size_t capacity) {
+    STA_StackSlab *slab = malloc(sizeof(*slab));
+    if (!slab) return NULL;
+
+    if (sta_stack_slab_init(slab, capacity) != 0) {
+        free(slab);
+        return NULL;
+    }
     return slab;
 }
 
 void sta_stack_slab_destroy(STA_StackSlab *slab) {
     if (!slab) return;
-    free(slab->base);
+    sta_stack_slab_deinit(slab);
     free(slab);
 }
 

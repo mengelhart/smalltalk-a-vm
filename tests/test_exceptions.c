@@ -18,9 +18,11 @@
 #include "vm/frame.h"
 #include "vm/handler.h"
 #include "vm/oop.h"
+#include "vm/vm_state.h"
 #include "bootstrap/bootstrap.h"
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static int tests_run = 0;
@@ -35,20 +37,22 @@ static int tests_passed = 0;
 
 /* ── Shared infrastructure ───────────────────────────────────────────── */
 
-static STA_Heap *heap;
-static STA_ImmutableSpace *imm;
-static STA_SymbolTable *syms;
-static STA_ClassTable *ct;
-static STA_StackSlab *slab;
+static STA_VM *g_vm;
 
 static void setup(void) {
-    heap = sta_heap_create(4 * 1024 * 1024);
-    imm  = sta_immutable_space_create(4 * 1024 * 1024);
-    syms = sta_symbol_table_create(256);
-    ct   = sta_class_table_create();
-    slab = sta_stack_slab_create(64 * 1024);
+    g_vm = calloc(1, sizeof(STA_VM));
+    assert(g_vm);
 
-    STA_BootstrapResult br = sta_bootstrap(heap, imm, syms, ct);
+    sta_heap_init(&g_vm->heap, 4 * 1024 * 1024);
+    sta_immutable_space_init(&g_vm->immutable_space, 4 * 1024 * 1024);
+    sta_symbol_table_init(&g_vm->symbol_table, 256);
+    sta_class_table_init(&g_vm->class_table);
+    sta_stack_slab_init(&g_vm->slab, 64 * 1024);
+
+    sta_special_objects_bind(g_vm->specials);
+    sta_primitive_table_init();
+
+    STA_BootstrapResult br = sta_bootstrap(&g_vm->heap, &g_vm->immutable_space, &g_vm->symbol_table, &g_vm->class_table);
     assert(br.status == 0);
 
     /* Reset handler chain to clean state. */
@@ -57,11 +61,11 @@ static void setup(void) {
 
 /* Compile an expression, install as Object>>doIt, execute, return result. */
 static STA_OOP eval(const char *source) {
-    STA_OOP obj_cls = sta_class_table_get(ct, STA_CLS_OBJECT);
+    STA_OOP obj_cls = sta_class_table_get(&g_vm->class_table, STA_CLS_OBJECT);
     STA_OOP sysdict = sta_spc_get(SPC_SMALLTALK);
 
     STA_CompileResult cr = sta_compile_expression(
-        source, syms, imm, heap, sysdict);
+        source, &g_vm->symbol_table, &g_vm->immutable_space, &g_vm->heap, sysdict);
     if (cr.had_error) {
         fprintf(stderr, "COMPILE ERROR: %s\n  source: %s\n",
                 cr.error_msg, source);
@@ -69,16 +73,16 @@ static STA_OOP eval(const char *source) {
     assert(!cr.had_error);
 
     /* Install as doIt on Object. */
-    STA_OOP sel = sta_symbol_intern(imm, syms, "doIt", 4);
+    STA_OOP sel = sta_symbol_intern(&g_vm->immutable_space, &g_vm->symbol_table, "doIt", 4);
     assert(sel != 0);
     STA_OOP md = sta_class_method_dict(obj_cls);
-    (void)sta_method_dict_insert(heap, md, sel, cr.method);
+    (void)sta_method_dict_insert(&g_vm->heap, md, sel, cr.method);
 
-    STA_ObjHeader *recv_h = sta_heap_alloc(heap, STA_CLS_OBJECT, 0);
+    STA_ObjHeader *recv_h = sta_heap_alloc(&g_vm->heap, STA_CLS_OBJECT, 0);
     assert(recv_h);
     STA_OOP receiver = (STA_OOP)(uintptr_t)recv_h;
 
-    return sta_interpret(slab, heap, ct, cr.method, receiver, NULL, 0);
+    return sta_interpret(g_vm, cr.method, receiver, NULL, 0);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════ */
@@ -112,13 +116,9 @@ static void test_signal_superclass_match(void) {
 }
 
 static void test_signal_with_message_text(void) {
-    /* Exception with messageText, caught and queried.
-     * Use chained sends: (Exception new messageText: 'boom') returns self,
-     * then signal is sent to it. Handler block accesses messageText. */
     STA_OOP result = eval(
         "[(Exception new messageText: 'boom') signal] "
         "  on: Exception do: [:e | e messageText]");
-    /* result should be the String 'boom' — a heap object, not nil */
     assert(result != sta_spc_get(SPC_NIL));
     assert(STA_IS_HEAP(result));
 }
@@ -128,11 +128,8 @@ static void test_signal_with_message_text(void) {
 /* ═══════════════════════════════════════════════════════════════════════ */
 
 static void test_exception_accessors(void) {
-    /* Exception new messageText: 'hello' returns self.
-     * Then messageText returns the string.  */
     STA_OOP result = eval(
         "(Exception new messageText: 'test') messageText");
-    /* Should be a String (not nil). */
     assert(result != sta_spc_get(SPC_NIL));
     assert(STA_IS_HEAP(result));
 }
@@ -142,7 +139,6 @@ static void test_exception_accessors(void) {
 /* ═══════════════════════════════════════════════════════════════════════ */
 
 static void test_dnu_creates_mnu(void) {
-    /* Send unknown message, catch MessageNotUnderstood, verify receiver. */
     STA_OOP result = eval(
         "[3 unknownMessage] "
         "  on: MessageNotUnderstood "
@@ -152,12 +148,10 @@ static void test_dnu_creates_mnu(void) {
 }
 
 static void test_dnu_message_object(void) {
-    /* Verify the message object is accessible from the MNU exception. */
     STA_OOP result = eval(
         "[3 unknownMessage] "
         "  on: MessageNotUnderstood "
         "  do: [:e | e message]");
-    /* Should be a Message object (not nil). */
     assert(result != sta_spc_get(SPC_NIL));
     assert(STA_IS_HEAP(result));
 }
@@ -167,15 +161,12 @@ static void test_dnu_message_object(void) {
 /* ═══════════════════════════════════════════════════════════════════════ */
 
 static void test_ensure_normal(void) {
-    /* [42] ensure: [99]  →  42 (body result, not ensure result) */
     STA_OOP result = eval("[42] ensure: [99]");
     assert(STA_IS_SMALLINT(result));
     assert(STA_SMALLINT_VAL(result) == 42);
 }
 
 static void test_ensure_body_result_preserved(void) {
-    /* Verify ensure: returns the body result, not the ensure block result.
-     * Test with different body/ensure values to confirm. */
     STA_OOP r1 = eval("[7] ensure: [0]");
     assert(STA_IS_SMALLINT(r1));
     assert(STA_SMALLINT_VAL(r1) == 7);
@@ -190,10 +181,6 @@ static void test_ensure_body_result_preserved(void) {
 /* ═══════════════════════════════════════════════════════════════════════ */
 
 static void test_nested_handlers_inner_catches(void) {
-    /* Nested handlers: inner catches Error, outer would catch Exception.
-     * [[Error new signal] on: Error do: [:e | 11]]
-     *   on: Exception do: [:e | 22]
-     * → should return the inner handler result (11). */
     STA_OOP result = eval(
         "[[Error new signal] on: Error do: [:e | 11]] "
         "  on: Exception do: [:e | 22]");
@@ -202,12 +189,6 @@ static void test_nested_handlers_inner_catches(void) {
 }
 
 static void test_on_do_with_ensure_phase1(void) {
-    /* Phase 1 limitation: ensure: does NOT fire during exception
-     * unwinding. The on:do: catches the signal; the ensure: block
-     * is bypassed because longjmp skips it.
-     *
-     * Verify: on:do: catches the exception from within an ensure: body.
-     * The on:do: handler result (55) is returned. */
     STA_OOP result = eval(
         "[[Error new signal] ensure: [0]] "
         "  on: Error do: [:e | 55]");
@@ -216,9 +197,6 @@ static void test_on_do_with_ensure_phase1(void) {
 }
 
 static void test_normal_ensure_with_on_do(void) {
-    /* Normal completion with both ensure: and on:do:.
-     * Body completes normally, ensure: runs, on:do: handler not invoked.
-     * Result = body result (42). */
     STA_OOP result = eval(
         "[[42] ensure: [99]] "
         "  on: Error do: [:e | 0 - 1]");
