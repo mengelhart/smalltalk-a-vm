@@ -53,3 +53,21 @@ STA_OOP sta_deep_copy_gc(STA_OOP root,
                           struct STA_VM *vm,
                           struct STA_Actor *target_actor,
                           STA_ClassTable *class_table);
+
+/* ── Pre-flight size estimation ──────────────────────────────────────── */
+
+/* Estimate the total heap bytes needed to deep copy the object graph
+ * rooted at 'root'. Walks the same graph as deep copy (skipping
+ * immediates, nil, and immutables) but only measures — no allocation.
+ *
+ * Uses a visited set to avoid double-counting shared sub-objects in DAGs.
+ * Safe with cycles.
+ *
+ * Returns the estimated number of bytes (aligned allocations). */
+size_t sta_deep_copy_estimate(STA_OOP root, STA_ClassTable *class_table);
+
+/* Estimate total bytes for an array of roots (e.g., message args).
+ * Uses a single visited set across all roots so shared sub-objects
+ * between args are not double-counted. */
+size_t sta_deep_copy_estimate_roots(STA_OOP *roots, uint8_t count,
+                                     STA_ClassTable *class_table);
