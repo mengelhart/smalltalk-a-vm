@@ -30,6 +30,28 @@ struct STA_Actor;
  * Caller should retry allocation after a successful GC. */
 int sta_gc_collect(struct STA_VM *vm, struct STA_Actor *actor);
 
+/* ── GC-aware allocation ───────────────────────────────────────────────── */
+
+/* Allocate an object on the actor's heap, triggering GC if needed.
+ *
+ * Flow:
+ *   1. Try sta_heap_alloc → success? return.
+ *   2. Run sta_gc_collect → retry alloc → success? return.
+ *   3. Grow heap (heap growth policy) → retry alloc → success? return.
+ *   4. Return NULL (out of memory).
+ *
+ * IMPORTANT: caller must set actor->saved_frame to the current innermost
+ * frame BEFORE calling this function, so GC can walk the stack roots.
+ * After return, any OOP stored in a C local variable that pointed into
+ * the old heap is STALE — re-read from rooted locations. */
+STA_ObjHeader *sta_heap_alloc_gc(struct STA_VM *vm, struct STA_Actor *actor,
+                                  uint32_t class_index, uint32_t nwords);
+
+/* Grow the actor's heap to at least min_capacity bytes.
+ * Copies all current content to a new larger region.
+ * Returns 0 on success, -1 on allocation failure. */
+int sta_heap_grow(STA_Heap *heap, size_t min_capacity);
+
 /* ── GC statistics (Story 6 placeholder) ───────────────────────────────── */
 
 typedef struct STA_GCStats {

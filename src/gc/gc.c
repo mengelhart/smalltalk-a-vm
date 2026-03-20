@@ -378,3 +378,209 @@ int sta_gc_collect(struct STA_VM *vm, struct STA_Actor *actor) {
 
     return 0;
 }
+
+/* ── sta_heap_grow — grow a heap's backing region ──────────────────────── */
+
+int sta_heap_grow(STA_Heap *heap, size_t min_capacity) {
+    /* Round up to 16-byte alignment. */
+    min_capacity = (min_capacity + 15u) & ~(size_t)15u;
+    if (min_capacity <= heap->capacity) return 0;  /* already big enough */
+
+    char *new_base = aligned_alloc(16, min_capacity);
+    if (!new_base) return -1;
+
+    /* Copy existing content. */
+    memcpy(new_base, heap->base, heap->used);
+    /* Zero the rest. */
+    memset(new_base + heap->used, 0, min_capacity - heap->used);
+
+    /* Pointer fixup: any OOP pointing into the old region is now stale.
+     * This is only safe when called right after GC (all objects are in
+     * a contiguous block at the start of the heap, and the caller will
+     * update roots). For post-GC growth, the to-space was just installed
+     * as the heap — objects are at base..base+used. We need to relocate
+     * all OOPs. Use a simple offset-based fixup since objects are a
+     * contiguous memcpy. */
+    ptrdiff_t delta = new_base - heap->base;
+    if (delta != 0) {
+        /* Walk all objects in the new region and fix internal pointers. */
+        char *scan = new_base;
+        char *limit = new_base + heap->used;
+        char *old_base = heap->base;
+        char *old_limit = old_base + heap->used;
+
+        while (scan < limit) {
+            STA_ObjHeader *obj = (STA_ObjHeader *)scan;
+            STA_OOP *slots = sta_payload(obj);
+
+            /* Only fix slots that point into the old region. */
+            for (uint32_t i = 0; i < obj->size; i++) {
+                STA_OOP val = slots[i];
+                if (STA_IS_HEAP(val) && val != 0) {
+                    const char *p = (const char *)(uintptr_t)val;
+                    if (p >= old_base && p < old_limit) {
+                        slots[i] = (STA_OOP)(uintptr_t)(p + delta);
+                    }
+                }
+            }
+
+            size_t raw = sta_alloc_size(obj->size);
+            size_t alloc_bytes = (raw + 15u) & ~(size_t)15u;
+            scan += alloc_bytes;
+        }
+    }
+
+    free(heap->base);
+    heap->base = new_base;
+    heap->capacity = min_capacity;
+
+    return 0;
+}
+
+/* ── sta_heap_alloc_gc — GC-aware allocation ───────────────────────────── */
+
+STA_ObjHeader *sta_heap_alloc_gc(struct STA_VM *vm, struct STA_Actor *actor,
+                                  uint32_t class_index, uint32_t nwords)
+{
+    STA_Heap *heap = &actor->heap;
+
+    /* 1. Try normal allocation. */
+    STA_ObjHeader *obj = sta_heap_alloc(heap, class_index, nwords);
+    if (obj) return obj;
+
+    /* 2. Run GC and retry. */
+    if (sta_gc_collect(vm, actor) != 0) return NULL;
+
+    obj = sta_heap_alloc(heap, class_index, nwords);
+    if (obj) return obj;
+
+    /* 3. Survivors filled the space — grow the heap and retry.
+     *
+     * Growth policy based on survivor ratio:
+     *   survivors > 75% of capacity → double
+     *   survivors > 50% of capacity → grow by 50%
+     *   else (shouldn't reach here) → grow by 50% as fallback
+     *
+     * We also need to ensure the new capacity has room for the
+     * requested allocation. */
+    size_t survived = heap->used;
+    size_t old_cap = heap->capacity;
+    size_t new_cap;
+
+    if (survived * 4 > old_cap * 3) {
+        /* > 75% survived → double. */
+        new_cap = old_cap * 2;
+    } else {
+        /* > 50% survived (or fallback) → grow by 50%. */
+        new_cap = old_cap + old_cap / 2;
+    }
+
+    /* Ensure the new capacity can fit the requested allocation. */
+    size_t raw = sta_alloc_size(nwords);
+    size_t alloc_bytes = (raw + 15u) & ~(size_t)15u;
+    if (new_cap < survived + alloc_bytes) {
+        new_cap = survived + alloc_bytes;
+    }
+
+    /* Grow also needs to fix the actor's rooted OOPs that point into
+     * the old heap region. We handle this by updating roots after grow. */
+    char *old_base = heap->base;
+    if (sta_heap_grow(heap, new_cap) != 0) return NULL;
+
+    /* Fix actor struct OOP roots if they pointed into the old region. */
+    ptrdiff_t delta = heap->base - old_base;
+    if (delta != 0) {
+        /* Fix actor behavior OOPs. */
+        STA_OOP *actor_oops[] = {
+            &actor->behavior_class,
+            &actor->behavior_obj,
+            &actor->signaled_exception,
+        };
+        char *old_limit = old_base + survived;
+        for (size_t i = 0; i < sizeof(actor_oops) / sizeof(actor_oops[0]); i++) {
+            STA_OOP val = *actor_oops[i];
+            if (STA_IS_HEAP(val) && val != 0) {
+                const char *p = (const char *)(uintptr_t)val;
+                if (p >= old_base && p < old_limit) {
+                    *actor_oops[i] = (STA_OOP)(uintptr_t)(p + delta);
+                }
+            }
+        }
+
+        /* Fix saved_frame if it points into the stack slab — no, saved_frame
+         * is on the stack slab, not the heap. Stack slab is separate memory.
+         * But OOPs within stack frames that point into the old heap need
+         * fixing. Walk the frame chain. */
+        if (actor->saved_frame) {
+            STA_Frame *f = actor->saved_frame;
+            while (f) {
+                /* Fix method and receiver if they're on the heap
+                 * (methods are immutable, receiver might be on heap). */
+                STA_OOP *frame_oops[] = {
+                    &f->method, &f->receiver, &f->context
+                };
+                for (size_t i = 0; i < 3; i++) {
+                    STA_OOP val = *frame_oops[i];
+                    if (STA_IS_HEAP(val) && val != 0) {
+                        const char *p = (const char *)(uintptr_t)val;
+                        if (p >= old_base && p < old_limit) {
+                            *frame_oops[i] = (STA_OOP)(uintptr_t)(p + delta);
+                        }
+                    }
+                }
+
+                /* Fix args/temps/stack slots. */
+                STA_OOP *slots = sta_frame_slots(f);
+                uint32_t slot_count = sta_frame_slot_count(f);
+                for (uint32_t i = 0; i < slot_count; i++) {
+                    STA_OOP val = slots[i];
+                    if (STA_IS_HEAP(val) && val != 0) {
+                        const char *p = (const char *)(uintptr_t)val;
+                        if (p >= old_base && p < old_limit) {
+                            slots[i] = (STA_OOP)(uintptr_t)(p + delta);
+                        }
+                    }
+                }
+
+                /* Fix expression stack for innermost frame. */
+                if (f == actor->saved_frame) {
+                    STA_OOP *stack_base = &slots[slot_count];
+                    STA_OOP *stack_top = (STA_OOP *)actor->slab.sp;
+                    for (STA_OOP *p = stack_base; p < stack_top; p++) {
+                        STA_OOP val = *p;
+                        if (STA_IS_HEAP(val) && val != 0) {
+                            const char *ptr = (const char *)(uintptr_t)val;
+                            if (ptr >= old_base && ptr < old_limit) {
+                                *p = (STA_OOP)(uintptr_t)(ptr + delta);
+                            }
+                        }
+                    }
+                }
+
+                f = f->sender;
+            }
+        }
+
+        /* Fix handler chain OOPs. */
+        STA_HandlerEntry *he = actor->handler_top;
+        while (he) {
+            STA_OOP *handler_oops[] = {
+                &he->exception_class, &he->handler_block, &he->ensure_block
+            };
+            for (size_t i = 0; i < 3; i++) {
+                STA_OOP val = *handler_oops[i];
+                if (STA_IS_HEAP(val) && val != 0) {
+                    const char *p = (const char *)(uintptr_t)val;
+                    if (p >= old_base && p < old_limit) {
+                        *handler_oops[i] = (STA_OOP)(uintptr_t)(p + delta);
+                    }
+                }
+            }
+            he = he->prev;
+        }
+    }
+
+    /* 4. Retry allocation on the grown heap. */
+    obj = sta_heap_alloc(heap, class_index, nwords);
+    return obj;  /* NULL if still fails (OOM) */
+}

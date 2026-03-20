@@ -430,6 +430,12 @@ target_include_directories(test_gc PRIVATE
 target_link_libraries(test_gc PRIVATE sta_vm)
 add_test(NAME gc COMMAND test_gc)
 
+add_executable(test_gc_heap test_gc_heap.c)
+target_include_directories(test_gc_heap PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(test_gc_heap PRIVATE sta_vm)
+add_test(NAME gc_heap COMMAND test_gc_heap)
+
 # ── Spike 002: MPSC mailbox — TSan correctness gate ───────────────────────
 find_package(Threads REQUIRED)
 
