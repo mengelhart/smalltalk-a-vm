@@ -6,6 +6,7 @@
 #include "deep_copy.h"
 #include "mailbox_msg.h"
 #include "scheduler/scheduler.h"
+#include "gc/gc.h"
 #include "vm/vm_state.h"
 #include "vm/interpreter.h"
 #include "vm/method_dict.h"
@@ -101,20 +102,22 @@ int sta_actor_send_msg(struct STA_Actor *sender,
     STA_OOP *copied_args = NULL;
 
     if (nargs > 0) {
-        /* Allocate an array on the target's heap for the copied args. */
-        STA_ObjHeader *args_h = sta_heap_alloc(&target->heap, STA_CLS_ARRAY,
-                                                (uint32_t)nargs);
+        /* Allocate an array on the target's heap for the copied args.
+         * Use GC-aware allocation so the target can collect garbage
+         * if its heap is full. */
+        struct STA_VM *vm = sender->vm;
+        STA_ObjHeader *args_h = sta_heap_alloc_gc(vm, target,
+                                                    STA_CLS_ARRAY,
+                                                    (uint32_t)nargs);
         if (!args_h) return -1;
         copied_args = sta_payload(args_h);
 
-        /* Resolve class table from VM (sender and target share the same VM). */
-        STA_ClassTable *ct = &sender->vm->class_table;
+        STA_ClassTable *ct = &vm->class_table;
 
         for (uint8_t i = 0; i < nargs; i++) {
-            copied_args[i] = sta_deep_copy(args[i],
-                                            &sender->heap,
-                                            &target->heap,
-                                            ct);
+            copied_args[i] = sta_deep_copy_gc(args[i],
+                                               &sender->heap,
+                                               vm, target, ct);
             /* Check for allocation failure during deep copy. */
             if (copied_args[i] == 0 && args[i] != 0 &&
                 !STA_IS_IMMEDIATE(args[i])) {

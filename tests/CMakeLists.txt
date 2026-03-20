@@ -452,6 +452,15 @@ target_compile_definitions(test_gc_safety PRIVATE
 target_link_libraries(test_gc_safety PRIVATE sta_vm)
 add_test(NAME gc_safety COMMAND test_gc_safety)
 
+add_executable(test_gc_scheduled test_gc_scheduled.c)
+target_include_directories(test_gc_scheduled PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_compile_definitions(test_gc_scheduled PRIVATE
+    KERNEL_DIR="${CMAKE_SOURCE_DIR}/kernel")
+target_link_libraries(test_gc_scheduled PRIVATE sta_vm Threads::Threads)
+add_test(NAME gc_scheduled COMMAND test_gc_scheduled)
+set_tests_properties(gc_scheduled PROPERTIES TIMEOUT 60)
+
 # ── Spike 002: MPSC mailbox — TSan correctness gate ───────────────────────
 find_package(Threads REQUIRED)
 
