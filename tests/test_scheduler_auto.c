@@ -72,7 +72,7 @@ static void test_send_auto_schedules_created(void) {
     /* Send a message — should auto-schedule. */
     STA_OOP sel = yourself_selector(vm);
     struct STA_Actor *root = vm->root_actor;
-    int send_rc = sta_actor_send_msg(root, child, sel, NULL, 0);
+    int send_rc = sta_actor_send_msg(vm, root, child->actor_id, sel, NULL, 0);
     assert(send_rc == 0);
 
     /* Wait for processing. */
@@ -106,7 +106,7 @@ static void test_send_wakes_suspended(void) {
     struct STA_Actor *root = vm->root_actor;
 
     /* First message: auto-schedules from CREATED. */
-    sta_actor_send_msg(root, child, sel, NULL, 0);
+    sta_actor_send_msg(vm, root, child->actor_id, sel, NULL, 0);
     bool done = wait_for_empty(child, 500);
     assert(done);
 
@@ -114,7 +114,7 @@ static void test_send_wakes_suspended(void) {
     assert(atomic_load(&child->state) == STA_ACTOR_SUSPENDED);
 
     /* Second message: should wake from SUSPENDED. */
-    sta_actor_send_msg(root, child, sel, NULL, 0);
+    sta_actor_send_msg(vm, root, child->actor_id, sel, NULL, 0);
     done = wait_for_empty(child, 500);
     assert(done);
 
@@ -143,7 +143,7 @@ static void test_multiple_msgs_auto_scheduled(void) {
 
     /* Send 10 messages in quick succession. */
     for (int i = 0; i < 10; i++) {
-        sta_actor_send_msg(root, child, sel, NULL, 0);
+        sta_actor_send_msg(vm, root, child->actor_id, sel, NULL, 0);
     }
 
     /* Wait for all to be processed. */
@@ -171,7 +171,7 @@ static void test_no_schedule_without_scheduler(void) {
     struct STA_Actor *root = vm->root_actor;
 
     /* Send — should succeed without crashing, no auto-schedule. */
-    int send_rc = sta_actor_send_msg(root, child, sel, NULL, 0);
+    int send_rc = sta_actor_send_msg(vm, root, child->actor_id, sel, NULL, 0);
     assert(send_rc == 0);
 
     /* Message is in mailbox but not dispatched. */
@@ -208,7 +208,7 @@ static void test_running_actor_not_reenqueued(void) {
     atomic_store(&vm->scheduler->running, true);
 
     /* Send — should NOT enqueue (actor is RUNNING). */
-    sta_actor_send_msg(root, child, sel, NULL, 0);
+    sta_actor_send_msg(vm, root, child->actor_id, sel, NULL, 0);
 
     /* Overflow queue should be empty — actor was RUNNING, CAS fails. */
     assert(vm->scheduler->overflow_head == NULL);
@@ -235,15 +235,14 @@ static void test_two_actors_reactive(void) {
 
     struct STA_Actor *a1 = make_child_actor(vm);
     struct STA_Actor *a2 = make_child_actor(vm);
-    a1->actor_id = 100;
-    a2->actor_id = 200;
+
 
     STA_OOP sel = yourself_selector(vm);
     struct STA_Actor *root = vm->root_actor;
 
     /* Send to both actors. */
-    sta_actor_send_msg(root, a1, sel, NULL, 0);
-    sta_actor_send_msg(root, a2, sel, NULL, 0);
+    sta_actor_send_msg(vm, root, a1->actor_id, sel, NULL, 0);
+    sta_actor_send_msg(vm, root, a2->actor_id, sel, NULL, 0);
 
     /* Wait for both to process. */
     bool done1 = wait_for_empty(a1, 500);
@@ -279,9 +278,9 @@ static void test_fifo_ordering(void) {
     STA_OOP sel3 = sta_symbol_intern(
         &vm->immutable_space, &vm->symbol_table, "yourself", 8);
 
-    sta_actor_send_msg(root, child, sel1, NULL, 0);
-    sta_actor_send_msg(root, child, sel2, NULL, 0);
-    sta_actor_send_msg(root, child, sel3, NULL, 0);
+    sta_actor_send_msg(vm, root, child->actor_id, sel1, NULL, 0);
+    sta_actor_send_msg(vm, root, child->actor_id, sel2, NULL, 0);
+    sta_actor_send_msg(vm, root, child->actor_id, sel3, NULL, 0);
 
     /* Process all three manually. */
     assert(sta_actor_process_one(vm, child) == 1);

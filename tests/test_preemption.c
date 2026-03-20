@@ -177,7 +177,7 @@ static void test_process_one_preemptible(void) {
     STA_OOP sel = sta_symbol_intern(
         &vm->immutable_space, &vm->symbol_table, "longLoop", 8);
     struct STA_Actor *root = vm->root_actor;
-    sta_actor_send_msg(root, child, sel, NULL, 0);
+    sta_actor_send_msg(vm, root, child->actor_id, sel, NULL, 0);
 
     /* Process with preemption. */
     int rc = sta_actor_process_one_preemptible(vm, child);
@@ -209,7 +209,6 @@ static void test_scheduler_preemption(void) {
     assert(rc == 0);
 
     struct STA_Actor *child = make_child_actor(vm);
-    child->actor_id = 99;
 
     install_method(vm, child,
         "longLoop\n"
@@ -223,7 +222,7 @@ static void test_scheduler_preemption(void) {
     STA_OOP sel = sta_symbol_intern(
         &vm->immutable_space, &vm->symbol_table, "longLoop", 8);
     struct STA_Actor *root = vm->root_actor;
-    sta_actor_send_msg(root, child, sel, NULL, 0);
+    sta_actor_send_msg(vm, root, child->actor_id, sel, NULL, 0);
 
     /* Wait for completion — only check atomic state to avoid TSan races
      * on non-atomic saved_frame. saved_frame is checked after stop (which

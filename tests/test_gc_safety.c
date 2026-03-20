@@ -202,8 +202,8 @@ static void test_gc_during_deep_copy(void) {
     /* Send message with the array as argument.
      * sta_actor_send_msg deep-copies args to receiver's heap. */
     STA_OOP arr_oop = (STA_OOP)(uintptr_t)arr;
-    int rc = sta_actor_send_msg(sender, receiver, intern("setKey:"),
-                                 &arr_oop, 1);
+    int rc = sta_actor_send_msg(g_vm, sender, receiver->actor_id,
+                                 intern("setKey:"), &arr_oop, 1);
     assert(rc == 0);
 
     /* Process the message. */

@@ -97,13 +97,12 @@ static void test_10_actors_100_messages(void) {
 
     for (int i = 0; i < 10; i++) {
         actors[i] = make_child_actor(vm);
-        actors[i]->actor_id = (uint32_t)(1000 + i);
     }
 
     /* Send 100 messages to each actor. */
     for (int msg = 0; msg < 100; msg++) {
         for (int i = 0; i < 10; i++) {
-            sta_actor_send_msg(root, actors[i], sel, NULL, 0);
+            sta_actor_send_msg(vm, root, actors[i]->actor_id, sel, NULL, 0);
         }
     }
 
@@ -147,7 +146,6 @@ static void test_preemption_stress(void) {
     struct STA_Actor *actors[4];
     for (int i = 0; i < 4; i++) {
         actors[i] = make_child_actor(vm);
-        actors[i]->actor_id = (uint32_t)(2000 + i);
         install_method(vm, actors[i],
             "work | i | i := 0. [i < 2000] whileTrue: [i := i + 1]. ^ i",
             "work");
@@ -156,7 +154,7 @@ static void test_preemption_stress(void) {
     STA_OOP sel = intern(vm, "work");
     struct STA_Actor *root = vm->root_actor;
     for (int i = 0; i < 4; i++) {
-        sta_actor_send_msg(root, actors[i], sel, NULL, 0);
+        sta_actor_send_msg(vm, root, actors[i]->actor_id, sel, NULL, 0);
     }
 
     bool done = wait_all_suspended(actors, 4, 5000);
@@ -194,7 +192,7 @@ static void test_fifo_ordering_under_load(void) {
     struct STA_Actor *root = vm->root_actor;
 
     for (int i = 0; i < 50; i++) {
-        sta_actor_send_msg(root, child, sel, NULL, 0);
+        sta_actor_send_msg(vm, root, child->actor_id, sel, NULL, 0);
     }
 
     /* Process all — should get 50 messages in order. */
@@ -240,18 +238,17 @@ static void test_stop_with_pending_messages(void) {
     assert(rc == 0);
 
     struct STA_Actor *child = make_child_actor(vm);
-    child->actor_id = 3000;
     install_method(vm, child,
         "work | i | i := 0. [i < 10000] whileTrue: [i := i + 1]. ^ i",
         "work");
 
     STA_OOP sel = intern(vm, "work");
     /* Send a long-running message. */
-    sta_actor_send_msg(vm->root_actor, child, sel, NULL, 0);
+    sta_actor_send_msg(vm, vm->root_actor, child->actor_id, sel, NULL, 0);
     /* Send more messages while the first is processing. */
     STA_OOP sel2 = intern(vm, "yourself");
     for (int i = 0; i < 10; i++) {
-        sta_actor_send_msg(vm->root_actor, child, sel2, NULL, 0);
+        sta_actor_send_msg(vm, vm->root_actor, child->actor_id, sel2, NULL, 0);
     }
 
     /* Stop immediately — don't wait for completion.
@@ -277,14 +274,13 @@ static void test_state_machine(void) {
     assert(rc == 0);
 
     struct STA_Actor *child = make_child_actor(vm);
-    child->actor_id = 4000;
 
     /* CREATED initially. */
     assert(atomic_load(&child->state) == STA_ACTOR_CREATED);
 
     /* Send message → should auto-schedule (CREATED → READY). */
     STA_OOP sel = intern(vm, "yourself");
-    sta_actor_send_msg(vm->root_actor, child, sel, NULL, 0);
+    sta_actor_send_msg(vm, vm->root_actor, child->actor_id, sel, NULL, 0);
 
     /* Wait for it to go through READY → RUNNING → SUSPENDED. */
     for (int i = 0; i < 200; i++) {
@@ -294,7 +290,7 @@ static void test_state_machine(void) {
     assert(atomic_load(&child->state) == STA_ACTOR_SUSPENDED);
 
     /* Send another → SUSPENDED → READY → RUNNING → SUSPENDED. */
-    sta_actor_send_msg(vm->root_actor, child, sel, NULL, 0);
+    sta_actor_send_msg(vm, vm->root_actor, child->actor_id, sel, NULL, 0);
     for (int i = 0; i < 200; i++) {
         if (sta_mailbox_is_empty(&child->mailbox) &&
             atomic_load(&child->state) == STA_ACTOR_SUSPENDED) break;
@@ -325,10 +321,9 @@ static void test_many_actors_few_messages(void) {
 
     for (int i = 0; i < N_ACTORS; i++) {
         actors[i] = make_child_actor(vm);
-        actors[i]->actor_id = (uint32_t)(5000 + i);
         /* 2 messages each. */
-        sta_actor_send_msg(vm->root_actor, actors[i], sel, NULL, 0);
-        sta_actor_send_msg(vm->root_actor, actors[i], sel, NULL, 0);
+        sta_actor_send_msg(vm, vm->root_actor, actors[i]->actor_id, sel, NULL, 0);
+        sta_actor_send_msg(vm, vm->root_actor, actors[i]->actor_id, sel, NULL, 0);
     }
 
     bool done = wait_all_suspended(actors, N_ACTORS, 5000);
@@ -368,7 +363,6 @@ static void test_steal_verification(void) {
     struct STA_Actor *actors[8];
     for (int i = 0; i < 8; i++) {
         actors[i] = make_child_actor(vm);
-        actors[i]->actor_id = (uint32_t)(6000 + i);
         install_method(vm, actors[i],
             "work | i | i := 0. [i < 1000] whileTrue: [i := i + 1]. ^ i",
             "work");
@@ -376,7 +370,7 @@ static void test_steal_verification(void) {
 
     STA_OOP sel = intern(vm, "work");
     for (int i = 0; i < 8; i++) {
-        sta_actor_send_msg(vm->root_actor, actors[i], sel, NULL, 0);
+        sta_actor_send_msg(vm, vm->root_actor, actors[i]->actor_id, sel, NULL, 0);
     }
 
     bool done = wait_all_suspended(actors, 8, 5000);
@@ -415,7 +409,6 @@ static void test_eval_under_stress(void) {
     struct STA_Actor *actors[10];
     for (int i = 0; i < 10; i++) {
         actors[i] = make_child_actor(vm);
-        actors[i]->actor_id = (uint32_t)(7000 + i);
         install_method(vm, actors[i],
             "work | i | i := 0. [i < 1000] whileTrue: [i := i + 1]. ^ i",
             "work");
@@ -423,7 +416,7 @@ static void test_eval_under_stress(void) {
 
     STA_OOP sel = intern(vm, "work");
     for (int i = 0; i < 10; i++) {
-        sta_actor_send_msg(vm->root_actor, actors[i], sel, NULL, 0);
+        sta_actor_send_msg(vm, vm->root_actor, actors[i]->actor_id, sel, NULL, 0);
     }
 
     /* While actors are running, do sta_eval. */
@@ -466,13 +459,12 @@ static void test_full_core_stress(void) {
 
     for (int i = 0; i < FC_ACTORS; i++) {
         actors[i] = make_child_actor(vm);
-        actors[i]->actor_id = (uint32_t)(10000 + i);
     }
 
     /* Send FC_MSGS messages to each actor. */
     for (int msg = 0; msg < FC_MSGS; msg++) {
         for (int i = 0; i < FC_ACTORS; i++) {
-            sta_actor_send_msg(root, actors[i], sel, NULL, 0);
+            sta_actor_send_msg(vm, root, actors[i]->actor_id, sel, NULL, 0);
         }
     }
 
@@ -538,13 +530,12 @@ static void test_heavy_contention(void) {
 
     for (int i = 0; i < HC_ACTORS; i++) {
         actors[i] = make_child_actor(vm);
-        actors[i]->actor_id = (uint32_t)(20000 + i);
     }
 
     /* Send HC_MSGS messages to each actor. */
     for (int msg = 0; msg < HC_MSGS; msg++) {
         for (int i = 0; i < HC_ACTORS; i++) {
-            sta_actor_send_msg(root, actors[i], sel, NULL, 0);
+            sta_actor_send_msg(vm, root, actors[i]->actor_id, sel, NULL, 0);
         }
     }
 

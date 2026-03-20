@@ -62,7 +62,7 @@ static void test_deque_basic(void) {
     struct STA_Actor *a1 = sta_actor_create(vm, 128, 128);
     struct STA_Actor *a2 = sta_actor_create(vm, 128, 128);
     struct STA_Actor *a3 = sta_actor_create(vm, 128, 128);
-    a1->actor_id = 1; a2->actor_id = 2; a3->actor_id = 3;
+
 
     /* Push 3. */
     assert(sta_deque_push(&dq, a1) == 0);
@@ -144,10 +144,9 @@ static void test_imbalanced_stealing(void) {
 
     for (int i = 0; i < 6; i++) {
         actors[i] = make_child_actor(vm);
-        actors[i]->actor_id = (uint32_t)(300 + i);
         /* Send 2 messages each. */
-        sta_actor_send_msg(root, actors[i], sel, NULL, 0);
-        sta_actor_send_msg(root, actors[i], sel, NULL, 0);
+        sta_actor_send_msg(vm, root, actors[i]->actor_id, sel, NULL, 0);
+        sta_actor_send_msg(vm, root, actors[i]->actor_id, sel, NULL, 0);
     }
 
     /* Wait for all to complete. */
@@ -213,8 +212,7 @@ static void test_long_running_stealing(void) {
      * to the local deque, and the other worker can steal them. */
     struct STA_Actor *a1 = make_child_actor(vm);
     struct STA_Actor *a2 = make_child_actor(vm);
-    a1->actor_id = 400;
-    a2->actor_id = 401;
+
 
     install_method(vm, a1,
         "work | i | i := 0. [i < 2000] whileTrue: [i := i + 1]. ^ i",
@@ -225,8 +223,8 @@ static void test_long_running_stealing(void) {
 
     STA_OOP sel = intern(vm, "work");
     struct STA_Actor *root = vm->root_actor;
-    sta_actor_send_msg(root, a1, sel, NULL, 0);
-    sta_actor_send_msg(root, a2, sel, NULL, 0);
+    sta_actor_send_msg(vm, root, a1->actor_id, sel, NULL, 0);
+    sta_actor_send_msg(vm, root, a2->actor_id, sel, NULL, 0);
 
     bool done1 = wait_for_suspended(a1, 3000);
     bool done2 = wait_for_suspended(a2, 3000);

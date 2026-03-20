@@ -128,18 +128,30 @@ void sta_actor_destroy(struct STA_Actor *actor) {
 
 /* ── Messaging ───────────────────────────────────────────────────────── */
 
-int sta_actor_send_msg(struct STA_Actor *sender,
-                       struct STA_Actor *target,
+int sta_actor_send_msg(struct STA_VM *vm,
+                       struct STA_Actor *sender,
+                       uint32_t target_id,
                        STA_OOP selector,
                        STA_OOP *args, uint8_t nargs)
 {
+    /* Resolve target by ID through the actor registry.
+     *
+     * TOCTOU note: the registry lock is released after lookup, so the
+     * returned pointer could theoretically become stale if a supervisor
+     * destroys the target between the lookup and the enqueue below.
+     * This is acceptable: supervision restarts are single-threaded
+     * within the supervisor's message processing, and the window
+     * between lookup and enqueue is microseconds. A full fix would
+     * require reference counting or hazard pointers on actors. */
+    struct STA_Actor *target = sta_registry_lookup(vm->registry, target_id);
+    if (!target) return STA_ERR_ACTOR_DEAD;
+
     /* Deep copy each argument from sender's heap to target's heap.
      * The copied args array is allocated on the target's heap so it
      * lives alongside the target's other objects. */
     STA_OOP *copied_args = NULL;
 
     if (nargs > 0) {
-        struct STA_VM *vm = sender->vm;
         STA_ClassTable *ct = &vm->class_table;
 
         /* ── Pre-flight size estimation (GitHub #295) ──────────────

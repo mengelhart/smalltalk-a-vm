@@ -9,6 +9,7 @@
 #include "actor/actor.h"
 #include "actor/mailbox.h"
 #include "actor/mailbox_msg.h"
+#include "actor/registry.h"
 #include "vm/vm_state.h"
 #include "vm/heap.h"
 #include "vm/oop.h"
@@ -46,7 +47,6 @@ static void teardown(void) {
 static struct STA_Actor *make_actor(size_t heap_size) {
     struct STA_Actor *a = sta_actor_create(g_vm, heap_size, 512);
     assert(a != NULL);
-    a->actor_id = (uint32_t)(uintptr_t)a % 10000;  /* arbitrary ID */
     return a;
 }
 
@@ -89,10 +89,9 @@ static bool on_heap(STA_Heap *heap, STA_OOP oop) {
 static void test_send_no_args(void) {
     struct STA_Actor *a = make_actor(4096);
     struct STA_Actor *b = make_actor(4096);
-    a->actor_id = 1;
 
     STA_OOP sel = intern("run");
-    int rc = sta_actor_send_msg(a, b, sel, NULL, 0);
+    int rc = sta_actor_send_msg(g_vm, a, b->actor_id, sel, NULL, 0);
     assert(rc == 0);
 
     /* Message should be in B's mailbox. */
@@ -102,7 +101,7 @@ static void test_send_no_args(void) {
     assert(msg->selector == sel);
     assert(msg->arg_count == 0);
     assert(msg->args == NULL);
-    assert(msg->sender_id == 1);
+    assert(msg->sender_id == a->actor_id);
 
     sta_mailbox_msg_destroy(msg);
     sta_actor_destroy(a);
@@ -116,7 +115,7 @@ static void test_send_with_smallint_arg(void) {
     STA_OOP sel = intern("add:");
     STA_OOP args[1] = { STA_SMALLINT_OOP(42) };
 
-    int rc = sta_actor_send_msg(a, b, sel, args, 1);
+    int rc = sta_actor_send_msg(g_vm, a, b->actor_id, sel, args, 1);
     assert(rc == 0);
 
     STA_MailboxMsg *msg = sta_mailbox_dequeue(&b->mailbox);
@@ -140,7 +139,7 @@ static void test_send_deep_copies_mutable_arg(void) {
     STA_OOP arr = make_array(&a->heap, 3);
     STA_OOP args[1] = { arr };
 
-    int rc = sta_actor_send_msg(a, b, sel, args, 1);
+    int rc = sta_actor_send_msg(g_vm, a, b->actor_id, sel, args, 1);
     assert(rc == 0);
 
     STA_MailboxMsg *msg = sta_mailbox_dequeue(&b->mailbox);
@@ -174,7 +173,7 @@ static void test_send_symbol_arg_shared(void) {
     STA_OOP sym_arg = intern("foo");
     STA_OOP args[1] = { sym_arg };
 
-    int rc = sta_actor_send_msg(a, b, sel, args, 1);
+    int rc = sta_actor_send_msg(g_vm, a, b->actor_id, sel, args, 1);
     assert(rc == 0);
 
     STA_MailboxMsg *msg = sta_mailbox_dequeue(&b->mailbox);
@@ -194,7 +193,7 @@ static void test_send_multiple_args(void) {
     STA_OOP str = make_string(&a->heap, "hello");
     STA_OOP args[2] = { STA_SMALLINT_OOP(1), str };
 
-    int rc = sta_actor_send_msg(a, b, sel, args, 2);
+    int rc = sta_actor_send_msg(g_vm, a, b->actor_id, sel, args, 2);
     assert(rc == 0);
 
     STA_MailboxMsg *msg = sta_mailbox_dequeue(&b->mailbox);
@@ -226,18 +225,18 @@ static void test_send_mailbox_full(void) {
     STA_OOP sel = intern("ping");
 
     /* Fill the mailbox. */
-    assert(sta_actor_send_msg(a, b, sel, NULL, 0) == 0);
-    assert(sta_actor_send_msg(a, b, sel, NULL, 0) == 0);
+    assert(sta_actor_send_msg(g_vm, a, b->actor_id, sel, NULL, 0) == 0);
+    assert(sta_actor_send_msg(g_vm, a, b->actor_id, sel, NULL, 0) == 0);
 
     /* Third send should fail. */
-    int rc = sta_actor_send_msg(a, b, sel, NULL, 0);
+    int rc = sta_actor_send_msg(g_vm, a, b->actor_id, sel, NULL, 0);
     assert(rc == STA_ERR_MAILBOX_FULL);
 
     /* Drain one, then send should succeed. */
     STA_MailboxMsg *msg = sta_mailbox_dequeue(&b->mailbox);
     sta_mailbox_msg_destroy(msg);
 
-    rc = sta_actor_send_msg(a, b, sel, NULL, 0);
+    rc = sta_actor_send_msg(g_vm, a, b->actor_id, sel, NULL, 0);
     assert(rc == 0);
 
     sta_actor_destroy(a);
@@ -247,13 +246,12 @@ static void test_send_mailbox_full(void) {
 static void test_send_preserves_sender_id(void) {
     struct STA_Actor *a = make_actor(4096);
     struct STA_Actor *b = make_actor(4096);
-    a->actor_id = 42;
 
     STA_OOP sel = intern("hello");
-    sta_actor_send_msg(a, b, sel, NULL, 0);
+    sta_actor_send_msg(g_vm, a, b->actor_id, sel, NULL, 0);
 
     STA_MailboxMsg *msg = sta_mailbox_dequeue(&b->mailbox);
-    assert(msg->sender_id == 42);
+    assert(msg->sender_id == a->actor_id);
 
     sta_mailbox_msg_destroy(msg);
     sta_actor_destroy(a);
@@ -268,7 +266,7 @@ static void test_send_heap_isolation(void) {
     STA_OOP arr = make_array(&a->heap, 2);
     STA_OOP args[1] = { arr };
 
-    sta_actor_send_msg(a, b, sel, args, 1);
+    sta_actor_send_msg(g_vm, a, b->actor_id, sel, args, 1);
 
     STA_MailboxMsg *msg = sta_mailbox_dequeue(&b->mailbox);
     STA_OOP copy = msg->args[0];
@@ -294,7 +292,7 @@ static void test_send_fifo_order(void) {
         char buf[16];
         snprintf(buf, sizeof(buf), "msg%d", i);
         STA_OOP sel = intern(buf);
-        sta_actor_send_msg(a, b, sel, NULL, 0);
+        sta_actor_send_msg(g_vm, a, b->actor_id, sel, NULL, 0);
     }
 
     /* Messages should arrive in FIFO order. */
@@ -309,6 +307,39 @@ static void test_send_fifo_order(void) {
         sta_mailbox_msg_destroy(msg);
     }
 
+    sta_actor_destroy(a);
+    sta_actor_destroy(b);
+}
+
+static void test_send_to_dead_actor(void) {
+    struct STA_Actor *a = make_actor(4096);
+    struct STA_Actor *b = make_actor(4096);
+    uint32_t b_id = b->actor_id;
+
+    /* Destroy the target — this should unregister it from the registry. */
+    sta_actor_destroy(b);
+
+    STA_OOP sel = intern("ping");
+    int rc = sta_actor_send_msg(g_vm, a, b_id, sel, NULL, 0);
+    assert(rc == STA_ERR_ACTOR_DEAD);
+
+    sta_actor_destroy(a);
+}
+
+static void test_send_after_unregister(void) {
+    struct STA_Actor *a = make_actor(4096);
+    struct STA_Actor *b = make_actor(4096);
+    uint32_t b_id = b->actor_id;
+
+    /* Manually unregister the target from the registry. */
+    sta_registry_unregister(g_vm->registry, b_id);
+
+    STA_OOP sel = intern("ping");
+    int rc = sta_actor_send_msg(g_vm, a, b_id, sel, NULL, 0);
+    assert(rc == STA_ERR_ACTOR_DEAD);
+
+    /* Re-register before destroy so sta_actor_destroy doesn't double-unregister. */
+    sta_registry_register(g_vm->registry, b);
     sta_actor_destroy(a);
     sta_actor_destroy(b);
 }
@@ -328,6 +359,8 @@ int main(void) {
     RUN(test_send_preserves_sender_id);
     RUN(test_send_heap_isolation);
     RUN(test_send_fifo_order);
+    RUN(test_send_to_dead_actor);
+    RUN(test_send_after_unregister);
 
     teardown();
     printf("\n%d/%d tests passed\n", tests_passed, tests_run);

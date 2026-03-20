@@ -51,7 +51,6 @@ static void teardown(void) {
 static struct STA_Actor *make_actor(size_t heap_size) {
     struct STA_Actor *a = sta_actor_create(g_vm, heap_size, 512);
     assert(a != NULL);
-    a->actor_id = (uint32_t)(uintptr_t)a % 10000;
     return a;
 }
 
@@ -199,7 +198,7 @@ static void test_send_large_payload_to_small_heap(void) {
     STA_OOP sel = intern("process:");
     STA_OOP args[1] = { arr };
 
-    int rc = sta_actor_send_msg(src, tgt, sel, args, 1);
+    int rc = sta_actor_send_msg(g_vm, src, tgt->actor_id, sel, args, 1);
     assert(rc == 0);
 
     /* Dequeue and verify the message arrived intact. */
@@ -262,7 +261,7 @@ static void test_send_multiple_large_messages(void) {
         }
 
         STA_OOP args[1] = { arr };
-        int rc = sta_actor_send_msg(src, tgt, sel, args, 1);
+        int rc = sta_actor_send_msg(g_vm, src, tgt->actor_id, sel, args, 1);
         assert(rc == 0);
 
         /* Drain immediately — verify the message. */
@@ -309,7 +308,7 @@ static void test_send_deeply_nested_structure(void) {
     STA_OOP sel = intern("deep:");
     STA_OOP args[1] = { inner };
 
-    int rc = sta_actor_send_msg(src, tgt, sel, args, 1);
+    int rc = sta_actor_send_msg(g_vm, src, tgt->actor_id, sel, args, 1);
     assert(rc == 0);
 
     STA_MailboxMsg *msg = sta_mailbox_dequeue(&tgt->mailbox);
@@ -342,7 +341,7 @@ static void test_send_small_payload_no_regression(void) {
     STA_OOP sel = intern("small:");
     STA_OOP args[1] = { STA_SMALLINT_OOP(42) };
 
-    int rc = sta_actor_send_msg(src, tgt, sel, args, 1);
+    int rc = sta_actor_send_msg(g_vm, src, tgt->actor_id, sel, args, 1);
     assert(rc == 0);
 
     /* Heap should not have grown. */
@@ -372,7 +371,7 @@ static void test_send_all_immediates_no_growth(void) {
         sym
     };
 
-    int rc = sta_actor_send_msg(src, tgt, sel, args, 3);
+    int rc = sta_actor_send_msg(g_vm, src, tgt->actor_id, sel, args, 3);
     assert(rc == 0);
 
     /* Heap should not have grown (args array + 3 immediates fits easily). */

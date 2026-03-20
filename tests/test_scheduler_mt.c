@@ -70,16 +70,15 @@ static void test_two_threads_two_actors(void) {
 
     struct STA_Actor *a1 = make_child_actor(vm);
     struct STA_Actor *a2 = make_child_actor(vm);
-    a1->actor_id = 1;
-    a2->actor_id = 2;
+
 
     STA_OOP sel = intern(vm, "yourself");
     struct STA_Actor *root = vm->root_actor;
 
     /* Send 5 messages to each actor. */
     for (int i = 0; i < 5; i++) {
-        sta_actor_send_msg(root, a1, sel, NULL, 0);
-        sta_actor_send_msg(root, a2, sel, NULL, 0);
+        sta_actor_send_msg(vm, root, a1->actor_id, sel, NULL, 0);
+        sta_actor_send_msg(vm, root, a2->actor_id, sel, NULL, 0);
     }
 
     /* Wait for both to complete. */
@@ -122,7 +121,6 @@ static void test_four_actors_two_threads(void) {
     struct STA_Actor *actors[4];
     for (int i = 0; i < 4; i++) {
         actors[i] = make_child_actor(vm);
-        actors[i]->actor_id = (uint32_t)(10 + i);
     }
 
     STA_OOP sel = intern(vm, "yourself");
@@ -131,7 +129,7 @@ static void test_four_actors_two_threads(void) {
     /* Send 3 messages to each actor. */
     for (int i = 0; i < 4; i++) {
         for (int j = 0; j < 3; j++) {
-            sta_actor_send_msg(root, actors[i], sel, NULL, 0);
+            sta_actor_send_msg(vm, root, actors[i]->actor_id, sel, NULL, 0);
         }
     }
 
@@ -169,7 +167,7 @@ static void test_actor_exclusivity(void) {
     assert(rc == 0);
 
     struct STA_Actor *child = make_child_actor(vm);
-    child->actor_id = 50;
+
 
     STA_OOP sel = intern(vm, "yourself");
     struct STA_Actor *root = vm->root_actor;
@@ -177,7 +175,7 @@ static void test_actor_exclusivity(void) {
     /* Send many messages to a single actor — even with 2 threads,
      * the actor should only be executed by one thread at a time. */
     for (int i = 0; i < 20; i++) {
-        sta_actor_send_msg(root, child, sel, NULL, 0);
+        sta_actor_send_msg(vm, root, child->actor_id, sel, NULL, 0);
     }
 
     bool done = wait_for_suspended(child, 2000);
@@ -225,7 +223,6 @@ static void test_concurrent_sends(void) {
     struct STA_Actor *actors[3];
     for (int i = 0; i < 3; i++) {
         actors[i] = make_child_actor(vm);
-        actors[i]->actor_id = (uint32_t)(100 + i);
     }
 
     STA_OOP sel = intern(vm, "yourself");
@@ -234,7 +231,7 @@ static void test_concurrent_sends(void) {
     /* Send 10 messages in interleaved order. */
     for (int round = 0; round < 10; round++) {
         for (int i = 0; i < 3; i++) {
-            sta_actor_send_msg(root, actors[i], sel, NULL, 0);
+            sta_actor_send_msg(vm, root, actors[i]->actor_id, sel, NULL, 0);
         }
     }
 
@@ -292,8 +289,7 @@ static void test_preemption_multithread(void) {
     /* Create 2 actors with long-running methods. */
     struct STA_Actor *a1 = make_child_actor(vm);
     struct STA_Actor *a2 = make_child_actor(vm);
-    a1->actor_id = 200;
-    a2->actor_id = 201;
+
 
     install_method(vm, a1,
         "longLoop\n"
@@ -314,8 +310,8 @@ static void test_preemption_multithread(void) {
     STA_OOP sel = intern(vm, "longLoop");
     struct STA_Actor *root = vm->root_actor;
 
-    sta_actor_send_msg(root, a1, sel, NULL, 0);
-    sta_actor_send_msg(root, a2, sel, NULL, 0);
+    sta_actor_send_msg(vm, root, a1->actor_id, sel, NULL, 0);
+    sta_actor_send_msg(vm, root, a2->actor_id, sel, NULL, 0);
 
     bool done1 = wait_for_suspended(a1, 3000);
     bool done2 = wait_for_suspended(a2, 3000);
