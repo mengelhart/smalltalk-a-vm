@@ -414,6 +414,15 @@ target_compile_definitions(test_eval_integration PRIVATE
 target_link_libraries(test_eval_integration PRIVATE sta_vm Threads::Threads)
 add_test(NAME eval_integration COMMAND test_eval_integration)
 
+add_executable(test_scheduler_stress test_scheduler_stress.c)
+target_include_directories(test_scheduler_stress PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_compile_definitions(test_scheduler_stress PRIVATE
+    KERNEL_DIR="${CMAKE_SOURCE_DIR}/kernel")
+target_link_libraries(test_scheduler_stress PRIVATE sta_vm Threads::Threads)
+add_test(NAME scheduler_stress COMMAND test_scheduler_stress)
+set_tests_properties(scheduler_stress PROPERTIES TIMEOUT 30)
+
 # ── Spike 002: MPSC mailbox — TSan correctness gate ───────────────────────
 find_package(Threads REQUIRED)
 
