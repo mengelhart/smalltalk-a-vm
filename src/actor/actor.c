@@ -3,6 +3,7 @@
  * See actor.h for documentation.
  */
 #include "actor.h"
+#include "registry.h"
 #include "supervisor.h"
 #include "deep_copy.h"
 #include "mailbox_msg.h"
@@ -60,7 +61,16 @@ struct STA_Actor *sta_actor_create(struct STA_VM *vm,
 
     /* Lifecycle state. */
     atomic_store_explicit(&actor->state, STA_ACTOR_CREATED, memory_order_relaxed);
-    actor->actor_id = 0;  /* assigned by VM or scheduler */
+
+    /* Assign a unique actor_id from the VM's atomic counter.
+     * If no VM is provided (test-only path), leave at 0. */
+    if (vm) {
+        actor->actor_id = atomic_fetch_add_explicit(
+            &vm->next_actor_id, 1, memory_order_relaxed);
+    } else {
+        actor->actor_id = 0;
+    }
+
     actor->next_runnable = NULL;
 
     /* Initialize mailbox with default capacity. */
@@ -78,11 +88,21 @@ struct STA_Actor *sta_actor_create(struct STA_VM *vm,
     actor->supervisor = NULL;
     actor->sup_data = NULL;
 
+    /* Register in the VM-wide actor registry. */
+    if (vm && vm->registry) {
+        sta_registry_register(vm->registry, actor);
+    }
+
     return actor;
 }
 
 void sta_actor_destroy(struct STA_Actor *actor) {
     if (!actor) return;
+
+    /* Unregister from the VM-wide actor registry before freeing. */
+    if (actor->vm && actor->vm->registry) {
+        sta_registry_unregister(actor->vm->registry, actor->actor_id);
+    }
 
     /* If this actor is a supervisor, destroy children depth-first. */
     if (actor->sup_data) {

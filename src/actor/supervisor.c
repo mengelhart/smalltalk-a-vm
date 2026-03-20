@@ -60,11 +60,8 @@ struct STA_Actor *sta_supervisor_add_child(struct STA_Actor *supervisor,
     child->supervisor = supervisor;
     child->behavior_class = behavior_class;
 
-    /* Assign a unique actor_id. Use a simple atomic counter on the VM.
-     * For now, use a non-atomic increment — Story 1 is single-threaded.
-     * The scheduler assigns proper IDs in production. */
-    static uint32_t next_id = 100;
-    child->actor_id = next_id++;
+    /* actor_id is now assigned by sta_actor_create via the VM's
+     * atomic counter, and registered in the VM-wide registry. */
 
     /* Create child spec. */
     STA_ChildSpec *spec = calloc(1, sizeof(STA_ChildSpec));
@@ -126,9 +123,7 @@ static struct STA_Actor *restart_child(struct STA_Actor *supervisor,
     child->supervisor = supervisor;
     child->behavior_class = spec->behavior_class;
 
-    /* Assign new actor_id. */
-    static uint32_t restart_id = 10000;
-    child->actor_id = restart_id++;
+    /* actor_id assigned by sta_actor_create via VM's atomic counter. */
 
     /* Allocate a behavior_obj on the child's heap (instance of behavior_class).
      * Need to get the class index from the class table. */

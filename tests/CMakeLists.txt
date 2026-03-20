@@ -534,6 +534,13 @@ target_link_libraries(test_supervision_stress PRIVATE sta_vm Threads::Threads)
 add_test(NAME supervision_stress COMMAND test_supervision_stress)
 set_tests_properties(supervision_stress PROPERTIES TIMEOUT 60)
 
+# ── Actor Registry (Cleanup Story 1) ─────────────────────────────────
+add_executable(test_actor_registry test_actor_registry.c)
+target_include_directories(test_actor_registry PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(test_actor_registry PRIVATE sta_vm)
+add_test(NAME actor_registry COMMAND test_actor_registry)
+
 # ── Spike 002: MPSC mailbox — TSan correctness gate ───────────────────────
 find_package(Threads REQUIRED)
 

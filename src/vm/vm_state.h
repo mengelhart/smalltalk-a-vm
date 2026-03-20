@@ -24,6 +24,7 @@
 #include "handle.h"
 #include <sta/vm.h>
 #include <stdbool.h>
+#include <stdatomic.h>
 
 /* ── STA_ExecContext ───────────────────────────────────────────────────── */
 
@@ -62,8 +63,14 @@ struct STA_VM {
 
     /* Root supervisor — top of the supervision tree. Created at VM init.
      * All actors created via sta_vm_spawn_supervised become children of
-     * the root supervisor. The root supervisor's supervisor is NULL. */
+     * the root supervisor. */
     struct STA_Actor    *root_supervisor;
+
+    /* Actor registry — VM-wide actor_id → STA_Actor* lookup table. */
+    struct STA_ActorRegistry *registry;
+
+    /* Next actor ID counter — atomic for thread-safe assignment. */
+    _Atomic uint32_t next_actor_id;
 
     /* Scheduler — optionally started for multi-core execution. */
     struct STA_Scheduler *scheduler;
