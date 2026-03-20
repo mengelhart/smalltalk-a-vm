@@ -525,6 +525,15 @@ target_compile_definitions(test_supervision_tree PRIVATE
 target_link_libraries(test_supervision_tree PRIVATE sta_vm Threads::Threads)
 add_test(NAME supervision_tree COMMAND test_supervision_tree)
 
+add_executable(test_supervision_stress test_supervision_stress.c)
+target_include_directories(test_supervision_stress PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_compile_definitions(test_supervision_stress PRIVATE
+    KERNEL_DIR="${CMAKE_SOURCE_DIR}/kernel")
+target_link_libraries(test_supervision_stress PRIVATE sta_vm Threads::Threads)
+add_test(NAME supervision_stress COMMAND test_supervision_stress)
+set_tests_properties(supervision_stress PROPERTIES TIMEOUT 60)
+
 # ── Spike 002: MPSC mailbox — TSan correctness gate ───────────────────────
 find_package(Threads REQUIRED)
 
