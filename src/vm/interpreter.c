@@ -278,12 +278,24 @@ static STA_OOP interpret_loop_ex(STA_VM *vm, STA_Frame *frame,
                     STA_OOP dnu_method = method_lookup(ct, recv_cls_idx, dnu_sel);
                     if (dnu_method != 0) {
                         found_method = dnu_method;
+                        /* GC safety: push send_receiver + send_args back
+                         * onto the expression stack to root them across
+                         * the Message/Array allocations below. */
+                        sta_stack_push(slab, send_receiver);
+                        for (uint8_t i = 0; i < arity; i++)
+                            sta_stack_push(slab, send_args[i]);
                         GC_SAVE_FRAME();
                         STA_ObjHeader *msg_h = sta_heap_alloc(heap, STA_CLS_MESSAGE, 3);
+                        STA_ObjHeader *arr_h = msg_h
+                            ? sta_heap_alloc(heap, STA_CLS_ARRAY, arity)
+                            : NULL;
+                        /* Re-read rooted args from expression stack. */
+                        for (int i = (int)arity - 1; i >= 0; i--)
+                            send_args[i] = sta_stack_pop(slab);
+                        send_receiver = sta_stack_pop(slab);
                         if (msg_h) {
                             STA_OOP *msg_slots = sta_payload(msg_h);
-                            msg_slots[0] = selector;
-                            STA_ObjHeader *arr_h = sta_heap_alloc(heap, STA_CLS_ARRAY, arity);
+                            msg_slots[0] = selector; /* Symbol — immutable */
                             if (arr_h) {
                                 STA_OOP *arr_slots = sta_payload(arr_h);
                                 for (uint8_t i = 0; i < arity; i++)
@@ -665,10 +677,13 @@ static STA_OOP interpret_loop_ex(STA_VM *vm, STA_Frame *frame,
 
             if (target == NULL) {
                 /* Home method already returned — signal BlockCannotReturn.
-                 * Create a BlockCannotReturn exception and signal it. */
+                 * Create a BlockCannotReturn exception and signal it.
+                 * GC safety: push result onto expression stack to root it. */
+                sta_stack_push(slab, result);
                 GC_SAVE_FRAME();
                 STA_ObjHeader *bcr_h = sta_heap_alloc(heap,
                     STA_CLS_BLOCKCANNOTRETURN, 4);
+                result = sta_stack_pop(slab);  /* re-read after potential GC */
                 if (bcr_h) {
                     STA_OOP *bcr_slots = sta_payload(bcr_h);
                     bcr_slots[0] = sta_spc_get(SPC_NIL); /* messageText */
@@ -834,6 +849,9 @@ STA_OOP sta_interpret(STA_VM *vm,
     STA_OOP mh = sta_method_header(method);
     if (STA_METHOD_LARGE_FRAME(mh)) {
         uint32_t ctx_size = (uint32_t)frame->arg_count + (uint32_t)frame->local_count;
+        /* GC safety: frame is on the slab with args/temps rooted.
+         * Set saved_frame so GC can walk the stack. */
+        if (actor) actor->saved_frame = frame;
         STA_ObjHeader *ctx_h = sta_heap_alloc(heap, STA_CLS_ARRAY, ctx_size);
         if (!ctx_h) {
             fprintf(stderr, "sta_interpret: failed to allocate context\n");
@@ -915,6 +933,8 @@ int sta_interpret_actor(STA_VM *vm, struct STA_Actor *actor,
     STA_OOP mh = sta_method_header(method);
     if (STA_METHOD_LARGE_FRAME(mh)) {
         uint32_t ctx_size = (uint32_t)frame->arg_count + (uint32_t)frame->local_count;
+        /* GC safety: frame is on slab with args/temps rooted. */
+        actor->saved_frame = frame;
         STA_ObjHeader *ctx_h = sta_heap_alloc(heap, STA_CLS_ARRAY, ctx_size);
         if (!ctx_h) return -1;
         STA_OOP *ctx_slots = sta_payload(ctx_h);

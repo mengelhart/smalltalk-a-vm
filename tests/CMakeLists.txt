@@ -444,6 +444,14 @@ target_compile_definitions(test_gc_roots PRIVATE
 target_link_libraries(test_gc_roots PRIVATE sta_vm)
 add_test(NAME gc_roots COMMAND test_gc_roots)
 
+add_executable(test_gc_safety test_gc_safety.c)
+target_include_directories(test_gc_safety PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_compile_definitions(test_gc_safety PRIVATE
+    KERNEL_DIR="${CMAKE_SOURCE_DIR}/kernel")
+target_link_libraries(test_gc_safety PRIVATE sta_vm)
+add_test(NAME gc_safety COMMAND test_gc_safety)
+
 # ── Spike 002: MPSC mailbox — TSan correctness gate ───────────────────────
 find_package(Threads REQUIRED)
 

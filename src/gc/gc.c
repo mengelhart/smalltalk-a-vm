@@ -11,6 +11,39 @@
  *      OOP slots to follow forwarding pointers.
  *   6. When scan catches up to alloc, GC is complete.
  *   7. Free old from-space; to-space becomes the active heap.
+ *
+ * ── GC safety audit (Story 4) ─────────────────────────────────────────
+ *
+ * Every sta_heap_alloc call site in interpreter.c and primitive_table.c
+ * was audited for GC safety. Status of each allocation site:
+ *
+ * interpreter.c — interpret_loop_ex:
+ *   L282  DNU Message alloc       FIXED  push send_args to stack, re-read after
+ *   L286  DNU Array alloc         FIXED  (same block as L282)
+ *   L451  context alloc (send)    SAFE   args/receiver in new frame on slab
+ *   L591  OP_BLOCK_COPY           SAFE   all values are SmallInts or frame fields
+ *   L625  OP_CLOSURE_COPY         SAFE   SmallInts + frame fields (rooted)
+ *   L670  OP_NLR BlockCannotReturn FIXED push result to stack, re-read after
+ *   L555  OP_PRIMITIVE dispatch   SAFE   GC_SAVE_FRAME before prim call
+ *
+ * interpreter.c — entry points:
+ *   L837  sta_interpret ctx alloc  FIXED  set actor->saved_frame before alloc
+ *   L918  sta_interpret_actor ctx  FIXED  set actor->saved_frame before alloc
+ *
+ * primitive_table.c:
+ *   prim 31 basicNew              FIXED  uses prim_alloc (GC-aware)
+ *   prim 32 basicNew:             FIXED  uses prim_alloc
+ *   prim 41 shallowCopy           FIXED  uses prim_alloc
+ *   prim 200 printString          FIXED  uses prim_alloc
+ *   prim 92 asString              FIXED  uses prim_alloc
+ *   prim 122 subclass (cls+meta)  FIXED  uses prim_alloc, cls rooted in class table
+ *   prim_sysdict_put              FIXED  uses prim_alloc via ctx
+ *
+ * deep_copy.c:
+ *   L175  copy_heap_object        SAFE   no unrooted OOPs; fails cleanly on full heap
+ *                                        (deep copy heap growth deferred — GitHub #295)
+ *
+ * bootstrap.c (all sites):        N/A    GC not running during bootstrap
  */
 #include "gc.h"
 #include "vm/oop.h"

@@ -1009,8 +1009,8 @@ static const char *string_bytes(STA_OOP str, size_t *out_len) {
     return (const char *)sta_payload(h);
 }
 
-static int prim_sysdict_put(STA_Heap *heap, STA_OOP dict, STA_OOP key_sym, STA_OOP value) {
-    STA_ObjHeader *ah = sta_heap_alloc(heap, STA_CLS_ASSOCIATION, 2);
+static int prim_sysdict_put(STA_ExecContext *ctx, STA_OOP dict, STA_OOP key_sym, STA_OOP value) {
+    STA_ObjHeader *ah = prim_alloc(ctx, STA_CLS_ASSOCIATION, 2);
     if (!ah) return -1;
     sta_payload(ah)[0] = key_sym;
     sta_payload(ah)[1] = value;
@@ -1094,14 +1094,17 @@ static int prim_subclass(STA_ExecContext *ctx, STA_OOP *args, uint8_t nargs, STA
         return STA_PRIM_NO_MEMORY;
     }
 
-    STA_ObjHeader *cls_h = sta_heap_alloc(heap, meta_index, 4);
+    STA_ObjHeader *cls_h = prim_alloc(ctx, meta_index, 4);
     if (!cls_h) {
         sta_class_table_set(&vm->class_table, cls_index, 0);
         return STA_PRIM_NO_MEMORY;
     }
+    /* GC safety: root cls in class table before the next allocation,
+     * so it survives if GC triggers during meta_h or dict allocs. */
     STA_OOP cls = (STA_OOP)(uintptr_t)cls_h;
+    sta_class_table_set(&vm->class_table, cls_index, cls);
 
-    STA_ObjHeader *meta_h = sta_heap_alloc(heap, STA_CLS_METACLASS, 4);
+    STA_ObjHeader *meta_h = prim_alloc(ctx, STA_CLS_METACLASS, 4);
     if (!meta_h) {
         sta_class_table_set(&vm->class_table, cls_index, 0);
         return STA_PRIM_NO_MEMORY;
@@ -1115,9 +1118,17 @@ static int prim_subclass(STA_ExecContext *ctx, STA_OOP *args, uint8_t nargs, STA
         return STA_PRIM_NO_MEMORY;
     }
 
+    /* GC safety: re-read cls from class table — may have moved during
+     * meta_h or dict allocations. meta/cls_md/meta_md are the most
+     * recently allocated objects and are still valid. superclass and
+     * name_sym are immutable (class objects / Symbols). */
+    cls = sta_class_table_get(&vm->class_table, cls_index);
+    cls_h = (STA_ObjHeader *)(uintptr_t)cls;
+
     STA_OOP nil_oop = vm->specials[SPC_NIL];
     STA_OOP meta_super = nil_oop;
     if (superclass != 0 && superclass != nil_oop) {
+        super_h = (STA_ObjHeader *)(uintptr_t)superclass;
         uint32_t super_meta_idx = super_h->class_index;
         meta_super = sta_class_table_get(&vm->class_table, super_meta_idx);
     }
@@ -1134,12 +1145,12 @@ static int prim_subclass(STA_ExecContext *ctx, STA_OOP *args, uint8_t nargs, STA
     meta_slots[STA_CLASS_SLOT_FORMAT]     = STA_FORMAT_ENCODE(4, STA_FMT_NORMAL);
     meta_slots[STA_CLASS_SLOT_NAME]       = nil_oop;
 
-    sta_class_table_set(&vm->class_table, cls_index, cls);
+    /* cls already set in class table above; update meta. */
     sta_class_table_set(&vm->class_table, meta_index, meta);
 
     STA_OOP sysdict = vm->specials[SPC_SMALLTALK];
     if (sysdict != 0 && sysdict != nil_oop)
-        prim_sysdict_put(heap, sysdict, name_sym, cls);
+        prim_sysdict_put(ctx, sysdict, name_sym, cls);
 
     *result = cls;
     return STA_PRIM_SUCCESS;
