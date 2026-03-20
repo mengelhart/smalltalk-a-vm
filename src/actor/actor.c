@@ -55,8 +55,9 @@ struct STA_Actor *sta_actor_create(struct STA_VM *vm,
     actor->signaled_exception = 0;
 
     /* Lifecycle state. */
-    actor->state = STA_ACTOR_CREATED;
+    atomic_store_explicit(&actor->state, STA_ACTOR_CREATED, memory_order_relaxed);
     actor->actor_id = 0;  /* assigned by VM or scheduler */
+    actor->next_runnable = NULL;
 
     /* Initialize mailbox with default capacity. */
     if (sta_mailbox_init(&actor->mailbox, STA_MAILBOX_DEFAULT_CAPACITY) != 0) {
@@ -81,7 +82,7 @@ void sta_actor_destroy(struct STA_Actor *actor) {
     sta_stack_slab_deinit(&actor->slab);
     sta_heap_deinit(&actor->heap);
 
-    actor->state = STA_ACTOR_TERMINATED;
+    atomic_store_explicit(&actor->state, STA_ACTOR_TERMINATED, memory_order_relaxed);
     free(actor);
 }
 

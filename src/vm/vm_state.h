@@ -60,6 +60,9 @@ struct STA_VM {
     /* Root actor — created after bootstrap; all execution runs inside it. */
     struct STA_Actor    *root_actor;
 
+    /* Scheduler — optionally started for multi-core execution. */
+    struct STA_Scheduler *scheduler;
+
     /* Handle table (per ADR 013: reference-counted, growable) */
     STA_HandleTable      handles;
 

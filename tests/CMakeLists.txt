@@ -363,6 +363,17 @@ target_compile_definitions(test_deep_copy PRIVATE
 target_link_libraries(test_deep_copy PRIVATE sta_vm)
 add_test(NAME deep_copy COMMAND test_deep_copy)
 
+# ── Phase 2 Epic 4: Scheduler ──────────────────────────────────────────
+find_package(Threads REQUIRED)
+
+add_executable(test_scheduler test_scheduler.c)
+target_include_directories(test_scheduler PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_compile_definitions(test_scheduler PRIVATE
+    KERNEL_DIR="${CMAKE_SOURCE_DIR}/kernel")
+target_link_libraries(test_scheduler PRIVATE sta_vm Threads::Threads)
+add_test(NAME scheduler COMMAND test_scheduler)
+
 # ── Spike 002: MPSC mailbox — TSan correctness gate ───────────────────────
 find_package(Threads REQUIRED)
 

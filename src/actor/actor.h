@@ -12,6 +12,7 @@
 #include "vm/handler.h"
 #include "vm/oop.h"
 #include "mailbox.h"
+#include <stdatomic.h>
 #include <stdint.h>
 
 /* Forward-declare STA_VM to avoid circular include. */
@@ -41,11 +42,14 @@ struct STA_Actor {
     STA_HandlerEntry *handler_top;
     STA_OOP           signaled_exception;
 
-    /* Lifecycle state machine */
-    uint32_t          state;
+    /* Lifecycle state machine (atomic for scheduler thread safety) */
+    _Atomic uint32_t  state;
 
     /* Actor identity */
     uint32_t          actor_id;
+
+    /* Intrusive run-queue link (scheduler only) */
+    struct STA_Actor *next_runnable;
 
     /* The actor's Smalltalk-level behavior class and object.
      * Messages dispatched to this actor are looked up in behavior_class
