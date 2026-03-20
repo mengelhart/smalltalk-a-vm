@@ -109,14 +109,12 @@ static void test_e2e_send_and_process(void) {
 
     struct STA_Actor *a = sta_actor_create(g_vm, 8192, 512);
     assert(a != NULL);
-    a->actor_id = 1;
 
     struct STA_Actor *b = make_actor_with_behavior(assoc_cls, 2);
-    b->actor_id = 2;
 
     /* A sends setValue: 42 to B. */
     STA_OOP args[] = { STA_SMALLINT_OOP(42) };
-    int rc = sta_actor_send_msg(a, b, intern("setValue:"), args, 1);
+    int rc = sta_actor_send_msg(g_vm, a, b->actor_id, intern("setValue:"), args, 1);
     assert(rc == 0);
 
     /* B processes the message. */
@@ -140,9 +138,7 @@ static void test_e2e_deep_copy_isolation(void) {
     install_method(assoc_cls, "setKey:", "setKey: k key := k", ivars, 2);
 
     struct STA_Actor *a = sta_actor_create(g_vm, 16384, 512);
-    a->actor_id = 1;
     struct STA_Actor *b = make_actor_with_behavior(assoc_cls, 2);
-    b->actor_id = 2;
 
     /* Create a mutable array on A's heap. */
     STA_ObjHeader *arr_h = sta_heap_alloc(&a->heap, STA_CLS_ARRAY, 3);
@@ -153,7 +149,7 @@ static void test_e2e_deep_copy_isolation(void) {
 
     /* Send it to B. */
     STA_OOP args[] = { arr };
-    sta_actor_send_msg(a, b, intern("setKey:"), args, 1);
+    sta_actor_send_msg(g_vm, a, b->actor_id, intern("setKey:"), args, 1);
     sta_actor_process_one(g_vm, b);
 
     /* B's key instVar should be a copy on B's heap. */
@@ -176,7 +172,6 @@ static void test_e2e_deep_copy_isolation(void) {
 
 static void test_bounded_mailbox_flow(void) {
     struct STA_Actor *a = sta_actor_create(g_vm, 4096, 512);
-    a->actor_id = 1;
     struct STA_Actor *b = sta_actor_create(g_vm, 4096, 512);
 
     /* Reinit B's mailbox with capacity 3. */
@@ -185,16 +180,16 @@ static void test_bounded_mailbox_flow(void) {
 
     STA_OOP sel = intern("x");
 
-    assert(sta_actor_send_msg(a, b, sel, NULL, 0) == 0);
-    assert(sta_actor_send_msg(a, b, sel, NULL, 0) == 0);
-    assert(sta_actor_send_msg(a, b, sel, NULL, 0) == 0);
-    assert(sta_actor_send_msg(a, b, sel, NULL, 0) == STA_ERR_MAILBOX_FULL);
+    assert(sta_actor_send_msg(g_vm, a, b->actor_id, sel, NULL, 0) == 0);
+    assert(sta_actor_send_msg(g_vm, a, b->actor_id, sel, NULL, 0) == 0);
+    assert(sta_actor_send_msg(g_vm, a, b->actor_id, sel, NULL, 0) == 0);
+    assert(sta_actor_send_msg(g_vm, a, b->actor_id, sel, NULL, 0) == STA_ERR_MAILBOX_FULL);
 
     /* Dequeue one manually, send should succeed again. */
     STA_MailboxMsg *msg = sta_mailbox_dequeue(&b->mailbox);
     sta_mailbox_msg_destroy(msg);
 
-    assert(sta_actor_send_msg(a, b, sel, NULL, 0) == 0);
+    assert(sta_actor_send_msg(g_vm, a, b->actor_id, sel, NULL, 0) == 0);
 
     sta_actor_destroy(a);
     sta_actor_destroy(b);
@@ -341,20 +336,17 @@ static void test_three_actor_chain(void) {
     /* Already installed from earlier tests: setValue:, setKey: */
 
     struct STA_Actor *a = sta_actor_create(g_vm, 8192, 512);
-    a->actor_id = 1;
     struct STA_Actor *b = make_actor_with_behavior(assoc_cls, 2);
-    b->actor_id = 2;
     struct STA_Actor *c = make_actor_with_behavior(assoc_cls, 2);
-    c->actor_id = 3;
 
     /* A sends setValue: 100 to B. */
     STA_OOP args1[] = { STA_SMALLINT_OOP(100) };
-    sta_actor_send_msg(a, b, intern("setValue:"), args1, 1);
+    sta_actor_send_msg(g_vm, a, b->actor_id, intern("setValue:"), args1, 1);
     sta_actor_process_one(g_vm, b);
 
     /* B sends setValue: 200 to C (manually, as B doesn't have send logic). */
     STA_OOP args2[] = { STA_SMALLINT_OOP(200) };
-    sta_actor_send_msg(b, c, intern("setValue:"), args2, 1);
+    sta_actor_send_msg(g_vm, b, c->actor_id, intern("setValue:"), args2, 1);
     sta_actor_process_one(g_vm, c);
 
     /* Verify B has value=100, C has value=200. */
@@ -372,7 +364,6 @@ static void test_same_message_to_multiple_actors(void) {
     STA_OOP assoc_cls = sta_class_table_get(&g_vm->class_table, STA_CLS_ASSOCIATION);
 
     struct STA_Actor *a = sta_actor_create(g_vm, 8192, 512);
-    a->actor_id = 1;
     struct STA_Actor *b = make_actor_with_behavior(assoc_cls, 2);
     struct STA_Actor *c = make_actor_with_behavior(assoc_cls, 2);
 
@@ -384,8 +375,8 @@ static void test_same_message_to_multiple_actors(void) {
 
     /* Send the same array to B and C. */
     STA_OOP args[] = { arr };
-    sta_actor_send_msg(a, b, intern("setKey:"), args, 1);
-    sta_actor_send_msg(a, c, intern("setKey:"), args, 1);
+    sta_actor_send_msg(g_vm, a, b->actor_id, intern("setKey:"), args, 1);
+    sta_actor_send_msg(g_vm, a, c->actor_id, intern("setKey:"), args, 1);
 
     sta_actor_process_one(g_vm, b);
     sta_actor_process_one(g_vm, c);

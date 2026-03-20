@@ -72,7 +72,6 @@ static struct STA_Actor *make_actor(void) {
     STA_ObjHeader *obj_h = sta_heap_alloc(&a->heap, STA_CLS_OBJECT, 0);
     assert(obj_h != NULL);
     a->behavior_obj = (STA_OOP)(uintptr_t)obj_h;
-    a->actor_id = 42;
     atomic_store_explicit(&a->state, STA_ACTOR_READY, memory_order_relaxed);
     return a;
 }
@@ -122,13 +121,11 @@ static void test_supervisor_receives_notification(void) {
     struct STA_Actor *sup = sta_actor_create(g_vm, 16384, 2048);
     assert(sup);
     sta_supervisor_init(sup, 3, 5);
-    sup->actor_id = 1;
     atomic_store_explicit(&sup->state, STA_ACTOR_SUSPENDED, memory_order_relaxed);
 
     /* Create worker with supervisor link. */
     struct STA_Actor *worker = make_actor();
     worker->supervisor = sup;
-    worker->actor_id = 42;
 
     /* Send 'crash' to worker. */
     STA_OOP sel = intern("crash");
@@ -156,7 +153,7 @@ static void test_supervisor_receives_notification(void) {
     assert(notif->args != NULL);
     STA_OOP id_oop = notif->args[0];
     assert(STA_IS_SMALLINT(id_oop));
-    assert(STA_SMALLINT_VAL(id_oop) == 42);
+    assert(STA_SMALLINT_VAL(id_oop) == (int64_t)worker->actor_id);
 
     /* args[1] should be a Symbol (the exception class name). */
     STA_OOP reason = notif->args[1];
@@ -257,7 +254,6 @@ static void test_scheduler_crash(void) {
     struct STA_Actor *sup = sta_actor_create(g_vm, 16384, 2048);
     assert(sup);
     sta_supervisor_init(sup, 3, 5);
-    sup->actor_id = 1;
     /* Supervisor needs behavior to be schedulable but won't process. */
     sup->behavior_class = obj_cls;
     STA_ObjHeader *sup_obj = sta_heap_alloc(&sup->heap, STA_CLS_OBJECT, 0);
@@ -271,7 +267,6 @@ static void test_scheduler_crash(void) {
     /* Create worker. */
     struct STA_Actor *worker = make_actor();
     worker->supervisor = sup;
-    worker->actor_id = 99;
     /* Set to SUSPENDED so auto-schedule CAS in send_msg will enqueue it. */
     atomic_store_explicit(&worker->state, STA_ACTOR_SUSPENDED, memory_order_relaxed);
 
@@ -281,7 +276,7 @@ static void test_scheduler_crash(void) {
 
     /* Send crash message — auto-schedule should pick it up. */
     STA_OOP sel = intern("crash");
-    sta_actor_send_msg(g_vm->root_actor, worker, sel, NULL, 0);
+    sta_actor_send_msg(g_vm, g_vm->root_actor, worker->actor_id, sel, NULL, 0);
 
     /* Wait for worker to terminate. */
     for (int i = 0; i < 200; i++) {

@@ -90,9 +90,16 @@ struct STA_Actor *sta_actor_create(struct STA_VM *vm,
 /* Destroy an actor — deinitialize heap and slab, free the struct. */
 void sta_actor_destroy(struct STA_Actor *actor);
 
+/* ── Error codes ────────────────────────────────────────────────────── */
+
+#define STA_ERR_ACTOR_DEAD  (-6)   /* target actor_id not in registry */
+
 /* ── Messaging (Epic 3) ─────────────────────────────────────────────── */
 
-/* Send an asynchronous message from sender to target.
+/* Send an asynchronous message from sender to target, identified by ID.
+ * Resolves target_id through the VM's actor registry. If the target no
+ * longer exists (destroyed or restarted), returns STA_ERR_ACTOR_DEAD.
+ *
  * - selector: a Symbol OOP (immutable, shared by pointer — never copied)
  * - args: array of argument OOPs on the sender's heap (may be NULL if nargs==0)
  * - nargs: number of arguments (0–255)
@@ -102,10 +109,12 @@ void sta_actor_destroy(struct STA_Actor *actor);
  * Fire-and-forget: returns immediately, no return value from target.
  *
  * Returns 0 on success.
+ * Returns STA_ERR_ACTOR_DEAD if target_id is not in the registry.
  * Returns STA_ERR_MAILBOX_FULL if the target's mailbox is at capacity.
  * Returns negative error on allocation failure. */
-int sta_actor_send_msg(struct STA_Actor *sender,
-                       struct STA_Actor *target,
+int sta_actor_send_msg(struct STA_VM *vm,
+                       struct STA_Actor *sender,
+                       uint32_t target_id,
                        STA_OOP selector,
                        STA_OOP *args, uint8_t nargs);
 

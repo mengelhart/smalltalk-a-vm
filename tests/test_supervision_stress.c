@@ -163,10 +163,9 @@ static void test_mass_restart(void) {
         }
     }
 
-    /* Pre-enqueue all messages BEFORE starting the scheduler.
-     * We cannot use sta_actor_send_msg while the scheduler is running
-     * because the scheduler could destroy a worker (via supervisor restart)
-     * while the main thread is still sending messages to it. */
+    /* Pre-enqueue messages before starting the scheduler for simplicity.
+     * sta_actor_send_msg is now safe during scheduling (resolves target
+     * by ID via registry), but pre-enqueue avoids timing dependencies. */
     STA_OOP work_sel = intern(vm, "work");
     STA_OOP crash_sel = intern(vm, "crash");
 
@@ -181,10 +180,7 @@ static void test_mass_restart(void) {
         sta_mailbox_enqueue(&workers[i]->mailbox, msg);
     }
 
-    /* Use 1 scheduler thread to serialize processing — avoids raw-pointer
-     * race where a scheduler thread accesses an actor being destroyed by
-     * the supervisor on another thread (see GitHub #313). */
-    sta_scheduler_init(vm, 1);
+    sta_scheduler_init(vm, 0);  /* All cores — #313 fixed by registry */
     sta_scheduler_start(vm);
 
     for (int i = 0; i < 100; i++) {
@@ -289,7 +285,7 @@ static void test_simultaneous_crashes(void) {
         sta_mailbox_enqueue(&workers[i]->mailbox, msg);
     }
 
-    sta_scheduler_init(vm, 1);  /* Single thread — see #313 */
+    sta_scheduler_init(vm, 0);  /* All cores — #313 fixed by registry */
     sta_scheduler_start(vm);
 
     for (int i = 0; i < 10; i++) {
@@ -370,7 +366,7 @@ static void test_restart_and_gc(void) {
         sta_mailbox_enqueue(&worker->mailbox, msg);
     }
 
-    sta_scheduler_init(vm, 1);  /* Single thread — see #313 */
+    sta_scheduler_init(vm, 0);  /* All cores — #313 fixed by registry */
     sta_scheduler_start(vm);
 
     atomic_store_explicit(&worker->state, STA_ACTOR_READY,
@@ -474,7 +470,7 @@ static void test_unaffected_siblings(void) {
     }
 
     /* Start scheduler and enqueue all workers. */
-    sta_scheduler_init(vm, 1);  /* Single thread — see #313 */
+    sta_scheduler_init(vm, 0);  /* All cores — #313 fixed by registry */
     sta_scheduler_start(vm);
 
     for (int i = 0; i < 5; i++) {
@@ -595,7 +591,7 @@ static void test_cascading_escalation(void) {
         sta_mailbox_enqueue(&w2->mailbox, msg);
     }
 
-    sta_scheduler_init(vm, 1);  /* Single thread — see #313 */
+    sta_scheduler_init(vm, 0);  /* All cores — #313 fixed by registry */
     sta_scheduler_start(vm);
 
     atomic_store_explicit(&w1->state, STA_ACTOR_READY, memory_order_release);

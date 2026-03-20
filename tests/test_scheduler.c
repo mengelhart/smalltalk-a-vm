@@ -77,8 +77,7 @@ static void test_enqueue_overflow(void) {
     struct STA_Actor *a1 = sta_actor_create(vm, 1024, 512);
     struct STA_Actor *a2 = sta_actor_create(vm, 1024, 512);
     assert(a1 && a2);
-    a1->actor_id = 10;
-    a2->actor_id = 20;
+
 
     STA_Scheduler *sched = vm->scheduler;
 
@@ -102,7 +101,6 @@ static void test_single_actor_dispatch(void) {
     /* Create a child actor with a simple method. */
     struct STA_Actor *child = sta_actor_create(vm, 4096, 2048);
     assert(child != NULL);
-    child->actor_id = 42;
     child->vm = vm;
 
     /* Set up actor behavior: use Object class (has methods via bootstrap).
@@ -120,7 +118,7 @@ static void test_single_actor_dispatch(void) {
 
     /* Use the root actor as sender. */
     struct STA_Actor *root = vm->root_actor;
-    int send_rc = sta_actor_send_msg(root, child, yourself_sel, NULL, 0);
+    int send_rc = sta_actor_send_msg(vm, root, child->actor_id, yourself_sel, NULL, 0);
     assert(send_rc == 0);
     assert(!sta_mailbox_is_empty(&child->mailbox));
 
@@ -166,7 +164,6 @@ static void test_multiple_messages(void) {
 
     struct STA_Actor *child = sta_actor_create(vm, 4096, 2048);
     assert(child != NULL);
-    child->actor_id = 43;
     child->vm = vm;
 
     STA_OOP obj_cls = sta_class_table_get(&vm->class_table, STA_CLS_OBJECT);
@@ -181,7 +178,7 @@ static void test_multiple_messages(void) {
     /* Send 5 messages. */
     struct STA_Actor *root = vm->root_actor;
     for (int i = 0; i < 5; i++) {
-        int send_rc = sta_actor_send_msg(root, child, yourself_sel, NULL, 0);
+        int send_rc = sta_actor_send_msg(vm, root, child->actor_id, yourself_sel, NULL, 0);
         assert(send_rc == 0);
     }
     assert(sta_mailbox_count(&child->mailbox) == 5);

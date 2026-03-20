@@ -144,12 +144,11 @@ static void test_eval_concurrent_with_actors(void) {
 
     /* Start a long-running actor. */
     struct STA_Actor *child = make_child_actor(vm);
-    child->actor_id = 500;
     install_method(vm, child,
         "work | i | i := 0. [i < 5000] whileTrue: [i := i + 1]. ^ i",
         "work");
     STA_OOP sel = intern(vm, "work");
-    sta_actor_send_msg(vm->root_actor, child, sel, NULL, 0);
+    sta_actor_send_msg(vm, vm->root_actor, child->actor_id, sel, NULL, 0);
 
     /* While the actor is running, do sta_eval on the main thread. */
     for (int i = 0; i < 5; i++) {
@@ -191,9 +190,8 @@ static void test_multiple_evals_with_scheduler(void) {
     STA_OOP sel = intern(vm, "yourself");
     for (int i = 0; i < 3; i++) {
         actors[i] = make_child_actor(vm);
-        actors[i]->actor_id = (uint32_t)(600 + i);
         for (int j = 0; j < 5; j++) {
-            sta_actor_send_msg(vm->root_actor, actors[i], sel, NULL, 0);
+            sta_actor_send_msg(vm, vm->root_actor, actors[i]->actor_id, sel, NULL, 0);
         }
     }
 

@@ -149,13 +149,12 @@ static void test_10_actors_100_gc_messages(void) {
     for (int i = 0; i < T1_ACTORS; i++) {
         /* 256-byte heap — forces GC frequently. */
         actors[i] = make_gc_actor(vm, assoc_cls, 2, 256);
-        actors[i]->actor_id = (uint32_t)(100 + i);
     }
 
     /* Send T1_MSGS messages to each actor. */
     for (int msg = 0; msg < T1_MSGS; msg++) {
         for (int i = 0; i < T1_ACTORS; i++) {
-            sta_actor_send_msg(vm->root_actor, actors[i], sel, NULL, 0);
+            sta_actor_send_msg(vm, vm->root_actor, actors[i]->actor_id, sel, NULL, 0);
         }
     }
 
@@ -227,7 +226,6 @@ static void test_mixed_retention(void) {
 
     for (int i = 0; i < T2_ACTORS; i++) {
         actors[i] = make_gc_actor(vm, assoc_cls, 2, 256);
-        actors[i]->actor_id = (uint32_t)(200 + i);
     }
 
     /* Even-indexed actors get "garbage" messages (pure compute).
@@ -235,7 +233,7 @@ static void test_mixed_retention(void) {
     for (int msg = 0; msg < 50; msg++) {
         for (int i = 0; i < T2_ACTORS; i++) {
             const char *sel_name = (i % 2 == 0) ? "garbage" : "retain";
-            sta_actor_send_msg(vm->root_actor, actors[i],
+            sta_actor_send_msg(vm, vm->root_actor, actors[i]->actor_id,
                                 intern(vm, sel_name), NULL, 0);
         }
     }
@@ -301,14 +299,13 @@ static void test_gc_loop_scheduled(void) {
 
     for (int i = 0; i < T3_ACTORS; i++) {
         actors[i] = make_gc_actor(vm, assoc_cls, 2, 256);
-        actors[i]->actor_id = (uint32_t)(300 + i);
     }
 
     /* Each actor gets 10 messages, each running a 20-iteration loop. */
     STA_OOP sel = intern(vm, "loopAlloc");
     for (int msg = 0; msg < 10; msg++) {
         for (int i = 0; i < T3_ACTORS; i++) {
-            sta_actor_send_msg(vm->root_actor, actors[i], sel, NULL, 0);
+            sta_actor_send_msg(vm, vm->root_actor, actors[i]->actor_id, sel, NULL, 0);
         }
     }
 
@@ -370,13 +367,12 @@ static void test_stress_100x500(void) {
     for (int i = 0; i < T4_ACTORS; i++) {
         /* 512-byte heap — room for behavior_obj + a few objects before GC. */
         actors[i] = make_gc_actor(vm, assoc_cls, 2, 512);
-        actors[i]->actor_id = (uint32_t)(1000 + i);
     }
 
     /* Send all messages. */
     for (int msg = 0; msg < T4_MSGS; msg++) {
         for (int i = 0; i < T4_ACTORS; i++) {
-            sta_actor_send_msg(vm->root_actor, actors[i], sel, NULL, 0);
+            sta_actor_send_msg(vm, vm->root_actor, actors[i]->actor_id, sel, NULL, 0);
         }
     }
 
@@ -460,8 +456,7 @@ static void test_gc_with_preemption(void) {
 
     for (int i = 0; i < T5_ACTORS; i++) {
         actors[i] = make_gc_actor(vm, assoc_cls, 2, 256);
-        actors[i]->actor_id = (uint32_t)(500 + i);
-        sta_actor_send_msg(vm->root_actor, actors[i], sel, NULL, 0);
+        sta_actor_send_msg(vm, vm->root_actor, actors[i]->actor_id, sel, NULL, 0);
     }
 
     bool done = wait_all_suspended(actors, T5_ACTORS, 15000);
@@ -524,10 +519,9 @@ static void test_concurrent_gc_all_cores(void) {
 
     for (uint32_t i = 0; i < nactors; i++) {
         actors[i] = make_gc_actor(vm, assoc_cls, 2, 256);
-        actors[i]->actor_id = (uint32_t)(600 + i);
         /* Send many messages to sustain GC pressure. */
         for (int m = 0; m < 100; m++) {
-            sta_actor_send_msg(vm->root_actor, actors[i], sel, NULL, 0);
+            sta_actor_send_msg(vm, vm->root_actor, actors[i]->actor_id, sel, NULL, 0);
         }
     }
 

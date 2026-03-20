@@ -71,7 +71,6 @@ static struct STA_Actor *make_supervisor(void) {
     STA_ObjHeader *obj_h = sta_heap_alloc(&sup->heap, STA_CLS_OBJECT, 0);
     assert(obj_h);
     sup->behavior_obj = (STA_OOP)(uintptr_t)obj_h;
-    sup->actor_id = 1;
     atomic_store_explicit(&sup->state, STA_ACTOR_SUSPENDED, memory_order_relaxed);
     return sup;
 }
@@ -289,7 +288,7 @@ static void test_scheduler_restart(void) {
 
     /* Send crash message. */
     STA_OOP crash_sel = intern("crash");
-    sta_actor_send_msg(g_vm->root_actor, child, crash_sel, NULL, 0);
+    sta_actor_send_msg(g_vm, g_vm->root_actor, child->actor_id, crash_sel, NULL, 0);
 
     /* Wait for the scheduler to process crash → notify → restart.
      * Sleep long enough, then stop the scheduler so all threads are joined

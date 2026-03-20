@@ -6,6 +6,7 @@
 #include "vm/special_objects.h"
 #include "vm/class_table.h"
 #include "actor/actor.h"
+#include "actor/registry.h"
 #include "actor/supervisor.h"
 #include "scheduler/scheduler.h"
 #include "bootstrap/bootstrap.h"
@@ -44,7 +45,8 @@ static void set_error(STA_VM *vm, const char *fmt, ...) {
 #define INIT_SYMTAB  (1u << 2)
 #define INIT_CLASSTAB (1u << 3)
 #define INIT_SLAB    (1u << 4)
-#define INIT_HANDLES (1u << 5)
+#define INIT_HANDLES  (1u << 5)
+#define INIT_REGISTRY (1u << 6)
 
 static int file_exists(const char *path) {
     FILE *f = fopen(path, "rb");
@@ -98,6 +100,16 @@ STA_VM* sta_vm_create(const STA_VMConfig* config) {
         set_error(vm, "handle table allocation failed"); goto fail;
     }
     inited |= INIT_HANDLES;
+
+    vm->registry = sta_registry_create(64);
+    if (!vm->registry) {
+        set_error(vm, "actor registry allocation failed"); goto fail;
+    }
+    inited |= INIT_REGISTRY;
+
+    /* Initialize actor ID counter. Root actor (manually created) gets ID 1;
+     * all subsequent actors get IDs from this counter via sta_actor_create. */
+    atomic_store_explicit(&vm->next_actor_id, 2, memory_order_relaxed);
 
     /* Bind special objects to this VM's inline array. */
     sta_special_objects_bind(vm->specials);
@@ -187,6 +199,9 @@ STA_VM* sta_vm_create(const STA_VMConfig* config) {
         }
 
         vm->root_actor = root;
+
+        /* Register root actor in the registry. */
+        sta_registry_register(vm->registry, root);
     }
 
     /* Create root supervisor — top of the supervision tree.
@@ -206,7 +221,7 @@ STA_VM* sta_vm_create(const STA_VMConfig* config) {
             goto fail;
         }
         rsup->behavior_obj = (STA_OOP)(uintptr_t)obj_h;
-        rsup->actor_id = 2;  /* root_actor is 1 */
+        /* actor_id assigned and registered by sta_actor_create. */
         rsup->supervisor = NULL;  /* root of the tree */
         atomic_store_explicit(&rsup->state, STA_ACTOR_SUSPENDED,
                               memory_order_relaxed);
@@ -223,6 +238,7 @@ STA_VM* sta_vm_create(const STA_VMConfig* config) {
     return vm;
 
 fail:
+    if (inited & INIT_REGISTRY) sta_registry_destroy(vm->registry);
     if (inited & INIT_HANDLES) sta_handle_table_destroy(&vm->handles);
     if (inited & INIT_SLAB)     sta_stack_slab_deinit(&vm->slab);
     if (inited & INIT_CLASSTAB) sta_class_table_deinit(&vm->class_table);
@@ -267,6 +283,13 @@ void sta_vm_destroy(STA_VM* vm) {
         /* No root actor — VM still owns heap and slab (failed early). */
         sta_stack_slab_deinit(&vm->slab);
         sta_heap_deinit(&vm->heap);
+    }
+
+    /* Destroy registry AFTER all actors — unregister calls during
+     * actor teardown need the registry to still be alive. */
+    if (vm->registry) {
+        sta_registry_destroy(vm->registry);
+        vm->registry = NULL;
     }
 
     sta_class_table_deinit(&vm->class_table);
