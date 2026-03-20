@@ -12,6 +12,7 @@
 #include "vm/handler.h"
 #include "vm/oop.h"
 #include "mailbox.h"
+#include <stdatomic.h>
 #include <stdint.h>
 
 /* Forward-declare STA_VM to avoid circular include. */
@@ -41,11 +42,14 @@ struct STA_Actor {
     STA_HandlerEntry *handler_top;
     STA_OOP           signaled_exception;
 
-    /* Lifecycle state machine */
-    uint32_t          state;
+    /* Lifecycle state machine (atomic for scheduler thread safety) */
+    _Atomic uint32_t  state;
 
     /* Actor identity */
     uint32_t          actor_id;
+
+    /* Intrusive run-queue link (scheduler only) */
+    struct STA_Actor *next_runnable;
 
     /* The actor's Smalltalk-level behavior class and object.
      * Messages dispatched to this actor are looked up in behavior_class
@@ -55,6 +59,11 @@ struct STA_Actor {
 
     /* MPSC mailbox — Vyukov linked list, bounded, per ADR 008 */
     STA_Mailbox       mailbox;
+
+    /* Preemption: saved frame pointer when actor is suspended mid-execution.
+     * NULL means the actor is not mid-execution (start fresh from mailbox).
+     * Non-NULL means the actor was preempted and should resume here. */
+    struct STA_Frame *saved_frame;
 
     /* Supervisor linkage — NULL placeholder, wired in Epic 6 */
     void             *supervisor;
@@ -94,17 +103,34 @@ int sta_actor_send_msg(struct STA_Actor *sender,
 
 /* ── Message dispatch (Epic 3 Story 5) ───────────────────────────────── */
 
+/* Return codes for sta_actor_process_one. */
+#define STA_ACTOR_MSG_PROCESSED  1
+#define STA_ACTOR_MSG_EMPTY      0
+#define STA_ACTOR_MSG_ERROR     (-1)
+#define STA_ACTOR_MSG_PREEMPTED  2
+
 /* Process one message from the actor's mailbox.
  *
- * 1. Dequeue one message from the mailbox.
- * 2. Look up the selector in the actor's behavior_class hierarchy.
- * 3. Execute the method with the actor's behavior_obj as receiver
+ * 1. If actor->saved_frame is set, resume preempted execution.
+ * 2. Otherwise, dequeue one message from the mailbox.
+ * 3. Look up the selector in the actor's behavior_class hierarchy.
+ * 4. Execute the method with the actor's behavior_obj as receiver
  *    and the message's copied arguments.
- * 4. Free the message envelope.
+ * 5. Free the message envelope.
  *
  * The actor must have behavior_class and behavior_obj set.
  * Execution uses the actor's own heap and stack slab.
  *
- * Returns 1 if a message was processed, 0 if mailbox was empty,
- * negative on error (method not found, etc.). */
+ * Returns:
+ *   STA_ACTOR_MSG_PROCESSED (1) — message completed
+ *   STA_ACTOR_MSG_EMPTY     (0) — mailbox was empty
+ *   STA_ACTOR_MSG_ERROR    (-1) — method not found, etc.
+ *   STA_ACTOR_MSG_PREEMPTED (2) — actor preempted mid-execution
+ *
+ * When use_preemption is true, the interpreter may preempt the actor
+ * after STA_REDUCTION_QUOTA reductions, saving state on actor->saved_frame.
+ * When false, the method runs to completion (backward compat). */
 int sta_actor_process_one(struct STA_VM *vm, struct STA_Actor *actor);
+
+/* Preemption-aware variant for the scheduler. */
+int sta_actor_process_one_preemptible(struct STA_VM *vm, struct STA_Actor *actor);

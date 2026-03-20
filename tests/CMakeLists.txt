@@ -363,6 +363,66 @@ target_compile_definitions(test_deep_copy PRIVATE
 target_link_libraries(test_deep_copy PRIVATE sta_vm)
 add_test(NAME deep_copy COMMAND test_deep_copy)
 
+# ── Phase 2 Epic 4: Scheduler ──────────────────────────────────────────
+find_package(Threads REQUIRED)
+
+add_executable(test_scheduler test_scheduler.c)
+target_include_directories(test_scheduler PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_compile_definitions(test_scheduler PRIVATE
+    KERNEL_DIR="${CMAKE_SOURCE_DIR}/kernel")
+target_link_libraries(test_scheduler PRIVATE sta_vm Threads::Threads)
+add_test(NAME scheduler COMMAND test_scheduler)
+
+add_executable(test_scheduler_auto test_scheduler_auto.c)
+target_include_directories(test_scheduler_auto PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_compile_definitions(test_scheduler_auto PRIVATE
+    KERNEL_DIR="${CMAKE_SOURCE_DIR}/kernel")
+target_link_libraries(test_scheduler_auto PRIVATE sta_vm Threads::Threads)
+add_test(NAME scheduler_auto COMMAND test_scheduler_auto)
+
+add_executable(test_preemption test_preemption.c)
+target_include_directories(test_preemption PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_compile_definitions(test_preemption PRIVATE
+    KERNEL_DIR="${CMAKE_SOURCE_DIR}/kernel")
+target_link_libraries(test_preemption PRIVATE sta_vm Threads::Threads)
+add_test(NAME preemption COMMAND test_preemption)
+
+add_executable(test_scheduler_mt test_scheduler_mt.c)
+target_include_directories(test_scheduler_mt PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_compile_definitions(test_scheduler_mt PRIVATE
+    KERNEL_DIR="${CMAKE_SOURCE_DIR}/kernel")
+target_link_libraries(test_scheduler_mt PRIVATE sta_vm Threads::Threads)
+add_test(NAME scheduler_mt COMMAND test_scheduler_mt)
+
+add_executable(test_work_stealing test_work_stealing.c)
+target_include_directories(test_work_stealing PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_compile_definitions(test_work_stealing PRIVATE
+    KERNEL_DIR="${CMAKE_SOURCE_DIR}/kernel")
+target_link_libraries(test_work_stealing PRIVATE sta_vm Threads::Threads)
+add_test(NAME work_stealing COMMAND test_work_stealing)
+
+add_executable(test_eval_integration test_eval_integration.c)
+target_include_directories(test_eval_integration PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_compile_definitions(test_eval_integration PRIVATE
+    KERNEL_DIR="${CMAKE_SOURCE_DIR}/kernel")
+target_link_libraries(test_eval_integration PRIVATE sta_vm Threads::Threads)
+add_test(NAME eval_integration COMMAND test_eval_integration)
+
+add_executable(test_scheduler_stress test_scheduler_stress.c)
+target_include_directories(test_scheduler_stress PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_compile_definitions(test_scheduler_stress PRIVATE
+    KERNEL_DIR="${CMAKE_SOURCE_DIR}/kernel")
+target_link_libraries(test_scheduler_stress PRIVATE sta_vm Threads::Threads)
+add_test(NAME scheduler_stress COMMAND test_scheduler_stress)
+set_tests_properties(scheduler_stress PROPERTIES TIMEOUT 30)
+
 # ── Spike 002: MPSC mailbox — TSan correctness gate ───────────────────────
 find_package(Threads REQUIRED)
 

@@ -37,6 +37,8 @@ add_library(sta_vm STATIC
     src/compiler/codegen.c
     src/compiler/compiler.c
     src/image/image.c
+    src/scheduler/scheduler.c
+    src/scheduler/deque.c
 )
 
 target_include_directories(sta_vm

@@ -5,6 +5,7 @@
 #include "actor.h"
 #include "deep_copy.h"
 #include "mailbox_msg.h"
+#include "scheduler/scheduler.h"
 #include "vm/vm_state.h"
 #include "vm/interpreter.h"
 #include "vm/method_dict.h"
@@ -55,8 +56,9 @@ struct STA_Actor *sta_actor_create(struct STA_VM *vm,
     actor->signaled_exception = 0;
 
     /* Lifecycle state. */
-    actor->state = STA_ACTOR_CREATED;
+    atomic_store_explicit(&actor->state, STA_ACTOR_CREATED, memory_order_relaxed);
     actor->actor_id = 0;  /* assigned by VM or scheduler */
+    actor->next_runnable = NULL;
 
     /* Initialize mailbox with default capacity. */
     if (sta_mailbox_init(&actor->mailbox, STA_MAILBOX_DEFAULT_CAPACITY) != 0) {
@@ -69,6 +71,7 @@ struct STA_Actor *sta_actor_create(struct STA_VM *vm,
     /* Placeholders. */
     actor->behavior_class = 0;
     actor->behavior_obj = 0;
+    actor->saved_frame = NULL;
     actor->supervisor = NULL;
 
     return actor;
@@ -81,7 +84,7 @@ void sta_actor_destroy(struct STA_Actor *actor) {
     sta_stack_slab_deinit(&actor->slab);
     sta_heap_deinit(&actor->heap);
 
-    actor->state = STA_ACTOR_TERMINATED;
+    atomic_store_explicit(&actor->state, STA_ACTOR_TERMINATED, memory_order_relaxed);
     free(actor);
 }
 
@@ -136,6 +139,26 @@ int sta_actor_send_msg(struct STA_Actor *sender,
         return rc;  /* STA_ERR_MAILBOX_FULL */
     }
 
+    /* Auto-schedule: if the target is idle (CREATED or SUSPENDED) and the
+     * scheduler is running, transition to READY and enqueue.
+     * Uses CAS to ensure only one sender wins the race. */
+    STA_Scheduler *sched = target->vm ? target->vm->scheduler : NULL;
+    if (sched && atomic_load_explicit(&sched->running, memory_order_acquire)) {
+        uint32_t expected = STA_ACTOR_SUSPENDED;
+        if (atomic_compare_exchange_strong_explicit(
+                &target->state, &expected, STA_ACTOR_READY,
+                memory_order_acq_rel, memory_order_relaxed)) {
+            sta_scheduler_enqueue(sched, target);
+        } else {
+            expected = STA_ACTOR_CREATED;
+            if (atomic_compare_exchange_strong_explicit(
+                    &target->state, &expected, STA_ACTOR_READY,
+                    memory_order_acq_rel, memory_order_relaxed)) {
+                sta_scheduler_enqueue(sched, target);
+            }
+        }
+    }
+
     return 0;
 }
 
@@ -161,7 +184,7 @@ int sta_actor_process_one(struct STA_VM *vm, struct STA_Actor *actor)
 {
     /* 1. Dequeue one message from the mailbox. */
     STA_MailboxMsg *msg = sta_mailbox_dequeue(&actor->mailbox);
-    if (!msg) return 0;  /* empty — nothing to do */
+    if (!msg) return STA_ACTOR_MSG_EMPTY;
 
     /* 2. Look up the selector in the actor's behavior class. */
     STA_ObjHeader *beh_h = (STA_ObjHeader *)(uintptr_t)actor->behavior_obj;
@@ -169,16 +192,11 @@ int sta_actor_process_one(struct STA_VM *vm, struct STA_Actor *actor)
     STA_OOP method = actor_method_lookup(vm, cls_idx, msg->selector);
 
     if (method == 0) {
-        /* Method not found — free envelope and return error.
-         * In production, this would trigger doesNotUnderstand:. */
         sta_mailbox_msg_destroy(msg);
-        return -1;
+        return STA_ACTOR_MSG_ERROR;
     }
 
-    /* 3. Execute the method on the target actor's resources.
-     * Temporarily swap vm->root_actor so sta_interpret uses this
-     * actor's heap and stack slab. This is correct for single-threaded
-     * manual dispatch (no scheduler yet). */
+    /* 3. Execute — swap root_actor for non-scheduler dispatch path. */
     struct STA_Actor *saved_root = vm->root_actor;
     vm->root_actor = actor;
 
@@ -190,5 +208,45 @@ int sta_actor_process_one(struct STA_VM *vm, struct STA_Actor *actor)
     /* 4. Free the message envelope. */
     sta_mailbox_msg_destroy(msg);
 
-    return 1;  /* message processed */
+    return STA_ACTOR_MSG_PROCESSED;
+}
+
+int sta_actor_process_one_preemptible(struct STA_VM *vm, struct STA_Actor *actor)
+{
+    /* If the actor was preempted mid-execution, resume. */
+    if (actor->saved_frame) {
+        int rc = sta_interpret_resume(vm, actor);
+        if (rc == STA_INTERPRET_PREEMPTED) {
+            return STA_ACTOR_MSG_PREEMPTED;
+        }
+        return STA_ACTOR_MSG_PROCESSED;
+    }
+
+    /* Dequeue a new message. */
+    STA_MailboxMsg *msg = sta_mailbox_dequeue(&actor->mailbox);
+    if (!msg) return STA_ACTOR_MSG_EMPTY;
+
+    /* Look up the method. */
+    STA_ObjHeader *beh_h = (STA_ObjHeader *)(uintptr_t)actor->behavior_obj;
+    uint32_t cls_idx = beh_h->class_index;
+    STA_OOP method = actor_method_lookup(vm, cls_idx, msg->selector);
+
+    if (method == 0) {
+        sta_mailbox_msg_destroy(msg);
+        return STA_ACTOR_MSG_ERROR;
+    }
+
+    /* Execute with preemption support. */
+    int rc = sta_interpret_actor(vm, actor, method, actor->behavior_obj,
+                                  msg->args, msg->arg_count);
+
+    /* Free the message envelope.
+     * Note: if preempted, the method is still mid-execution, but the
+     * message args have been copied to the frame. Safe to free. */
+    sta_mailbox_msg_destroy(msg);
+
+    if (rc == STA_INTERPRET_PREEMPTED) {
+        return STA_ACTOR_MSG_PREEMPTED;
+    }
+    return STA_ACTOR_MSG_PROCESSED;
 }

@@ -5,6 +5,7 @@
 #include "vm/vm_state.h"
 #include "vm/special_objects.h"
 #include "actor/actor.h"
+#include "scheduler/scheduler.h"
 #include "bootstrap/bootstrap.h"
 #include "bootstrap/kernel_load.h"
 #include "bootstrap/filein.h"
@@ -156,7 +157,7 @@ STA_VM* sta_vm_create(const STA_VMConfig* config) {
             goto fail;
         }
         root->vm = vm;
-        root->state = STA_ACTOR_READY;
+        atomic_store_explicit(&root->state, STA_ACTOR_READY, memory_order_relaxed);
         root->actor_id = 1;
 
         /* Transfer heap: move VM's heap contents to root actor. */
@@ -205,6 +206,12 @@ void sta_vm_destroy(STA_VM* vm) {
     if (!vm || vm->destroyed) return;
 
     vm->destroyed = true;
+
+    /* Stop and destroy scheduler if running. */
+    if (vm->scheduler) {
+        sta_scheduler_stop(vm);
+        sta_scheduler_destroy(vm);
+    }
 
     /* Teardown in reverse order of initialization. */
     sta_handle_table_destroy(&vm->handles);

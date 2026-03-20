@@ -298,9 +298,16 @@ src/vm/                   ← Phase 1 production code + Phase 0 spike code
   handler.h/c                 ← exception handler stack, setjmp/longjmp support (production)
   oop_spike.h, actor_spike.h  ← Phase 0 spike code (exploratory, not promoted)
   frame_spike.h/c             ← Phase 0 spike code
-src/actor/                ← mailbox, lifecycle stubs
+src/actor/                ← actor struct, mailbox, message send, deep copy
+  actor.h/c                   ← STA_Actor with per-actor heap/slab/mailbox, lifecycle, dispatch (production)
+  mailbox.h/c                 ← MPSC Vyukov mailbox (production)
+  mailbox_msg.h/c             ← message envelope (production)
+  deep_copy.h/c               ← cross-actor deep copy engine (production)
 src/gc/                   ← Phase 1+
-src/scheduler/            ← scheduler_spike.h, scheduler_spike.c
+src/scheduler/            ← work-stealing scheduler (Epic 4)
+  scheduler.h/c               ← N-thread scheduler, overflow queue, dispatch loop (production)
+  deque.h/c                   ← Chase-Lev work-stealing deque (production)
+  scheduler_spike.h/c         ← Phase 0 spike (reference only)
 src/io/                   ← io_spike.h, io_spike.c (Spike 005 complete)
 src/image/                ← production image save/load + spike reference
   image.h/c                   ← production writer + loader (Epic 10)
@@ -649,6 +656,39 @@ ArrayedCollection, Character, String, Symbol, ByteArray, Array, OrderedCollectio
   - Open decision #9: Deep-copy visited set — open-addressing hash map implemented
 - Tests: 68 CTest targets passing (63 existing + 5 new test files), ASan clean
 - Density: STA_Mailbox adds 32 bytes to STA_Actor; stub sentinel node (16 bytes) allocated separately
+
+### Epic 4: Work-Stealing Scheduler — COMPLETE
+- GitHub: Epic #279, stories #280–#286 (all closed)
+- Branch: phase2/epic-4-scheduler
+- New files:
+  - `src/scheduler/scheduler.h`, `src/scheduler/scheduler.c` — Production scheduler: N OS threads (default = CPU cores via sysconf), per-thread dispatch loops, overflow queue for external enqueue, idle-thread wakeup via pthread_cond_signal with 5ms timeout
+  - `src/scheduler/deque.h`, `src/scheduler/deque.c` — Chase-Lev fixed-capacity work-stealing deque (1024 slots), adapted from TSan-clean Spike 003 Variant A. Owner push/pop bottom (LIFO), stealers CAS top (FIFO)
+  - `tests/test_scheduler.c` — 7 lifecycle tests
+  - `tests/test_scheduler_auto.c` — 7 auto-scheduling tests
+  - `tests/test_preemption.c` — 5 preemption tests
+  - `tests/test_scheduler_mt.c` — 6 multi-threaded tests
+  - `tests/test_work_stealing.c` — 5 work-stealing tests
+  - `tests/test_eval_integration.c` — 6 eval+scheduler integration tests
+  - `tests/test_scheduler_stress.c` — 11 stress tests (up to 1000 actors × 100 msgs on 16 cores)
+- Modified files:
+  - `src/actor/actor.h` — STA_Actor gains `_Atomic uint32_t state` (was plain uint32_t), `next_runnable` (intrusive run-queue link), `saved_frame` (preemption save point)
+  - `src/actor/actor.c` — Auto-schedule on message arrival (CAS CREATED/SUSPENDED → READY), `sta_actor_process_one_preemptible` for scheduler dispatch
+  - `src/vm/interpreter.h` — `STA_INTERPRET_COMPLETED`/`PREEMPTED` status codes, `sta_interpret_actor`/`sta_interpret_resume` entry points
+  - `src/vm/interpreter.c` — `interpret_loop_ex` with `sched_actor` parameter: preemption at OP_SEND and OP_JUMP_BACK safe points. sta_eval path unchanged (NULL sched_actor = no preemption)
+  - `src/vm/vm_state.h` — STA_VM gains `scheduler` field
+  - `src/vm/vm.c` — Auto-stop/destroy scheduler on vm_destroy
+- Key design decisions:
+  - Reduction-based preemption: STA_REDUCTION_QUOTA=1000, preempt at OP_SEND (before arg pop) and OP_JUMP_BACK (loop boundary) — frame state always consistent for resume
+  - Actor exclusivity: CAS READY→RUNNING ensures only one thread executes an actor
+  - sta_eval synchronous on calling thread, root actor not scheduled
+  - Overflow queue for external enqueues (Chase-Lev push is owner-only)
+  - Preempted actors re-enqueue to local deque (LIFO, cache-warm)
+- Known constraint: exception primitives (on:do:, signal, ensure:) call sta_eval_block which resolves from root_actor — not yet safe for scheduled actors
+- Stress test results (M4 Max, 16 cores):
+  - 200 actors × 500 msgs = 100,000 messages, ~20k steals, all 16 workers active
+  - 1000 actors × 100 msgs = 100,000 messages, ~20k steals, all 16 workers active
+- Sanitizers: TSan clean (all 7 test files), ASan clean (all 7 test files)
+- Tests: 75 CTest targets passing (68 existing + 7 new test files)
 
 ---
 

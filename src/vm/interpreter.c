@@ -65,13 +65,22 @@ static inline STA_OOP *effective_slots(STA_Frame *frame) {
     return sta_frame_slots(frame);
 }
 
+/* Sentinel OOP returned by interpret_loop_ex when preempted.
+ * Uses an odd non-SmallInt bit pattern that can never be a valid OOP:
+ * bit 0 set (tagged), but bits 1..63 all set — no valid SmallInt equals this. */
+#define STA_OOP_PREEMPTED  ((STA_OOP)UINTPTR_MAX)
+
 /* ── Dispatch loop ─────────────────────────────────────────────────────── */
 
-static STA_OOP interpret_loop(STA_VM *vm, STA_Frame *frame)
+/* sched_actor: if non-NULL, the interpreter runs on this actor's resources
+ * and supports preemption. If NULL, runs on root_actor (sta_eval path,
+ * no preemption). */
+static STA_OOP interpret_loop_ex(STA_VM *vm, STA_Frame *frame,
+                                  struct STA_Actor *sched_actor)
 {
-    /* Resolve slab and heap from the root actor when available,
-     * fall back to VM for bootstrap-time interpretation. */
-    struct STA_Actor *actor = vm->root_actor;
+    /* Resolve slab and heap. Scheduled actors use their own resources;
+     * the sta_eval path uses root_actor (or VM fallback for bootstrap). */
+    struct STA_Actor *actor = sched_actor ? sched_actor : vm->root_actor;
     STA_StackSlab *slab = actor ? &actor->slab : &vm->slab;
     STA_Heap *heap = actor ? &actor->heap : &vm->heap;
     STA_ClassTable *ct = &vm->class_table;
@@ -217,6 +226,16 @@ static STA_OOP interpret_loop(STA_VM *vm, STA_Frame *frame)
 
         case OP_SEND:
         case OP_SEND_SUPER: {
+            /* Preemption check: if reduction quota exhausted and we're
+             * running a scheduled actor, save state and yield.
+             * PC still points to this send — on resume, it retries. */
+            reductions++;
+            if (sched_actor && reductions >= STA_REDUCTION_QUOTA) {
+                sched_actor->saved_frame = frame;
+                return STA_OOP_PREEMPTED;
+            }
+            if (reductions >= STA_REDUCTION_QUOTA) reductions = 0;
+
             STA_OOP selector = sta_method_literal(frame->method, (uint8_t)operand);
             uint8_t arity = sta_selector_arity(selector);
 
@@ -284,8 +303,6 @@ static STA_OOP interpret_loop(STA_VM *vm, STA_Frame *frame)
             }
 
             frame->pc += insn_len;
-            reductions++;
-            if (reductions >= STA_REDUCTION_QUOTA) reductions = 0;
 
             int is_tail = (bytecodes[frame->pc] == OP_RETURN_TOP);
 
@@ -508,6 +525,10 @@ static STA_OOP interpret_loop(STA_VM *vm, STA_Frame *frame)
         case OP_JUMP_BACK:
             frame->pc = frame->pc + insn_len - operand;
             reductions++;
+            if (sched_actor && reductions >= STA_REDUCTION_QUOTA) {
+                sched_actor->saved_frame = frame;
+                return STA_OOP_PREEMPTED;
+            }
             if (reductions >= STA_REDUCTION_QUOTA) reductions = 0;
             break;
 
@@ -813,7 +834,7 @@ STA_OOP sta_interpret(STA_VM *vm,
         frame->flags |= STA_FRAME_FLAG_MARKER;
     }
 
-    return interpret_loop(vm, frame);
+    return interpret_loop_ex(vm, frame, NULL);
 }
 
 STA_OOP sta_eval_block(STA_VM *vm,
@@ -858,5 +879,60 @@ STA_OOP sta_eval_block(STA_VM *vm,
     }
     frame->pc = start_pc;
 
-    return interpret_loop(vm, frame);
+    return interpret_loop_ex(vm, frame, NULL);
+}
+
+/* ── Scheduled actor execution (with preemption) ─────────────────────── */
+
+int sta_interpret_actor(STA_VM *vm, struct STA_Actor *actor,
+                        STA_OOP method, STA_OOP receiver,
+                        STA_OOP *args, uint8_t nargs)
+{
+    STA_StackSlab *slab = &actor->slab;
+    STA_Heap *heap = &actor->heap;
+
+    STA_Frame *frame = sta_frame_push(slab, method, receiver, NULL,
+                                       args, nargs);
+    if (!frame) {
+        fprintf(stderr, "sta_interpret_actor: failed to push initial frame\n");
+        return -1;
+    }
+
+    /* If the method needs a context, allocate one. */
+    STA_OOP mh = sta_method_header(method);
+    if (STA_METHOD_LARGE_FRAME(mh)) {
+        uint32_t ctx_size = (uint32_t)frame->arg_count + (uint32_t)frame->local_count;
+        STA_ObjHeader *ctx_h = sta_heap_alloc(heap, STA_CLS_ARRAY, ctx_size);
+        if (!ctx_h) return -1;
+        STA_OOP *ctx_slots = sta_payload(ctx_h);
+        STA_OOP *inline_slots = sta_frame_slots(frame);
+        for (uint32_t i = 0; i < ctx_size; i++)
+            ctx_slots[i] = inline_slots[i];
+        frame->context = (STA_OOP)(uintptr_t)ctx_h;
+        frame->flags |= STA_FRAME_FLAG_MARKER;
+    }
+
+    actor->saved_frame = NULL;
+    STA_OOP result = interpret_loop_ex(vm, frame, actor);
+
+    if (result == STA_OOP_PREEMPTED) {
+        return STA_INTERPRET_PREEMPTED;
+    }
+    actor->saved_frame = NULL;
+    return STA_INTERPRET_COMPLETED;
+}
+
+int sta_interpret_resume(STA_VM *vm, struct STA_Actor *actor)
+{
+    STA_Frame *frame = actor->saved_frame;
+    if (!frame) return STA_INTERPRET_COMPLETED;
+
+    actor->saved_frame = NULL;
+    STA_OOP result = interpret_loop_ex(vm, frame, actor);
+
+    if (result == STA_OOP_PREEMPTED) {
+        return STA_INTERPRET_PREEMPTED;
+    }
+    actor->saved_frame = NULL;
+    return STA_INTERPRET_COMPLETED;
 }
