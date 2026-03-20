@@ -134,9 +134,6 @@ static void test_mass_restart(void) {
 
     STA_OOP obj_cls = sta_class_table_get(&vm->class_table, STA_CLS_OBJECT);
 
-    /* Grow root supervisor heap for notification args (see #312). */
-    sta_heap_grow(&vm->root_supervisor->heap, 8192);
-
     /* Create 10 sub-supervisors under root. */
     struct STA_Actor *supervisors[10];
     struct STA_Actor *workers[100];
@@ -145,9 +142,6 @@ static void test_mass_restart(void) {
         supervisors[s] = sta_vm_spawn_supervised(vm, obj_cls,
                                                     STA_RESTART_RESTART);
         assert(supervisors[s]);
-        /* Grow supervisor heap: each failure notification allocates ~32
-         * bytes for args on the supervisor's heap (see GitHub #312). */
-        sta_heap_grow(&supervisors[s]->heap, 16384);
         STA_ObjHeader *s_obj = sta_heap_alloc(&supervisors[s]->heap,
                                                 STA_CLS_OBJECT, 0);
         assert(s_obj);
@@ -180,7 +174,7 @@ static void test_mass_restart(void) {
         sta_mailbox_enqueue(&workers[i]->mailbox, msg);
     }
 
-    sta_scheduler_init(vm, 0);  /* All cores — #313 fixed by registry */
+    sta_scheduler_init(vm, 0);
     sta_scheduler_start(vm);
 
     for (int i = 0; i < 100; i++) {
@@ -212,11 +206,12 @@ static void test_mass_restart(void) {
     assert(spec_idx == 100);
 
     int restarted = 0;
-    for (int attempt = 0; attempt < 30000; attempt++) {
+    for (int attempt = 0; attempt < 50000; attempt++) {
         restarted = 0;
         for (int i = 0; i < 100; i++) {
-            struct STA_Actor *cur = spec_ptrs[i]->current_actor;
-            if (cur != NULL && cur->actor_id != spec_original_ids[i]) {
+            uint32_t cur_id = atomic_load_explicit(
+                &spec_ptrs[i]->current_actor_id, memory_order_acquire);
+            if (cur_id != 0 && cur_id != spec_original_ids[i]) {
                 restarted++;
             }
         }
@@ -250,7 +245,7 @@ static void test_simultaneous_crashes(void) {
     struct STA_Actor *sup = sta_vm_spawn_supervised(vm, obj_cls,
                                                       STA_RESTART_RESTART);
     assert(sup);
-    sta_heap_grow(&sup->heap, 4096);  /* See GitHub #312 */
+
     STA_ObjHeader *s_obj = sta_heap_alloc(&sup->heap, STA_CLS_OBJECT, 0);
     assert(s_obj);
     sup->behavior_obj = (STA_OOP)(uintptr_t)s_obj;
@@ -285,7 +280,7 @@ static void test_simultaneous_crashes(void) {
         sta_mailbox_enqueue(&workers[i]->mailbox, msg);
     }
 
-    sta_scheduler_init(vm, 0);  /* All cores — #313 fixed by registry */
+    sta_scheduler_init(vm, 0);
     sta_scheduler_start(vm);
 
     for (int i = 0; i < 10; i++) {
@@ -299,8 +294,9 @@ static void test_simultaneous_crashes(void) {
     for (int attempt = 0; attempt < 10000; attempt++) {
         restarted = 0;
         for (int i = 0; i < 10; i++) {
-            struct STA_Actor *cur = sim_specs[i]->current_actor;
-            if (cur != NULL && cur->actor_id != sim_orig_ids[i]) {
+            uint32_t cur_id = atomic_load_explicit(
+                &sim_specs[i]->current_actor_id, memory_order_acquire);
+            if (cur_id != 0 && cur_id != sim_orig_ids[i]) {
                 restarted++;
             }
         }
@@ -345,7 +341,7 @@ static void test_restart_and_gc(void) {
     struct STA_Actor *sup = sta_vm_spawn_supervised(vm, obj_cls,
                                                       STA_RESTART_RESTART);
     assert(sup);
-    sta_heap_grow(&sup->heap, 4096);  /* See GitHub #312 */
+
     STA_ObjHeader *s_obj = sta_heap_alloc(&sup->heap, STA_CLS_OBJECT, 0);
     assert(s_obj);
     sup->behavior_obj = (STA_OOP)(uintptr_t)s_obj;
@@ -366,18 +362,19 @@ static void test_restart_and_gc(void) {
         sta_mailbox_enqueue(&worker->mailbox, msg);
     }
 
-    sta_scheduler_init(vm, 0);  /* All cores — #313 fixed by registry */
+    sta_scheduler_init(vm, 0);
     sta_scheduler_start(vm);
 
     atomic_store_explicit(&worker->state, STA_ACTOR_READY,
                           memory_order_release);
     sta_scheduler_enqueue(vm->scheduler, worker);
 
-    /* Wait for restart: poll until spec has a new actor. */
+    /* Wait for restart: poll atomic current_actor_id. */
     bool did_restart = false;
     for (int i = 0; i < 5000; i++) {
-        struct STA_Actor *cur = spec->current_actor;
-        if (cur != NULL && cur->actor_id != old_id) {
+        uint32_t cur_id = atomic_load_explicit(&spec->current_actor_id,
+                                                 memory_order_acquire);
+        if (cur_id != 0 && cur_id != old_id) {
             did_restart = true;
             break;
         }
@@ -434,7 +431,7 @@ static void test_unaffected_siblings(void) {
     struct STA_Actor *sup = sta_vm_spawn_supervised(vm, obj_cls,
                                                       STA_RESTART_RESTART);
     assert(sup);
-    sta_heap_grow(&sup->heap, 4096);  /* See GitHub #312 */
+
     STA_ObjHeader *s_obj = sta_heap_alloc(&sup->heap, STA_CLS_OBJECT, 0);
     assert(s_obj);
     sup->behavior_obj = (STA_OOP)(uintptr_t)s_obj;
@@ -470,7 +467,7 @@ static void test_unaffected_siblings(void) {
     }
 
     /* Start scheduler and enqueue all workers. */
-    sta_scheduler_init(vm, 0);  /* All cores — #313 fixed by registry */
+    sta_scheduler_init(vm, 0);
     sta_scheduler_start(vm);
 
     for (int i = 0; i < 5; i++) {
@@ -484,12 +481,12 @@ static void test_unaffected_siblings(void) {
                                          workers[3], workers[4] };
     wait_actors_done(surviving, 4, 5000);
 
-    /* Wait for the restart to complete: poll until spec has a new actor
-     * with a different ID (reads only after restart_child writes). */
+    /* Wait for the restart to complete: poll atomic current_actor_id. */
     bool restarted = false;
     for (int i = 0; i < 5000; i++) {
-        struct STA_Actor *cur = w2_spec->current_actor;
-        if (cur != NULL && cur->actor_id != worker2_old_id) {
+        uint32_t cur_id = atomic_load_explicit(&w2_spec->current_actor_id,
+                                                 memory_order_acquire);
+        if (cur_id != 0 && cur_id != worker2_old_id) {
             restarted = true;
             break;
         }
@@ -532,14 +529,10 @@ static void test_cascading_escalation(void) {
     atomic_store(&g_event_count, 0);
     sta_event_register(vm, event_counter, NULL);
 
-    /* Grow root supervisor heap for escalation notifications (#312). */
-    sta_heap_grow(&vm->root_supervisor->heap, 16384);
-
     /* sup_A under root with RESTART strategy. */
     struct STA_Actor *sup_a = sta_vm_spawn_supervised(vm, obj_cls,
                                                         STA_RESTART_RESTART);
     assert(sup_a);
-    sta_heap_grow(&sup_a->heap, 4096);  /* See GitHub #312 */
     STA_ObjHeader *a_obj = sta_heap_alloc(&sup_a->heap, STA_CLS_OBJECT, 0);
     assert(a_obj);
     sup_a->behavior_obj = (STA_OOP)(uintptr_t)a_obj;
@@ -547,8 +540,7 @@ static void test_cascading_escalation(void) {
                                         * escalation from sup_B immediately
                                         * exceeds → cascades to root. */
 
-    /* sup_B under sup_A with RESTART strategy.
-     * 16384-byte heap so failure notifications fit (see #312). */
+    /* sup_B under sup_A with RESTART strategy. */
     struct STA_Actor *sup_b = add_supervised_child(sup_a, vm,
                                                      STA_RESTART_RESTART, 16384);
     assert(sup_b);
@@ -591,7 +583,7 @@ static void test_cascading_escalation(void) {
         sta_mailbox_enqueue(&w2->mailbox, msg);
     }
 
-    sta_scheduler_init(vm, 0);  /* All cores — #313 fixed by registry */
+    sta_scheduler_init(vm, 0);
     sta_scheduler_start(vm);
 
     atomic_store_explicit(&w1->state, STA_ACTOR_READY, memory_order_release);

@@ -8,6 +8,7 @@
 #pragma once
 
 #include "vm/oop.h"
+#include <stdbool.h>
 #include <stdint.h>
 
 /* ── STA_MailboxMsg ──────────────────────────────────────────────────── */
@@ -16,12 +17,17 @@ typedef struct STA_MailboxMsg {
     /* Selector — a Symbol OOP. Immutable, shared by pointer (never copied). */
     STA_OOP     selector;
 
-    /* Arguments — pointer to copied argument array on target actor's heap.
-     * May be NULL if arg_count == 0. */
+    /* Arguments — pointer to copied argument array.
+     * May be NULL if arg_count == 0.
+     * If args_owned is true, the array is malloc'd and must be freed
+     * with the envelope. If false, it lives on the target actor's heap. */
     STA_OOP    *args;
 
     /* Number of arguments (0–255). */
     uint8_t     arg_count;
+
+    /* If true, args was malloc'd (zero-copy send) and must be freed. */
+    bool        args_owned;
 
     /* Sender actor ID — for reply routing (used by Epic 7 ask: semantics). */
     uint32_t    sender_id;

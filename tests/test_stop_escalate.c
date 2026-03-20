@@ -61,6 +61,7 @@ static void install_method(STA_OOP cls, const char *selector_str,
 
 /* Create a supervisor actor with Object as behavior class. */
 static struct STA_Actor *make_supervisor(uint32_t actor_id) {
+    (void)actor_id;  /* IDs are now opaque, auto-assigned */
     STA_OOP obj_cls = sta_class_table_get(&g_vm->class_table, STA_CLS_OBJECT);
     struct STA_Actor *sup = sta_actor_create(g_vm, 16384, 2048);
     assert(sup);
@@ -69,7 +70,6 @@ static struct STA_Actor *make_supervisor(uint32_t actor_id) {
     STA_ObjHeader *obj_h = sta_heap_alloc(&sup->heap, STA_CLS_OBJECT, 0);
     assert(obj_h);
     sup->behavior_obj = (STA_OOP)(uintptr_t)obj_h;
-    sup->actor_id = actor_id;
     atomic_store_explicit(&sup->state, STA_ACTOR_SUSPENDED, memory_order_relaxed);
     return sup;
 }
