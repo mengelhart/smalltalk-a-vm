@@ -23,6 +23,8 @@ STA_MailboxMsg *sta_mailbox_msg_create(STA_OOP selector,
 
 void sta_mailbox_msg_destroy(STA_MailboxMsg *msg) {
     if (!msg) return;
-    /* Note: does NOT free msg->args — those live on the target actor's heap. */
+    /* Free args if the message owns them (zero-copy send path). */
+    if (msg->args_owned && msg->args)
+        free(msg->args);
     free(msg);
 }

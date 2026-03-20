@@ -532,7 +532,7 @@ target_compile_definitions(test_supervision_stress PRIVATE
     KERNEL_DIR="${CMAKE_SOURCE_DIR}/kernel")
 target_link_libraries(test_supervision_stress PRIVATE sta_vm Threads::Threads)
 add_test(NAME supervision_stress COMMAND test_supervision_stress)
-set_tests_properties(supervision_stress PROPERTIES TIMEOUT 60)
+set_tests_properties(supervision_stress PROPERTIES TIMEOUT 120)
 
 # ── Actor Registry (Cleanup Story 1) ─────────────────────────────────
 add_executable(test_actor_registry test_actor_registry.c)

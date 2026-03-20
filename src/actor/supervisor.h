@@ -9,6 +9,7 @@
 
 #include "vm/oop.h"
 #include <sta/vm.h>    /* STA_RestartStrategy, STA_OOP, struct STA_VM */
+#include <stdatomic.h>
 #include <stdint.h>
 
 /* Forward declarations. */
@@ -20,7 +21,8 @@ struct STA_Actor;
 typedef struct STA_ChildSpec {
     STA_OOP              behavior_class;   /* Class to instantiate on (re)start */
     STA_RestartStrategy  strategy;         /* What to do on failure */
-    struct STA_Actor    *current_actor;    /* Currently running actor (or NULL) */
+    struct STA_Actor    *current_actor;       /* Currently running actor (or NULL) */
+    _Atomic uint32_t     current_actor_id;  /* ID for matching without deref */
     struct STA_ChildSpec *next;            /* Linked list of children */
 } STA_ChildSpec;
 

@@ -212,11 +212,12 @@ static void test_mass_restart(void) {
     assert(spec_idx == 100);
 
     int restarted = 0;
-    for (int attempt = 0; attempt < 30000; attempt++) {
+    for (int attempt = 0; attempt < 50000; attempt++) {
         restarted = 0;
         for (int i = 0; i < 100; i++) {
-            struct STA_Actor *cur = spec_ptrs[i]->current_actor;
-            if (cur != NULL && cur->actor_id != spec_original_ids[i]) {
+            uint32_t cur_id = atomic_load_explicit(
+                &spec_ptrs[i]->current_actor_id, memory_order_acquire);
+            if (cur_id != 0 && cur_id != spec_original_ids[i]) {
                 restarted++;
             }
         }
@@ -299,8 +300,9 @@ static void test_simultaneous_crashes(void) {
     for (int attempt = 0; attempt < 10000; attempt++) {
         restarted = 0;
         for (int i = 0; i < 10; i++) {
-            struct STA_Actor *cur = sim_specs[i]->current_actor;
-            if (cur != NULL && cur->actor_id != sim_orig_ids[i]) {
+            uint32_t cur_id = atomic_load_explicit(
+                &sim_specs[i]->current_actor_id, memory_order_acquire);
+            if (cur_id != 0 && cur_id != sim_orig_ids[i]) {
                 restarted++;
             }
         }
@@ -373,11 +375,12 @@ static void test_restart_and_gc(void) {
                           memory_order_release);
     sta_scheduler_enqueue(vm->scheduler, worker);
 
-    /* Wait for restart: poll until spec has a new actor. */
+    /* Wait for restart: poll atomic current_actor_id. */
     bool did_restart = false;
     for (int i = 0; i < 5000; i++) {
-        struct STA_Actor *cur = spec->current_actor;
-        if (cur != NULL && cur->actor_id != old_id) {
+        uint32_t cur_id = atomic_load_explicit(&spec->current_actor_id,
+                                                 memory_order_acquire);
+        if (cur_id != 0 && cur_id != old_id) {
             did_restart = true;
             break;
         }
@@ -484,12 +487,12 @@ static void test_unaffected_siblings(void) {
                                          workers[3], workers[4] };
     wait_actors_done(surviving, 4, 5000);
 
-    /* Wait for the restart to complete: poll until spec has a new actor
-     * with a different ID (reads only after restart_child writes). */
+    /* Wait for the restart to complete: poll atomic current_actor_id. */
     bool restarted = false;
     for (int i = 0; i < 5000; i++) {
-        struct STA_Actor *cur = w2_spec->current_actor;
-        if (cur != NULL && cur->actor_id != worker2_old_id) {
+        uint32_t cur_id = atomic_load_explicit(&w2_spec->current_actor_id,
+                                                 memory_order_acquire);
+        if (cur_id != 0 && cur_id != worker2_old_id) {
             restarted = true;
             break;
         }

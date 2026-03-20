@@ -70,10 +70,12 @@ struct STA_Actor *sta_supervisor_add_child(struct STA_Actor *supervisor,
         return NULL;
     }
 
-    spec->behavior_class = behavior_class;
-    spec->strategy       = strategy;
-    spec->current_actor  = child;
-    spec->next           = supervisor->sup_data->children;
+    spec->behavior_class   = behavior_class;
+    spec->strategy         = strategy;
+    spec->current_actor    = child;
+    atomic_store_explicit(&spec->current_actor_id, child->actor_id,
+                          memory_order_release);
+    spec->next             = supervisor->sup_data->children;
 
     supervisor->sup_data->children = spec;
     supervisor->sup_data->child_count++;
@@ -98,13 +100,14 @@ void sta_supervisor_data_destroy(STA_SupervisorData *data)
 
 /* ── Failure handling ─────────────────────────────────────────────────── */
 
-/* Find child spec by actor_id. */
+/* Find child spec by actor_id — uses stored ID, no pointer deref. */
 static STA_ChildSpec *find_child_by_id(STA_SupervisorData *data,
                                          uint32_t actor_id) {
     STA_ChildSpec *spec = data->children;
     while (spec) {
-        if (spec->current_actor &&
-            spec->current_actor->actor_id == actor_id) {
+        uint32_t id = atomic_load_explicit(&spec->current_actor_id,
+                                            memory_order_acquire);
+        if (id == actor_id) {
             return spec;
         }
         spec = spec->next;
@@ -195,13 +198,15 @@ static void terminate_all_children(struct STA_Actor *supervisor) {
             spec->current_actor->supervisor = NULL;
             sta_actor_destroy(spec->current_actor);
             spec->current_actor = NULL;
+            atomic_store_explicit(&spec->current_actor_id, 0,
+                                  memory_order_release);
         }
         spec = spec->next;
     }
 }
 
 /* Send escalation notification to this supervisor's parent.
- * reason_oop is the reason symbol to include. */
+ * Uses sta_actor_send_msg (registry-based) with immediates-only args. */
 static void escalate_to_parent(struct STA_Actor *supervisor, STA_OOP reason_oop) {
     struct STA_Actor *parent = supervisor->supervisor;
     if (!parent) {
@@ -210,45 +215,12 @@ static void escalate_to_parent(struct STA_Actor *supervisor, STA_OOP reason_oop)
         return;
     }
 
-    uint32_t p_state = atomic_load_explicit(&parent->state, memory_order_acquire);
-    if (p_state == STA_ACTOR_TERMINATED) return;
-
     STA_OOP sup_id_oop = STA_SMALLINT_OOP((intptr_t)supervisor->actor_id);
     STA_OOP selector = sta_spc_get(SPC_CHILD_FAILED_REASON);
+    STA_OOP args[2] = { sup_id_oop, reason_oop };
 
-    STA_ObjHeader *p_args_h = sta_heap_alloc(&parent->heap, STA_CLS_ARRAY, 2);
-    if (!p_args_h) return;
-    STA_OOP *p_copied = sta_payload(p_args_h);
-    p_copied[0] = sup_id_oop;
-    p_copied[1] = reason_oop;
-
-    STA_MailboxMsg *notif = sta_mailbox_msg_create(selector, p_copied, 2,
-                                                     supervisor->actor_id);
-    if (!notif) return;
-
-    int rc = sta_mailbox_enqueue(&parent->mailbox, notif);
-    if (rc != 0) {
-        sta_mailbox_msg_destroy(notif);
-        return;
-    }
-
-    /* Auto-schedule parent if idle. */
-    STA_Scheduler *sched = parent->vm ? parent->vm->scheduler : NULL;
-    if (sched && atomic_load_explicit(&sched->running, memory_order_acquire)) {
-        uint32_t expected = STA_ACTOR_SUSPENDED;
-        if (atomic_compare_exchange_strong_explicit(
-                &parent->state, &expected, STA_ACTOR_READY,
-                memory_order_acq_rel, memory_order_relaxed)) {
-            sta_scheduler_enqueue(sched, parent);
-        } else {
-            expected = STA_ACTOR_CREATED;
-            if (atomic_compare_exchange_strong_explicit(
-                    &parent->state, &expected, STA_ACTOR_READY,
-                    memory_order_acq_rel, memory_order_relaxed)) {
-                sta_scheduler_enqueue(sched, parent);
-            }
-        }
-    }
+    sta_actor_send_msg(supervisor->vm, supervisor, parent->actor_id,
+                       selector, args, 2);
 }
 
 /* Check restart intensity. Returns 0 if restart is allowed, -1 if exceeded.
@@ -360,6 +332,9 @@ int sta_supervisor_handle_failure(struct STA_Actor *supervisor,
         /* Create new actor of same class. */
         struct STA_Actor *new_actor = restart_child(supervisor, spec);
         spec->current_actor = new_actor;
+        atomic_store_explicit(&spec->current_actor_id,
+                              new_actor ? new_actor->actor_id : 0,
+                              memory_order_release);
 
         if (!new_actor) {
             fprintf(stderr, "supervisor: restart failed for child %u\n", failed_id);
@@ -375,6 +350,7 @@ int sta_supervisor_handle_failure(struct STA_Actor *supervisor,
             sta_actor_destroy(old_actor);
         }
         spec->current_actor = NULL;
+        spec->current_actor_id = 0;
         break;
 
     case STA_RESTART_ESCALATE: {
@@ -384,6 +360,7 @@ int sta_supervisor_handle_failure(struct STA_Actor *supervisor,
             sta_actor_destroy(old_actor);
         }
         spec->current_actor = NULL;
+        spec->current_actor_id = 0;
 
         /* Forward the failure to this supervisor's supervisor. */
         escalate_to_parent(supervisor, args[1]);
