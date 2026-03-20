@@ -88,6 +88,12 @@ static STA_OOP interpret_loop_ex(STA_VM *vm, STA_Frame *frame,
     /* Construct execution context on the stack — passed to every primitive. */
     STA_ExecContext exec_ctx = { .vm = vm, .actor = actor };
 
+    /* GC_SAVE_FRAME: save the current frame on the actor before any operation
+     * that may trigger GC (allocation). This allows the GC to walk the frame
+     * chain for root enumeration. After the allocation, saved_frame is stale
+     * but harmless — it's only read during GC. */
+#define GC_SAVE_FRAME() do { if (actor) actor->saved_frame = frame; } while (0)
+
     uint32_t reductions = 0;
     STA_OOP result = 0;
 
@@ -272,6 +278,7 @@ static STA_OOP interpret_loop_ex(STA_VM *vm, STA_Frame *frame,
                     STA_OOP dnu_method = method_lookup(ct, recv_cls_idx, dnu_sel);
                     if (dnu_method != 0) {
                         found_method = dnu_method;
+                        GC_SAVE_FRAME();
                         STA_ObjHeader *msg_h = sta_heap_alloc(heap, STA_CLS_MESSAGE, 3);
                         if (msg_h) {
                             STA_OOP *msg_slots = sta_payload(msg_h);
@@ -374,6 +381,7 @@ static STA_OOP interpret_loop_ex(STA_VM *vm, STA_Frame *frame,
                 for (uint8_t i = 0; i < arity; i++)
                     prim_args_buf[1 + i] = send_args[i];
                 STA_OOP prim_result;
+                GC_SAVE_FRAME();
                 STA_PrimFn fn = (prim_idx < STA_PRIM_TABLE_SIZE)
                                  ? sta_primitives[prim_idx] : NULL;
                 if (fn) {
@@ -439,6 +447,7 @@ static STA_OOP interpret_loop_ex(STA_VM *vm, STA_Frame *frame,
              * slab slots remain allocated to provide expression stack space. */
             if (callee_needs_ctx) {
                 uint32_t ctx_size = (uint32_t)arity + (uint32_t)callee_locals;
+                GC_SAVE_FRAME();
                 STA_ObjHeader *ctx_h = sta_heap_alloc(heap, STA_CLS_ARRAY, ctx_size);
                 if (!ctx_h) {
                     fprintf(stderr, "FATAL: failed to allocate context object\n");
@@ -544,6 +553,7 @@ static STA_OOP interpret_loop_ex(STA_VM *vm, STA_Frame *frame,
 
         case OP_PRIMITIVE: {
             uint16_t prim_idx = operand;
+            GC_SAVE_FRAME();
             STA_PrimFn fn = (prim_idx < STA_PRIM_TABLE_SIZE)
                              ? sta_primitives[prim_idx] : NULL;
             if (fn) {
@@ -577,6 +587,7 @@ static STA_OOP interpret_loop_ex(STA_VM *vm, STA_Frame *frame,
             uint32_t blk_start  = (uint32_t)STA_SMALLINT_VAL(start_pc_oop);
             uint32_t blk_length = (uint32_t)STA_SMALLINT_VAL(body_len_oop);
 
+            GC_SAVE_FRAME();
             STA_ObjHeader *bc_h = sta_heap_alloc(heap, STA_CLS_BLOCKCLOSURE, 5);
             if (!bc_h) {
                 fprintf(stderr, "FATAL: failed to allocate BlockClosure\n");
@@ -610,6 +621,7 @@ static STA_OOP interpret_loop_ex(STA_VM *vm, STA_Frame *frame,
             uint32_t blk_start  = (uint32_t)STA_SMALLINT_VAL(start_pc_oop);
             uint32_t blk_length = (uint32_t)STA_SMALLINT_VAL(body_len_oop);
 
+            GC_SAVE_FRAME();
             STA_ObjHeader *bc_h = sta_heap_alloc(heap, STA_CLS_BLOCKCLOSURE, 6);
             if (!bc_h) {
                 fprintf(stderr, "FATAL: failed to allocate BlockClosure\n");
@@ -654,6 +666,7 @@ static STA_OOP interpret_loop_ex(STA_VM *vm, STA_Frame *frame,
             if (target == NULL) {
                 /* Home method already returned — signal BlockCannotReturn.
                  * Create a BlockCannotReturn exception and signal it. */
+                GC_SAVE_FRAME();
                 STA_ObjHeader *bcr_h = sta_heap_alloc(heap,
                     STA_CLS_BLOCKCANNOTRETURN, 4);
                 if (bcr_h) {

@@ -5,6 +5,7 @@
 #include "primitive_table.h"
 #include "vm_state.h"
 #include "actor/actor.h"
+#include "gc/gc.h"
 #include "format.h"
 #include "handler.h"
 #include "interpreter.h"
@@ -27,6 +28,19 @@ static inline STA_StackSlab *resolve_slab(STA_ExecContext *ctx) {
 
 static inline STA_Heap *resolve_heap(STA_ExecContext *ctx) {
     return ctx->actor ? &ctx->actor->heap : &ctx->vm->heap;
+}
+
+/* GC-aware allocation for primitives. When an actor is available,
+ * uses sta_heap_alloc_gc which triggers GC on failure. When no actor
+ * (bootstrap), falls back to plain sta_heap_alloc. */
+static inline STA_ObjHeader *prim_alloc(STA_ExecContext *ctx,
+                                         uint32_t class_index,
+                                         uint32_t nwords) {
+    if (ctx->actor) {
+        /* saved_frame was set by the interpreter before calling us. */
+        return sta_heap_alloc_gc(ctx->vm, ctx->actor, class_index, nwords);
+    }
+    return sta_heap_alloc(&ctx->vm->heap, class_index, nwords);
 }
 
 /* ── SmallInteger arithmetic primitives ────────────────────────────────── */
@@ -227,7 +241,7 @@ static int prim_smallint_printstring(STA_ExecContext *ctx, STA_OOP *args, uint8_
 
     uint32_t var_words = ((uint32_t)len + (uint32_t)(sizeof(STA_OOP) - 1))
                          / (uint32_t)sizeof(STA_OOP);
-    STA_ObjHeader *str_h = sta_heap_alloc(resolve_heap(ctx), STA_CLS_STRING, var_words);
+    STA_ObjHeader *str_h = prim_alloc(ctx, STA_CLS_STRING, var_words);
     if (!str_h) return STA_PRIM_NO_MEMORY;
 
     str_h->reserved = (uint8_t)(var_words * sizeof(STA_OOP) - (uint32_t)len);
@@ -429,7 +443,7 @@ static int prim_basic_new(STA_ExecContext *ctx, STA_OOP *args, uint8_t nargs, ST
     if (cls_idx == 0) return STA_PRIM_BAD_RECEIVER;
 
     uint8_t inst_size = STA_FORMAT_INST_VARS(fmt);
-    STA_ObjHeader *obj = sta_heap_alloc(resolve_heap(ctx), cls_idx, inst_size);
+    STA_ObjHeader *obj = prim_alloc(ctx, cls_idx, inst_size);
     if (!obj) return STA_PRIM_NO_MEMORY;
 
     STA_OOP nil_oop = ctx->vm->specials[SPC_NIL];
@@ -471,7 +485,7 @@ static int prim_basic_new_size(STA_ExecContext *ctx, STA_OOP *args, uint8_t narg
     }
 
     uint32_t total_words = (uint32_t)inst_size + var_words;
-    STA_ObjHeader *obj = sta_heap_alloc(resolve_heap(ctx), cls_idx, total_words);
+    STA_ObjHeader *obj = prim_alloc(ctx, cls_idx, total_words);
     if (!obj) return STA_PRIM_NO_MEMORY;
 
     if (is_bytes) obj->reserved = byte_padding;
@@ -695,7 +709,7 @@ static int prim_shallow_copy(STA_ExecContext *ctx, STA_OOP *args, uint8_t nargs,
     }
 
     STA_ObjHeader *h = (STA_ObjHeader *)(uintptr_t)args[0];
-    STA_ObjHeader *copy = sta_heap_alloc(resolve_heap(ctx), h->class_index, h->size);
+    STA_ObjHeader *copy = prim_alloc(ctx, h->class_index, h->size);
     if (!copy) return 7;
 
     memcpy(sta_payload(copy), sta_payload(h), (size_t)h->size * sizeof(STA_OOP));
@@ -947,7 +961,7 @@ static int prim_sym_as_string(STA_ExecContext *ctx, STA_OOP *args, uint8_t nargs
 
     uint32_t var_words = ((uint32_t)len + (uint32_t)(sizeof(STA_OOP) - 1))
                          / (uint32_t)sizeof(STA_OOP);
-    STA_ObjHeader *str_h = sta_heap_alloc(resolve_heap(ctx), STA_CLS_STRING, var_words);
+    STA_ObjHeader *str_h = prim_alloc(ctx, STA_CLS_STRING, var_words);
     if (!str_h) return STA_PRIM_NO_MEMORY;
 
     str_h->reserved = (uint8_t)(var_words * sizeof(STA_OOP) - (uint32_t)len);
