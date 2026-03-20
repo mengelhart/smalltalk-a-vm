@@ -406,6 +406,14 @@ target_compile_definitions(test_work_stealing PRIVATE
 target_link_libraries(test_work_stealing PRIVATE sta_vm Threads::Threads)
 add_test(NAME work_stealing COMMAND test_work_stealing)
 
+add_executable(test_eval_integration test_eval_integration.c)
+target_include_directories(test_eval_integration PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_compile_definitions(test_eval_integration PRIVATE
+    KERNEL_DIR="${CMAKE_SOURCE_DIR}/kernel")
+target_link_libraries(test_eval_integration PRIVATE sta_vm Threads::Threads)
+add_test(NAME eval_integration COMMAND test_eval_integration)
+
 # ── Spike 002: MPSC mailbox — TSan correctness gate ───────────────────────
 find_package(Threads REQUIRED)
 
