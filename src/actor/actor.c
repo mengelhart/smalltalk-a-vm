@@ -102,17 +102,42 @@ int sta_actor_send_msg(struct STA_Actor *sender,
     STA_OOP *copied_args = NULL;
 
     if (nargs > 0) {
-        /* Allocate an array on the target's heap for the copied args.
-         * Use GC-aware allocation so the target can collect garbage
-         * if its heap is full. */
         struct STA_VM *vm = sender->vm;
+        STA_ClassTable *ct = &vm->class_table;
+
+        /* ── Pre-flight size estimation (GitHub #295) ──────────────
+         * Estimate the total bytes needed for deep copying all args,
+         * plus the args array itself. If the target heap doesn't have
+         * enough free space, GC and/or grow it once upfront. */
+        size_t estimated = sta_deep_copy_estimate_roots(args, nargs, ct);
+
+        /* Add the args array allocation cost. */
+        size_t args_alloc = sta_alloc_size((uint32_t)nargs);
+        args_alloc = (args_alloc + 15u) & ~(size_t)15u;
+        estimated += args_alloc;
+
+        size_t free_space = target->heap.capacity - target->heap.used;
+        if (estimated > free_space) {
+            /* Grow the heap to fit the estimated payload.
+             * We do NOT GC here because mailbox-referenced objects on
+             * the target heap are not GC roots and would be collected.
+             * Per-object GC is still available as a safety net via
+             * sta_heap_alloc_gc during the actual deep copy. */
+            size_t needed = target->heap.used + estimated;
+            /* Add 50% breathing room. */
+            size_t new_cap = needed + needed / 2;
+            if (sta_heap_grow(&target->heap, new_cap) != 0)
+                return -1;
+        }
+
+        /* Allocate the args array on the target's heap.
+         * Use GC-aware allocation as a safety net (pre-flight should
+         * have ensured enough space, but defense in depth). */
         STA_ObjHeader *args_h = sta_heap_alloc_gc(vm, target,
                                                     STA_CLS_ARRAY,
                                                     (uint32_t)nargs);
         if (!args_h) return -1;
         copied_args = sta_payload(args_h);
-
-        STA_ClassTable *ct = &vm->class_table;
 
         for (uint8_t i = 0; i < nargs; i++) {
             copied_args[i] = sta_deep_copy_gc(args[i],

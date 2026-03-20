@@ -313,3 +313,69 @@ STA_OOP sta_deep_copy_gc(STA_OOP root,
 
     return ctx.failed ? 0 : result;
 }
+
+/* ── Pre-flight size estimation ──────────────────────────────────────── */
+
+/* Walk the object graph rooted at oop, accumulating the aligned
+ * allocation size of each mutable heap object. Uses the visited set
+ * to avoid double-counting (DAGs) and infinite loops (cycles). */
+static size_t estimate_oop(STA_OOP oop, VisitedSet *vs,
+                            STA_ClassTable *class_table) {
+    if (STA_IS_SMALLINT(oop) || STA_IS_CHAR(oop) || oop == 0)
+        return 0;
+
+    STA_ObjHeader *h = (STA_ObjHeader *)(uintptr_t)oop;
+    if (h->obj_flags & STA_OBJ_IMMUTABLE) return 0;
+
+    /* Already visited? */
+    if (visited_get(vs, oop) != 0) return 0;
+
+    /* Mark as visited (map to a sentinel — value doesn't matter). */
+    if (visited_put(vs, oop, 1) != 0) return 0;
+
+    /* This object's allocation cost. */
+    size_t raw = sta_alloc_size(h->size);
+    size_t alloc_bytes = (raw + 15u) & ~(size_t)15u;
+    size_t total = alloc_bytes;
+
+    /* Recurse into OOP slots (same scannable_slots logic as deep copy). */
+    uint32_t scan_count = scannable_slots(h, class_table);
+    STA_OOP *slots = sta_payload(h);
+    for (uint32_t i = 0; i < scan_count; i++) {
+        total += estimate_oop(slots[i], vs, class_table);
+    }
+
+    return total;
+}
+
+size_t sta_deep_copy_estimate(STA_OOP root, STA_ClassTable *class_table) {
+    if (STA_IS_SMALLINT(root) || STA_IS_CHAR(root) || root == 0)
+        return 0;
+
+    STA_ObjHeader *h = (STA_ObjHeader *)(uintptr_t)root;
+    if (h->obj_flags & STA_OBJ_IMMUTABLE) return 0;
+
+    VisitedSet vs;
+    if (visited_init(&vs) != 0) return 0;
+
+    size_t total = estimate_oop(root, &vs, class_table);
+
+    visited_destroy(&vs);
+    return total;
+}
+
+size_t sta_deep_copy_estimate_roots(STA_OOP *roots, uint8_t count,
+                                     STA_ClassTable *class_table) {
+    if (count == 0 || !roots) return 0;
+
+    VisitedSet vs;
+    if (visited_init(&vs) != 0) return 0;
+
+    size_t total = 0;
+    for (uint8_t i = 0; i < count; i++) {
+        total += estimate_oop(roots[i], &vs, class_table);
+    }
+
+    visited_destroy(&vs);
+    return total;
+}
