@@ -363,6 +363,15 @@ target_compile_definitions(test_deep_copy PRIVATE
 target_link_libraries(test_deep_copy PRIVATE sta_vm)
 add_test(NAME deep_copy COMMAND test_deep_copy)
 
+# ── Fix #295: Deep Copy Heap Growth ──────────────────────────────────────
+add_executable(test_deep_copy_growth test_deep_copy_growth.c)
+target_include_directories(test_deep_copy_growth PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_compile_definitions(test_deep_copy_growth PRIVATE
+    KERNEL_DIR="${CMAKE_SOURCE_DIR}/kernel")
+target_link_libraries(test_deep_copy_growth PRIVATE sta_vm)
+add_test(NAME deep_copy_growth COMMAND test_deep_copy_growth)
+
 # ── Phase 2 Epic 4: Scheduler ──────────────────────────────────────────
 find_package(Threads REQUIRED)
 
