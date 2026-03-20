@@ -100,20 +100,22 @@ static void test_nested_handlers_inner_caught(void) {
 
 static void test_oc_error_propagation(void) {
     /* BUG (GitHub #244): Catching DNU on OC>>removeFirst triggers
-     * an unhandled BlockCannotReturn (class index 28) instead of
-     * delivering the MessageNotUnderstood to the on:do: handler.
-     * The DNU handler fires (doesNotUnderstand: creates the MNU object
-     * and signals it), but somewhere in the unwinding a block-cannot-return
-     * escapes. Likely related to the ensure:/longjmp Phase 1 limitation.
+     * unhandled BlockCannotReturn (class index 28) instead of delivering
+     * the MessageNotUnderstood to the on:do: handler.
      *
-     * KNOWN_FAIL — skipped to avoid aborting the test run.
-     * Uncomment when the bug is fixed:
+     * KNOWN_FAIL — re-tested after Phase 2 Epics 1-4 (2026-03-19), still fails.
+     * Epic 1 fixed ensure: unwinding, but this path involves DNU signal
+     * propagation through longjmp which still escapes as BlockCannotReturn.
+     * Likely: doesNotUnderstand: method uses a block that attempts NLR
+     * after the DNU handler's longjmp has already unwound the home frame.
+     *
+     * Uncomment when fixed:
      *   assert_eval(
      *       "[OrderedCollection new removeFirst] "
      *       "on: MessageNotUnderstood do: [:e | 'dnu caught']",
      *       "'dnu caught'");
      */
-    printf("SKIP (known bug: DNU catch triggers BlockCannotReturn) ");
+    printf("SKIP (known bug #244: DNU catch triggers BlockCannotReturn) ");
 }
 
 /* ── Additional: Error messageText round-trip ─────────────────────────── */

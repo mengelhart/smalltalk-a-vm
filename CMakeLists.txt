@@ -39,6 +39,7 @@ add_library(sta_vm STATIC
     src/image/image.c
     src/scheduler/scheduler.c
     src/scheduler/deque.c
+    src/gc/gc.c
 )
 
 target_include_directories(sta_vm

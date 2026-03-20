@@ -423,6 +423,13 @@ target_link_libraries(test_scheduler_stress PRIVATE sta_vm Threads::Threads)
 add_test(NAME scheduler_stress COMMAND test_scheduler_stress)
 set_tests_properties(scheduler_stress PROPERTIES TIMEOUT 30)
 
+# ── Phase 2 Epic 5: Per-Actor GC ──────────────────────────────────────────
+add_executable(test_gc test_gc.c)
+target_include_directories(test_gc PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(test_gc PRIVATE sta_vm)
+add_test(NAME gc COMMAND test_gc)
+
 # ── Spike 002: MPSC mailbox — TSan correctness gate ───────────────────────
 find_package(Threads REQUIRED)
 
