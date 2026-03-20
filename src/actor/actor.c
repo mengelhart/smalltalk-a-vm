@@ -118,18 +118,16 @@ int sta_actor_send_msg(struct STA_Actor *sender,
 
         size_t free_space = target->heap.capacity - target->heap.used;
         if (estimated > free_space) {
-            /* Try GC first. */
-            sta_gc_collect(vm, target);
-            free_space = target->heap.capacity - target->heap.used;
-
-            if (estimated > free_space) {
-                /* Still insufficient — grow the heap. */
-                size_t needed = target->heap.used + estimated;
-                /* Add 50% breathing room. */
-                size_t new_cap = needed + needed / 2;
-                if (sta_heap_grow(&target->heap, new_cap) != 0)
-                    return -1;
-            }
+            /* Grow the heap to fit the estimated payload.
+             * We do NOT GC here because mailbox-referenced objects on
+             * the target heap are not GC roots and would be collected.
+             * Per-object GC is still available as a safety net via
+             * sta_heap_alloc_gc during the actual deep copy. */
+            size_t needed = target->heap.used + estimated;
+            /* Add 50% breathing room. */
+            size_t new_cap = needed + needed / 2;
+            if (sta_heap_grow(&target->heap, new_cap) != 0)
+                return -1;
         }
 
         /* Allocate the args array on the target's heap.
