@@ -690,6 +690,45 @@ ArrayedCollection, Character, String, Symbol, ByteArray, Array, OrderedCollectio
 - Sanitizers: TSan clean (all 7 test files), ASan clean (all 7 test files)
 - Tests: 75 CTest targets passing (68 existing + 7 new test files)
 
+### Epic 5: Per-Actor Garbage Collection — COMPLETE
+- GitHub: Epic #288, stories #289–#294 (all closed)
+- Branch: phase2/epic-5-gc
+- New files:
+  - `src/gc/gc.h` — GC public API: sta_gc_collect, sta_heap_alloc_gc, sta_heap_grow, STA_GCStats struct (24 bytes)
+  - `src/gc/gc.c` — Cheney semi-space copying collector: gc_copy (copy one object from→to space), gc_scan_object (update OOP slots), gc_scan_roots (stack frames, handler chain, actor OOP fields), forwarding pointer mechanics (STA_GC_FORWARDED + first payload word, side table for zero-payload objects), heap growth policy (>75% survivors → 2x, >50% → 1.5x), GC statistics
+  - `tests/test_gc.c` — 8 core GC unit tests
+  - `tests/test_gc_heap.c` — 7 heap integration tests
+  - `tests/test_gc_roots.c` — 6 root enumeration correctness tests
+  - `tests/test_gc_safety.c` — 5 GC safety audit tests
+  - `tests/test_gc_scheduled.c` — 6 multi-threaded stress tests
+  - `tests/test_gc_stats.c` — 6 diagnostics tests
+- Modified files:
+  - `src/actor/actor.h` — STA_Actor gains STA_GCStats gc_stats (24 bytes inline)
+  - `src/actor/actor.c` — sta_actor_send_msg uses GC-aware allocation (sta_heap_alloc_gc, sta_deep_copy_gc)
+  - `src/actor/deep_copy.h/c` — Added sta_deep_copy_gc (GC-aware variant with vm/actor pointers)
+  - `src/vm/interpreter.c` — GC_SAVE_FRAME macro before allocation sites; 6 allocation sites audited and fixed for GC safety (DNU Message/Array, NLR BlockCannotReturn, context alloc in sta_interpret/sta_interpret_actor)
+  - `src/vm/primitive_table.c` — prim_alloc helper (GC-aware allocation for primitives); all allocating primitives (31, 32, 41, 122, 200, 92) wired through prim_alloc
+- Algorithm: Cheney semi-space copying collector, per-actor, stop-the-world within actor only
+  - Trigger: allocation failure → GC → retry → grow → retry → OOM
+  - Roots: stack frames (method, receiver, context, args, temps, expression stack), handler chain (exception_class, handler_block, ensure_block), actor struct (behavior_class, behavior_obj, signaled_exception)
+  - Pointer classification: SmallInt/Character → skip, immutable space → skip (address range check), from-space → copy/forward, to-space → leave, NULL → skip
+  - Scannable slots: format-aware (byte-indexable → instVars only, CompiledMethod → header + literals only)
+  - Forwarding: gc_flags |= STA_GC_FORWARDED, new address in first payload word; side table hash map for zero-payload objects
+  - Growth: survivors > 75% → double, > 50% → 1.5x; post-GC sta_heap_grow with full pointer fixup
+- GC statistics (inline in STA_Actor, 24 bytes):
+  - gc_count: number of collections (cumulative)
+  - gc_bytes_reclaimed: cumulative bytes freed
+  - gc_bytes_survived: bytes surviving most recent GC
+  - current_heap_size: read from actor->heap.capacity (not stored)
+- Density: sizeof(STA_Actor) = 184 bytes (was 160, +24 for GC stats)
+- Stress test results (M4 Max, 16 cores):
+  - 100 actors × 500 messages (8 allocs per message, retain 2): max_heap=512B, all retained objects valid
+  - GC + preemption: 8 actors × 2000-iteration allocating loops, preempted and resumed correctly
+  - Concurrent GC all cores: 32 actors on 16 threads, 100 messages each, no corruption
+- Sanitizers: ASan clean (all test files), TSan clean (all test files)
+- Deferred: Deep copy heap growth on allocation failure (GitHub #295), immutable space atomic bounds for concurrent GC reads (GitHub #296)
+- Tests: 81 CTest targets passing (75 existing + 6 new test files, 38 new tests)
+
 ---
 
 ## Current phase

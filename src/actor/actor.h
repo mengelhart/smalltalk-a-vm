@@ -11,6 +11,7 @@
 #include "vm/frame.h"
 #include "vm/handler.h"
 #include "vm/oop.h"
+#include "gc/gc.h"
 #include "mailbox.h"
 #include <stdatomic.h>
 #include <stdint.h>
@@ -64,6 +65,9 @@ struct STA_Actor {
      * NULL means the actor is not mid-execution (start fresh from mailbox).
      * Non-NULL means the actor was preempted and should resume here. */
     struct STA_Frame *saved_frame;
+
+    /* Per-actor GC statistics (Story 6). 24 bytes inline. */
+    STA_GCStats       gc_stats;
 
     /* Supervisor linkage — NULL placeholder, wired in Epic 6 */
     void             *supervisor;

@@ -6,6 +6,8 @@
 #include "vm/class_table.h"
 #include "vm/format.h"
 #include "vm/interpreter.h"  /* STA_CLASS_SLOT_FORMAT */
+#include "gc/gc.h"           /* sta_heap_alloc_gc */
+#include "actor.h"           /* STA_Actor */
 #include <stdlib.h>
 #include <string.h>
 
@@ -127,6 +129,10 @@ typedef struct {
     STA_ClassTable *class_table;
     VisitedSet      visited;
     bool            failed;   /* set on allocation failure */
+    /* GC-aware mode: when vm and actor are non-NULL, use
+     * sta_heap_alloc_gc instead of raw sta_heap_alloc. */
+    struct STA_VM    *vm;
+    struct STA_Actor *actor;
 } CopyCtx;
 
 /* Forward declaration. */
@@ -171,10 +177,16 @@ static uint32_t scannable_slots(STA_ObjHeader *h, STA_ClassTable *ct) {
 }
 
 static STA_OOP copy_heap_object(CopyCtx *ctx, STA_ObjHeader *src_h) {
-    /* Allocate the copy on the target heap. */
-    STA_ObjHeader *dst_h = sta_heap_alloc(ctx->target,
-                                           src_h->class_index,
-                                           src_h->size);
+    /* Allocate the copy on the target heap.
+     * Use GC-aware path when vm/actor are available. */
+    STA_ObjHeader *dst_h;
+    if (ctx->vm && ctx->actor) {
+        dst_h = sta_heap_alloc_gc(ctx->vm, ctx->actor,
+                                   src_h->class_index, src_h->size);
+    } else {
+        dst_h = sta_heap_alloc(ctx->target,
+                                src_h->class_index, src_h->size);
+    }
     if (!dst_h) {
         ctx->failed = true;
         return 0;
@@ -261,6 +273,37 @@ STA_OOP sta_deep_copy(STA_OOP root,
     ctx.target = target;
     ctx.class_table = class_table;
     ctx.failed = false;
+    ctx.vm = NULL;
+    ctx.actor = NULL;
+
+    if (visited_init(&ctx.visited) != 0) return 0;
+
+    STA_OOP result = copy_heap_object(&ctx, h);
+
+    visited_destroy(&ctx.visited);
+
+    return ctx.failed ? 0 : result;
+}
+
+STA_OOP sta_deep_copy_gc(STA_OOP root,
+                          STA_Heap *source,
+                          struct STA_VM *vm,
+                          struct STA_Actor *target_actor,
+                          STA_ClassTable *class_table) {
+    (void)source;
+
+    if (STA_IS_SMALLINT(root) || STA_IS_CHAR(root) || root == 0)
+        return root;
+
+    STA_ObjHeader *h = (STA_ObjHeader *)(uintptr_t)root;
+    if (h->obj_flags & STA_OBJ_IMMUTABLE) return root;
+
+    CopyCtx ctx;
+    ctx.target = &target_actor->heap;
+    ctx.class_table = class_table;
+    ctx.failed = false;
+    ctx.vm = vm;
+    ctx.actor = target_actor;
 
     if (visited_init(&ctx.visited) != 0) return 0;
 

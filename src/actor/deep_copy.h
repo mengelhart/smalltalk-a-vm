@@ -14,8 +14,10 @@
 #include "vm/oop.h"
 #include "vm/heap.h"
 
-/* Forward-declare STA_ClassTable to avoid pulling in class_table.h. */
+/* Forward declarations. */
 typedef struct STA_ClassTable STA_ClassTable;
+struct STA_VM;
+struct STA_Actor;
 
 /* ── Deep copy ───────────────────────────────────────────────────────── */
 
@@ -39,3 +41,15 @@ STA_OOP sta_deep_copy(STA_OOP root,
                        STA_Heap *source,
                        STA_Heap *target,
                        STA_ClassTable *class_table);
+
+/* GC-aware variant: uses sta_heap_alloc_gc on the target actor's heap,
+ * so allocation failure triggers GC before giving up.
+ * The target_actor must be the actor that owns the target heap.
+ * vm is needed for GC (immutable space bounds, class table).
+ *
+ * Returns 0 on allocation failure (after GC + retry). */
+STA_OOP sta_deep_copy_gc(STA_OOP root,
+                          STA_Heap *source,
+                          struct STA_VM *vm,
+                          struct STA_Actor *target_actor,
+                          STA_ClassTable *class_table);

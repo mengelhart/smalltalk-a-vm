@@ -94,15 +94,18 @@ static void test_poly_eq_cross_type(void) {
     /* BUG (GitHub #243): 42 = 'hello' should return false, but returns 42.
      * SmallInteger = (prim 7) fails when arg is not SmallInt, and the
      * primitive failure fallback returns the receiver instead of false.
-     * The primitive needs a Smalltalk fallback method that returns false
-     * on type mismatch, or prim 7 needs to return false for non-SmallInt args.
      *
-     * KNOWN_FAIL — skipped to avoid aborting the test run.
-     * Uncomment when the bug is fixed:
+     * KNOWN_FAIL — re-tested after Phase 2 Epics 1-4 (2026-03-19), still fails.
+     * Root cause: prim 7 returns STA_PRIM_FAIL on type mismatch, but there
+     * is no Smalltalk fallback method for = on SmallInteger. The primitive
+     * failure path returns the receiver. Needs a SmallInteger>>= fallback
+     * method that returns false, or prim 7 should return false for non-SmallInt args.
+     *
+     * Uncomment when fixed:
      *   assert_eval("42 = 'hello'", "false");
      *   assert_eval("'hello' = 42", "false");
      */
-    printf("SKIP (known bug: cross-type = returns receiver) ");
+    printf("SKIP (known bug #243: cross-type = returns receiver) ");
 }
 
 /* ── Test 3: Hash consistency (a = b implies a hash = b hash) ─────────── */
