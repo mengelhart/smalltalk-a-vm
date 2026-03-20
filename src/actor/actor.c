@@ -5,6 +5,7 @@
 #include "actor.h"
 #include "deep_copy.h"
 #include "mailbox_msg.h"
+#include "scheduler/scheduler.h"
 #include "vm/vm_state.h"
 #include "vm/interpreter.h"
 #include "vm/method_dict.h"
@@ -135,6 +136,26 @@ int sta_actor_send_msg(struct STA_Actor *sender,
          * target heap will be reclaimed by GC eventually. */
         sta_mailbox_msg_destroy(msg);
         return rc;  /* STA_ERR_MAILBOX_FULL */
+    }
+
+    /* Auto-schedule: if the target is idle (CREATED or SUSPENDED) and the
+     * scheduler is running, transition to READY and enqueue.
+     * Uses CAS to ensure only one sender wins the race. */
+    STA_Scheduler *sched = target->vm ? target->vm->scheduler : NULL;
+    if (sched && atomic_load_explicit(&sched->running, memory_order_acquire)) {
+        uint32_t expected = STA_ACTOR_SUSPENDED;
+        if (atomic_compare_exchange_strong_explicit(
+                &target->state, &expected, STA_ACTOR_READY,
+                memory_order_acq_rel, memory_order_relaxed)) {
+            sta_scheduler_enqueue(sched, target);
+        } else {
+            expected = STA_ACTOR_CREATED;
+            if (atomic_compare_exchange_strong_explicit(
+                    &target->state, &expected, STA_ACTOR_READY,
+                    memory_order_acq_rel, memory_order_relaxed)) {
+                sta_scheduler_enqueue(sched, target);
+            }
+        }
     }
 
     return 0;
