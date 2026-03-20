@@ -52,11 +52,13 @@ STA_ObjHeader *sta_heap_alloc_gc(struct STA_VM *vm, struct STA_Actor *actor,
  * Returns 0 on success, -1 on allocation failure. */
 int sta_heap_grow(STA_Heap *heap, size_t min_capacity);
 
-/* ── GC statistics (Story 6 placeholder) ───────────────────────────────── */
+/* ── GC statistics ─────────────────────────────────────────────────────── */
 
 typedef struct STA_GCStats {
     uint32_t gc_count;              /* number of collections              */
+    uint32_t _pad;                  /* alignment padding                  */
     size_t   gc_bytes_reclaimed;    /* cumulative bytes freed             */
     size_t   gc_bytes_survived;     /* bytes surviving most recent GC     */
-    size_t   current_heap_size;     /* current heap capacity              */
+    /* current_heap_size: read from actor->heap.capacity directly. */
 } STA_GCStats;
+/* sizeof = 24 bytes on LP64 (4 + 4 + 8 + 8) */

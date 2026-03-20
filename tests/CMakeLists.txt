@@ -452,6 +452,14 @@ target_compile_definitions(test_gc_safety PRIVATE
 target_link_libraries(test_gc_safety PRIVATE sta_vm)
 add_test(NAME gc_safety COMMAND test_gc_safety)
 
+add_executable(test_gc_stats test_gc_stats.c)
+target_include_directories(test_gc_stats PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_compile_definitions(test_gc_stats PRIVATE
+    KERNEL_DIR="${CMAKE_SOURCE_DIR}/kernel")
+target_link_libraries(test_gc_stats PRIVATE sta_vm)
+add_test(NAME gc_stats COMMAND test_gc_stats)
+
 add_executable(test_gc_scheduled test_gc_scheduled.c)
 target_include_directories(test_gc_scheduled PRIVATE
     ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)

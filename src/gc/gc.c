@@ -397,6 +397,7 @@ int sta_gc_collect(struct STA_VM *vm, struct STA_Actor *actor) {
 
     /* Phase 3: Update the actor's heap to use to-space. */
     size_t survived = (size_t)(gc.to_alloc - gc.to_base);
+    size_t from_used = heap->used;
 
     /* Free old from-space. */
     free(heap->base);
@@ -405,6 +406,13 @@ int sta_gc_collect(struct STA_VM *vm, struct STA_Actor *actor) {
     heap->base     = to_base;
     heap->capacity = to_capacity;
     heap->used     = survived;
+
+    /* Update GC statistics. */
+    actor->gc_stats.gc_count++;
+    actor->gc_stats.gc_bytes_survived = survived;
+    if (from_used > survived) {
+        actor->gc_stats.gc_bytes_reclaimed += (from_used - survived);
+    }
 
     /* Clean up side table. */
     fwd_table_destroy(&gc.fwd_table);
