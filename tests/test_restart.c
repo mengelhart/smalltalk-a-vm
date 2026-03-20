@@ -291,20 +291,16 @@ static void test_scheduler_restart(void) {
     STA_OOP crash_sel = intern("crash");
     sta_actor_send_msg(g_vm->root_actor, child, crash_sel, NULL, 0);
 
-    /* Wait for the supervisor to process the failure and restart the child.
-     * Do NOT dereference `child` — the supervisor's RESTART handler frees
-     * the old actor. Instead, watch the child spec for a new actor_id. */
-    for (int i = 0; i < 400; i++) {
-        STA_ChildSpec *spec = sup->sup_data->children;
-        if (spec && spec->current_actor &&
-            spec->current_actor->actor_id != old_child_id) break;
-        struct timespec ts = { .tv_nsec = 5000000 };
-        nanosleep(&ts, NULL);
-    }
+    /* Wait for the scheduler to process crash → notify → restart.
+     * Sleep long enough, then stop the scheduler so all threads are joined
+     * before we inspect shared state. No polling of child spec from the
+     * main thread — that would race with the scheduler thread's writes. */
+    struct timespec ts = { .tv_sec = 0, .tv_nsec = 200000000 };  /* 200 ms */
+    nanosleep(&ts, NULL);
 
     sta_scheduler_stop(g_vm);
 
-    /* Child spec should now point to a new actor with a different ID. */
+    /* Scheduler stopped — all worker threads joined, safe to read. */
     STA_ChildSpec *spec = sup->sup_data->children;
     assert(spec != NULL);
     assert(spec->current_actor != NULL);
