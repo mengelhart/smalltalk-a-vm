@@ -13,7 +13,6 @@
 #include "vm/method_dict.h"
 #include "vm/class_table.h"
 #include "vm/special_objects.h"
-#include "vm/symbol_table.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -281,11 +280,10 @@ static void notify_supervisor(struct STA_VM *vm, struct STA_Actor *actor) {
      *   args[1] = error description symbol (intern a simple string) */
     STA_OOP actor_id_oop = STA_SMALLINT_OOP((intptr_t)actor->actor_id);
 
-    /* Reason: intern "unknownError" as a symbol in immutable space.
+    /* Reason: use pre-interned symbol from special objects table.
      * TODO: extract the actual exception class name from signaled_exception
      * once thread-safe access to the actor's heap is guaranteed. */
-    STA_OOP reason = sta_symbol_intern(&vm->immutable_space, &vm->symbol_table,
-                                        "unknownError", 12);
+    STA_OOP reason = sta_spc_get(SPC_UNKNOWN_ERROR);
 
     STA_OOP selector = sta_spc_get(SPC_CHILD_FAILED_REASON);
 

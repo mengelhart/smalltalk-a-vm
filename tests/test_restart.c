@@ -279,6 +279,10 @@ static void test_scheduler_restart(void) {
     child->behavior_obj = (STA_OOP)(uintptr_t)child_obj;
     atomic_store_explicit(&child->state, STA_ACTOR_SUSPENDED, memory_order_relaxed);
 
+    /* Save the old actor_id — the old actor pointer becomes dangling after
+     * the supervisor destroys it, and malloc may reuse the address. */
+    uint32_t old_child_id = child->actor_id;
+
     /* Start scheduler. */
     sta_scheduler_init(g_vm, 2);
     sta_scheduler_start(g_vm);
@@ -289,21 +293,22 @@ static void test_scheduler_restart(void) {
 
     /* Wait for the supervisor to process the failure and restart the child.
      * Do NOT dereference `child` — the supervisor's RESTART handler frees
-     * the old actor. Instead, watch the child spec for a new pointer. */
+     * the old actor. Instead, watch the child spec for a new actor_id. */
     for (int i = 0; i < 400; i++) {
         STA_ChildSpec *spec = sup->sup_data->children;
-        if (spec && spec->current_actor && spec->current_actor != child) break;
+        if (spec && spec->current_actor &&
+            spec->current_actor->actor_id != old_child_id) break;
         struct timespec ts = { .tv_nsec = 5000000 };
         nanosleep(&ts, NULL);
     }
 
     sta_scheduler_stop(g_vm);
 
-    /* Child spec should now point to a new actor (different from old child). */
+    /* Child spec should now point to a new actor with a different ID. */
     STA_ChildSpec *spec = sup->sup_data->children;
     assert(spec != NULL);
     assert(spec->current_actor != NULL);
-    assert(spec->current_actor != child);
+    assert(spec->current_actor->actor_id != old_child_id);
 
     sta_scheduler_destroy(g_vm);
     sta_actor_destroy(sup);
@@ -319,10 +324,7 @@ int main(void) {
     test_restart_fresh_heap();
     test_restart_old_actor_freed();
     test_restart_processes_messages();
-    /* test_scheduler_restart disabled — sta_symbol_intern is not thread-safe
-     * and crashes when called from notify_supervisor on a scheduler thread.
-     * Fix: pre-intern "unknownError" at bootstrap. See GitHub issue. */
-    /* test_scheduler_restart(); */
-    printf("All restart tests passed (scheduler test disabled — see TODO).\n");
+    test_scheduler_restart();
+    printf("All restart tests passed.\n");
     return 0;
 }

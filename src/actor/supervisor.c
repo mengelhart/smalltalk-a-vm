@@ -10,7 +10,6 @@
 #include "vm/oop.h"
 #include "vm/heap.h"
 #include "vm/special_objects.h"
-#include "vm/symbol_table.h"
 #include "scheduler/scheduler.h"
 #include <stdlib.h>
 #include <stdatomic.h>
@@ -156,9 +155,7 @@ static struct STA_Actor *restart_child(struct STA_Actor *supervisor,
     }
 
     /* Send #initialize to the new actor's mailbox. */
-    STA_OOP init_sel = sta_symbol_intern(&vm->immutable_space,
-                                          &vm->symbol_table,
-                                          "initialize", 10);
+    STA_OOP init_sel = sta_spc_get(SPC_INITIALIZE);
     if (init_sel != 0) {
         STA_MailboxMsg *init_msg = sta_mailbox_msg_create(init_sel, NULL, 0,
                                                             supervisor->actor_id);

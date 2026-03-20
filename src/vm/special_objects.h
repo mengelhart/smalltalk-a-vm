@@ -29,7 +29,9 @@
 #define SPC_SHUTDOWN              10u  /* #shutDown symbol                    */
 #define SPC_RUN                   11u  /* #run symbol                         */
 #define SPC_CHILD_FAILED_REASON   12u  /* #childFailed:reason: symbol (Epic 6) */
-/* Indices 13–31: reserved for future well-known objects, initialized to 0. */
+#define SPC_UNKNOWN_ERROR         13u  /* #unknownError symbol (Epic 6)        */
+#define SPC_INITIALIZE            14u  /* #initialize symbol (Epic 6)          */
+/* Indices 15–31: reserved for future well-known objects, initialized to 0. */
 
 /* ── The table ─────────────────────────────────────────────────────────── */
 
