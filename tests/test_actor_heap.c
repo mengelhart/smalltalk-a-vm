@@ -36,8 +36,8 @@ static void test_heap_independent_backing_memory(void) {
     assert(sta_heap_capacity(&a->heap) >= 4096);
     assert(sta_heap_capacity(&b->heap) >= 4096);
 
-    sta_actor_destroy(a);
-    sta_actor_destroy(b);
+    sta_actor_terminate(a);
+    sta_actor_terminate(b);
 }
 
 static void test_alloc_does_not_affect_other_actor(void) {
@@ -64,8 +64,8 @@ static void test_alloc_does_not_affect_other_actor(void) {
     assert(hb2 != NULL);
     assert(sta_heap_used(&a->heap) == a_used);
 
-    sta_actor_destroy(a);
-    sta_actor_destroy(b);
+    sta_actor_terminate(a);
+    sta_actor_terminate(b);
 }
 
 static void test_objects_on_correct_heap(void) {
@@ -93,8 +93,8 @@ static void test_objects_on_correct_heap(void) {
     assert(ha_addr < b_base || ha_addr >= b_end);
     assert(hb_addr < a_base || hb_addr >= a_end);
 
-    sta_actor_destroy(a);
-    sta_actor_destroy(b);
+    sta_actor_terminate(a);
+    sta_actor_terminate(b);
 }
 
 static void test_heap_exhaustion_independent(void) {
@@ -114,8 +114,8 @@ static void test_heap_exhaustion_independent(void) {
     STA_ObjHeader *hb = sta_heap_alloc(&b->heap, 2, 1);
     assert(hb != NULL);
 
-    sta_actor_destroy(a);
-    sta_actor_destroy(b);
+    sta_actor_terminate(a);
+    sta_actor_terminate(b);
 }
 
 static void test_different_heap_sizes(void) {
@@ -127,8 +127,8 @@ static void test_different_heap_sizes(void) {
     assert(sta_heap_capacity(&large->heap) >= 8192);
     assert(sta_heap_capacity(&large->heap) > sta_heap_capacity(&small->heap));
 
-    sta_actor_destroy(small);
-    sta_actor_destroy(large);
+    sta_actor_terminate(small);
+    sta_actor_terminate(large);
 }
 
 static void test_destroy_frees_heap(void) {
@@ -142,7 +142,7 @@ static void test_destroy_frees_heap(void) {
     }
 
     /* Destroy — should not leak (ASan will catch). */
-    sta_actor_destroy(a);
+    sta_actor_terminate(a);
 }
 
 /* ── Main ────────────────────────────────────────────────────────────── */

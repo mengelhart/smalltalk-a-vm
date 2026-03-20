@@ -34,7 +34,7 @@ static void test_create_state_created(void) {
     struct STA_Actor *a = sta_actor_create(NULL, 4096, 2048);
     assert(a != NULL);
     assert(a->state == STA_ACTOR_CREATED);
-    sta_actor_destroy(a);
+    sta_actor_terminate(a);
 }
 
 static void test_heap_independent(void) {
@@ -55,8 +55,8 @@ static void test_heap_independent(void) {
     uintptr_t hb_addr = (uintptr_t)hb;
     assert(hb_addr < a_lo || hb_addr >= a_hi);
 
-    sta_actor_destroy(a);
-    sta_actor_destroy(b);
+    sta_actor_terminate(a);
+    sta_actor_terminate(b);
 }
 
 static void test_handler_chain_per_actor(void) {
@@ -79,8 +79,8 @@ static void test_handler_chain_per_actor(void) {
     assert(a->handler_top == &entry);
 
     a->handler_top = entry.prev;
-    sta_actor_destroy(a);
-    sta_actor_destroy(b);
+    sta_actor_terminate(a);
+    sta_actor_terminate(b);
 }
 
 static void test_destroy_cleanup(void) {
@@ -93,7 +93,7 @@ static void test_destroy_cleanup(void) {
     }
 
     /* Destroy should free all resources (ASan/LSan validates). */
-    sta_actor_destroy(a);
+    sta_actor_terminate(a);
 }
 
 /* ── Execution inside actors (via public API) ────────────────────────── */

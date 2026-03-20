@@ -616,7 +616,7 @@ ArrayedCollection, Character, String, Symbol, ByteArray, Array, OrderedCollectio
 - Branch: phase2/epic-2-actor-struct
 - New files:
   - `src/actor/actor.h` — Production STA_Actor struct: per-actor STA_Heap, STA_StackSlab, handler chain (handler_top, signaled_exception), lifecycle state machine (CREATED/READY/RUNNING/SUSPENDED/TERMINATED), actor_id, behavior_class, NULL placeholders for mailbox and supervisor, vm back-pointer
-  - `src/actor/actor.c` — sta_actor_create/sta_actor_destroy with heap+slab init/teardown; public API stubs retained
+  - `src/actor/actor.c` — sta_actor_create/sta_actor_terminate with heap+slab init/teardown; public API stubs retained
   - `tests/test_actor_lifecycle.c` — 9 lifecycle tests
   - `tests/test_actor_heap.c` — 6 heap isolation tests
   - `tests/test_actor_epic2.c` — 12 comprehensive tests (lifecycle, execution in actors, density measurement)

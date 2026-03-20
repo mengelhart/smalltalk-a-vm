@@ -119,7 +119,7 @@ static void test_stop_no_restart(void) {
     assert(spec->current_actor == NULL);
     assert(spec->strategy == STA_RESTART_STOP);
 
-    sta_actor_destroy(sup);
+    sta_actor_terminate(sup);
     teardown();
     printf("  PASS: test_stop_no_restart\n");
 }
@@ -169,7 +169,7 @@ static void test_stop_other_children_restart(void) {
     assert(restart_spec->current_actor != NULL);
     assert(restart_spec->current_actor->actor_id != old_restart_id);
 
-    sta_actor_destroy(sup);
+    sta_actor_terminate(sup);
     teardown();
     printf("  PASS: test_stop_other_children_restart\n");
 }
@@ -197,7 +197,7 @@ static void test_stop_actor_freed(void) {
     /* ASan will catch use-after-free or leaks. */
     assert(sup->sup_data->children->current_actor == NULL);
 
-    sta_actor_destroy(sup);
+    sta_actor_terminate(sup);
     teardown();
     printf("  PASS: test_stop_actor_freed\n");
 }
@@ -276,7 +276,7 @@ static void test_escalate_to_grandparent(void) {
     /* The new actor should have a different ID from the old parent. */
     assert(gp_spec->current_actor->actor_id != old_parent_id);
 
-    sta_actor_destroy(gp);
+    sta_actor_terminate(gp);
     teardown();
     printf("  PASS: test_escalate_to_grandparent\n");
 }
@@ -307,7 +307,7 @@ static void test_escalate_no_grandparent(void) {
     STA_ChildSpec *spec = sup->sup_data->children;
     assert(spec->current_actor == NULL);
 
-    sta_actor_destroy(sup);
+    sta_actor_terminate(sup);
     teardown();
     printf("  PASS: test_escalate_no_grandparent\n");
 }
@@ -366,7 +366,7 @@ static void test_escalate_grandparent_restarts_parent(void) {
     /* New parent should have #initialize in its mailbox. */
     assert(!sta_mailbox_is_empty(&gp_spec->current_actor->mailbox));
 
-    sta_actor_destroy(gp);
+    sta_actor_terminate(gp);
     teardown();
     printf("  PASS: test_escalate_grandparent_restarts_parent\n");
 }
@@ -480,7 +480,7 @@ static void test_mixed_strategies(void) {
     assert(gp_spec->current_actor != NULL);
     assert(gp_spec->current_actor->actor_id != old_parent_id);
 
-    sta_actor_destroy(gp);
+    sta_actor_terminate(gp);
     teardown();
     printf("  PASS: test_mixed_strategies\n");
 }

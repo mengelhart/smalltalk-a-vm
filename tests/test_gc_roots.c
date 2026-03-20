@@ -135,7 +135,7 @@ static void test_gc_during_allocation(void) {
     int rc = sta_actor_process_one(g_vm, actor);
     assert(rc == STA_ACTOR_MSG_PROCESSED);
 
-    sta_actor_destroy(actor);
+    sta_actor_terminate(actor);
     teardown();
 }
 
@@ -169,7 +169,7 @@ static void test_gc_deep_stack(void) {
     int rc = sta_actor_process_one(g_vm, actor);
     assert(rc == STA_ACTOR_MSG_PROCESSED);
 
-    sta_actor_destroy(actor);
+    sta_actor_terminate(actor);
     teardown();
 }
 
@@ -222,7 +222,7 @@ static void test_gc_state_retained(void) {
     STA_OOP key_val = sta_payload(beh)[0];  /* slot 0 = key */
     assert(key_val == STA_SMALLINT_OOP(42));
 
-    sta_actor_destroy(actor);
+    sta_actor_terminate(actor);
     teardown();
 }
 
@@ -267,7 +267,7 @@ static void test_gc_across_messages(void) {
     STA_OOP key_val = sta_payload(beh)[0];
     assert(key_val == STA_SMALLINT_OOP(10));
 
-    sta_actor_destroy(actor);
+    sta_actor_terminate(actor);
     teardown();
 }
 
@@ -299,7 +299,7 @@ static void test_gc_expression_stack(void) {
     int rc = sta_actor_process_one(g_vm, actor);
     assert(rc == STA_ACTOR_MSG_PROCESSED);
 
-    sta_actor_destroy(actor);
+    sta_actor_terminate(actor);
     teardown();
 }
 
@@ -332,7 +332,7 @@ static void test_gc_loop_allocation(void) {
     assert(rc == STA_ACTOR_MSG_PROCESSED);
 
     /* After 20 iterations of allocating+GC, the actor should still be fine. */
-    sta_actor_destroy(actor);
+    sta_actor_terminate(actor);
     teardown();
 }
 

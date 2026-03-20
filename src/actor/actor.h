@@ -47,6 +47,12 @@ struct STA_Actor {
     /* Lifecycle state machine (atomic for scheduler thread safety) */
     _Atomic uint32_t  state;
 
+    /* Reference count — protects actor from premature freeing.
+     * Created with refcount=1 (registry holds owning reference).
+     * Registry lookup increments; sta_actor_release decrements.
+     * Actor is freed when refcount reaches 0. See #316, #317. */
+    _Atomic uint32_t  refcount;
+
     /* Actor identity */
     uint32_t          actor_id;
 
@@ -82,13 +88,23 @@ struct STA_Actor {
 /* Create a new actor with the given heap and stack sizes.
  * The actor is allocated via malloc. heap and slab are initialized in-place.
  * Returns NULL on allocation failure.
- * Initial state: STA_ACTOR_CREATED. */
+ * Initial state: STA_ACTOR_CREATED, refcount = 1 (registry ref). */
 struct STA_Actor *sta_actor_create(struct STA_VM *vm,
                                    size_t heap_size,
                                    size_t stack_size);
 
-/* Destroy an actor — deinitialize heap and slab, free the struct. */
-void sta_actor_destroy(struct STA_Actor *actor);
+/* Logically terminate an actor — fixes #316, #317.
+ * Sets state to TERMINATED, unregisters from registry (no new lookups),
+ * drains the mailbox, recursively terminates supervised children,
+ * and releases the registry's reference (decrements refcount).
+ * Does NOT immediately free the struct — that happens when refcount
+ * reaches 0 via sta_actor_release. */
+void sta_actor_terminate(struct STA_Actor *actor);
+
+/* Release a reference to an actor (decrement refcount).
+ * When refcount reaches 0, frees the actor's resources and struct.
+ * Acquired via sta_registry_lookup or sta_scheduler_enqueue. */
+void sta_actor_release(struct STA_Actor *actor);
 
 /* ── Error codes ────────────────────────────────────────────────────── */
 

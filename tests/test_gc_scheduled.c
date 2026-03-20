@@ -178,7 +178,7 @@ static void test_10_actors_100_gc_messages(void) {
     }
 
     sta_scheduler_destroy(vm);
-    for (int i = 0; i < T1_ACTORS; i++) sta_actor_destroy(actors[i]);
+    for (int i = 0; i < T1_ACTORS; i++) sta_actor_terminate(actors[i]);
     sta_vm_destroy(vm);
     #undef T1_ACTORS
     #undef T1_MSGS
@@ -264,7 +264,7 @@ static void test_mixed_retention(void) {
     }
 
     sta_scheduler_destroy(vm);
-    for (int i = 0; i < T2_ACTORS; i++) sta_actor_destroy(actors[i]);
+    for (int i = 0; i < T2_ACTORS; i++) sta_actor_terminate(actors[i]);
     sta_vm_destroy(vm);
     #undef T2_ACTORS
 }
@@ -318,7 +318,7 @@ static void test_gc_loop_scheduled(void) {
     }
 
     sta_scheduler_destroy(vm);
-    for (int i = 0; i < T3_ACTORS; i++) sta_actor_destroy(actors[i]);
+    for (int i = 0; i < T3_ACTORS; i++) sta_actor_terminate(actors[i]);
     sta_vm_destroy(vm);
     #undef T3_ACTORS
 }
@@ -416,7 +416,7 @@ static void test_stress_100x500(void) {
            (unsigned long long)((uint64_t)T4_ACTORS * T4_MSGS));
 
     sta_scheduler_destroy(vm);
-    for (int i = 0; i < T4_ACTORS; i++) sta_actor_destroy(actors[i]);
+    for (int i = 0; i < T4_ACTORS; i++) sta_actor_terminate(actors[i]);
     free(actors);
     sta_vm_destroy(vm);
     #undef T4_ACTORS
@@ -473,7 +473,7 @@ static void test_gc_with_preemption(void) {
     }
 
     sta_scheduler_destroy(vm);
-    for (int i = 0; i < T5_ACTORS; i++) sta_actor_destroy(actors[i]);
+    for (int i = 0; i < T5_ACTORS; i++) sta_actor_terminate(actors[i]);
     sta_vm_destroy(vm);
     #undef T5_ACTORS
 }
@@ -542,7 +542,7 @@ static void test_concurrent_gc_all_cores(void) {
     printf("(%d threads, %u actors) ", (int)nthreads, nactors);
 
     sta_scheduler_destroy(vm);
-    for (uint32_t i = 0; i < nactors; i++) sta_actor_destroy(actors[i]);
+    for (uint32_t i = 0; i < nactors; i++) sta_actor_terminate(actors[i]);
     free(actors);
     sta_vm_destroy(vm);
 }

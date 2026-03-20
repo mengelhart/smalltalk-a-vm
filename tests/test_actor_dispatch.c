@@ -108,7 +108,7 @@ static void test_process_empty_returns_zero(void) {
     int rc = sta_actor_process_one(g_vm, a);
     assert(rc == 0);  /* no message */
 
-    sta_actor_destroy(a);
+    sta_actor_terminate(a);
 }
 
 static void test_process_simple_method(void) {
@@ -129,7 +129,7 @@ static void test_process_simple_method(void) {
     /* Mailbox should be empty now. */
     assert(sta_mailbox_is_empty(&a->mailbox));
 
-    sta_actor_destroy(a);
+    sta_actor_terminate(a);
 }
 
 static void test_process_with_args(void) {
@@ -160,7 +160,7 @@ static void test_process_with_args(void) {
     STA_ObjHeader *beh_h = (STA_ObjHeader *)(uintptr_t)a->behavior_obj;
     assert(sta_payload(beh_h)[1] == STA_SMALLINT_OOP(42));  /* slot 1 = value */
 
-    sta_actor_destroy(a);
+    sta_actor_terminate(a);
 }
 
 static void test_process_fifo_order(void) {
@@ -197,7 +197,7 @@ static void test_process_fifo_order(void) {
     assert(sta_payload(beh_h)[0] == STA_SMALLINT_OOP(1));
     assert(sta_payload(beh_h)[1] == STA_SMALLINT_OOP(2));
 
-    sta_actor_destroy(a);
+    sta_actor_terminate(a);
 }
 
 static void test_process_state_mutation(void) {
@@ -231,7 +231,7 @@ static void test_process_state_mutation(void) {
     /* value should be 10 + 5 + 5 + 5 = 25. */
     assert(sta_payload(beh_h)[1] == STA_SMALLINT_OOP(25));
 
-    sta_actor_destroy(a);
+    sta_actor_terminate(a);
 }
 
 static void test_method_not_found_returns_error(void) {
@@ -246,7 +246,7 @@ static void test_method_not_found_returns_error(void) {
     int rc = sta_actor_process_one(g_vm, a);
     assert(rc == -1);  /* method not found */
 
-    sta_actor_destroy(a);
+    sta_actor_terminate(a);
 }
 
 /* ── Main ─────────────────────────────────────────────────────────────── */

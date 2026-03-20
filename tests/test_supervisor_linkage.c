@@ -46,7 +46,7 @@ static void test_supervisor_init(void) {
     assert(sup->sup_data->restart_count == 0);
     assert(sup->sup_data->window_start_ns == 0);
 
-    sta_actor_destroy(sup);
+    sta_actor_terminate(sup);
     teardown();
     printf("  PASS: test_supervisor_init\n");
 }
@@ -77,7 +77,7 @@ static void test_add_child(void) {
     assert(sup->sup_data->children->behavior_class == behavior);
     assert(sup->sup_data->children->strategy == STA_RESTART_RESTART);
 
-    sta_actor_destroy(sup);
+    sta_actor_terminate(sup);
     teardown();
     printf("  PASS: test_add_child\n");
 }
@@ -119,7 +119,7 @@ static void test_multiple_children(void) {
     }
     assert(count == 3);
 
-    sta_actor_destroy(sup);
+    sta_actor_terminate(sup);
     teardown();
     printf("  PASS: test_multiple_children\n");
 }
@@ -134,7 +134,7 @@ static void test_non_supervisor(void) {
     assert(actor->supervisor == NULL);
     assert(actor->sup_data == NULL);
 
-    sta_actor_destroy(actor);
+    sta_actor_terminate(actor);
     teardown();
     printf("  PASS: test_non_supervisor\n");
 }
@@ -145,9 +145,8 @@ static void test_sizeof_actor(void) {
     size_t sz = sizeof(struct STA_Actor);
     printf("  sizeof(STA_Actor) = %zu bytes\n", sz);
 
-    /* Was 184 bytes (Epic 5). supervisor was already void* (8 bytes), now
-     * typed as STA_Actor* (still 8). Added sup_data pointer (8) = 192. */
-    assert(sz == 192);
+    /* Was 192 bytes (Epic 6). Added _Atomic uint32_t refcount (#316/#317). */
+    assert(sz == 200);
 
     printf("  PASS: test_sizeof_actor\n");
 }
@@ -167,7 +166,7 @@ static void test_destroy_tears_down_children(void) {
     sta_supervisor_add_child(sup, behavior, STA_RESTART_STOP);
 
     /* Destroying the supervisor should free children too (ASan validates). */
-    sta_actor_destroy(sup);
+    sta_actor_terminate(sup);
 
     teardown();
     printf("  PASS: test_destroy_tears_down_children\n");
@@ -202,7 +201,7 @@ static void test_nested_supervisors(void) {
     assert(gp->supervisor == NULL);
 
     /* Destroying grandparent should cascade down. */
-    sta_actor_destroy(gp);
+    sta_actor_terminate(gp);
 
     teardown();
     printf("  PASS: test_nested_supervisors\n");

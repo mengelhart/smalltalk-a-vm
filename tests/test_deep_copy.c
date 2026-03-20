@@ -98,8 +98,8 @@ static void test_copy_smallint(void) {
                                     &g_vm->class_table);
     assert(result == STA_SMALLINT_OOP(42));
 
-    sta_actor_destroy(src);
-    sta_actor_destroy(dst);
+    sta_actor_terminate(src);
+    sta_actor_terminate(dst);
 }
 
 static void test_copy_character(void) {
@@ -111,8 +111,8 @@ static void test_copy_character(void) {
                                     &g_vm->class_table);
     assert(result == ch);
 
-    sta_actor_destroy(src);
-    sta_actor_destroy(dst);
+    sta_actor_terminate(src);
+    sta_actor_terminate(dst);
 }
 
 static void test_copy_symbol_shared(void) {
@@ -130,8 +130,8 @@ static void test_copy_symbol_shared(void) {
     /* Symbol is immutable — shared by pointer, same OOP. */
     assert(result == sym);
 
-    sta_actor_destroy(src);
-    sta_actor_destroy(dst);
+    sta_actor_terminate(src);
+    sta_actor_terminate(dst);
 }
 
 static void test_copy_nil_shared(void) {
@@ -144,8 +144,8 @@ static void test_copy_nil_shared(void) {
     /* nil is immutable — shared by pointer. */
     assert(result == nil_oop);
 
-    sta_actor_destroy(src);
-    sta_actor_destroy(dst);
+    sta_actor_terminate(src);
+    sta_actor_terminate(dst);
 }
 
 static void test_copy_mutable_array(void) {
@@ -174,8 +174,8 @@ static void test_copy_mutable_array(void) {
     /* Target heap should have grown. */
     assert(sta_heap_used(&dst->heap) > dst_used_before);
 
-    sta_actor_destroy(src);
-    sta_actor_destroy(dst);
+    sta_actor_terminate(src);
+    sta_actor_terminate(dst);
 }
 
 static void test_copy_array_with_symbol(void) {
@@ -203,8 +203,8 @@ static void test_copy_array_with_symbol(void) {
     /* SmallInt passed through. */
     assert(copy_slots[1] == STA_SMALLINT_OOP(99));
 
-    sta_actor_destroy(src);
-    sta_actor_destroy(dst);
+    sta_actor_terminate(src);
+    sta_actor_terminate(dst);
 }
 
 static void test_copy_shared_structure(void) {
@@ -248,8 +248,8 @@ static void test_copy_shared_structure(void) {
     assert(copy_c_from_a != c);
     assert(on_heap(&dst->heap, copy_c_from_a));
 
-    sta_actor_destroy(src);
-    sta_actor_destroy(dst);
+    sta_actor_terminate(src);
+    sta_actor_terminate(dst);
 }
 
 static void test_copy_cycle(void) {
@@ -279,8 +279,8 @@ static void test_copy_cycle(void) {
     /* B' should point back to A'. */
     assert(sta_payload(cb_h)[0] == copy_a);
 
-    sta_actor_destroy(src);
-    sta_actor_destroy(dst);
+    sta_actor_terminate(src);
+    sta_actor_terminate(dst);
 }
 
 static void test_copy_mutable_string(void) {
@@ -309,8 +309,8 @@ static void test_copy_mutable_string(void) {
                           - STA_BYTE_PADDING(copy_h);
     assert(memcmp(orig_bytes, copy_bytes, byte_count) == 0);
 
-    sta_actor_destroy(src);
-    sta_actor_destroy(dst);
+    sta_actor_terminate(src);
+    sta_actor_terminate(dst);
 }
 
 static void test_copy_array_containing_string(void) {
@@ -340,8 +340,8 @@ static void test_copy_array_containing_string(void) {
     assert(bc == 5);
     assert(memcmp(sta_payload(cs_h), "world", 5) == 0);
 
-    sta_actor_destroy(src);
-    sta_actor_destroy(dst);
+    sta_actor_terminate(src);
+    sta_actor_terminate(dst);
 }
 
 static void test_copy_across_two_actor_heaps(void) {
@@ -379,8 +379,8 @@ static void test_copy_across_two_actor_heaps(void) {
     sta_payload(ch)[1] = STA_SMALLINT_OOP(999);
     assert(sta_payload(arr_h)[1] == STA_SMALLINT_OOP(100));
 
-    sta_actor_destroy(actor_a);
-    sta_actor_destroy(actor_b);
+    sta_actor_terminate(actor_a);
+    sta_actor_terminate(actor_b);
 }
 
 static void test_copy_zero_oop(void) {
@@ -391,8 +391,8 @@ static void test_copy_zero_oop(void) {
                                     &g_vm->class_table);
     assert(result == 0);
 
-    sta_actor_destroy(src);
-    sta_actor_destroy(dst);
+    sta_actor_terminate(src);
+    sta_actor_terminate(dst);
 }
 
 static void test_copy_deeply_nested(void) {
@@ -424,8 +424,8 @@ static void test_copy_deeply_nested(void) {
     }
     assert(current == STA_SMALLINT_OOP(42));
 
-    sta_actor_destroy(src);
-    sta_actor_destroy(dst);
+    sta_actor_terminate(src);
+    sta_actor_terminate(dst);
 }
 
 static void test_copy_mixed_mutable_immutable(void) {
@@ -460,8 +460,8 @@ static void test_copy_mixed_mutable_immutable(void) {
     assert(cs[3] == nil_oop);           /* shared */
     assert(cs[4] == true_oop);          /* shared */
 
-    sta_actor_destroy(src);
-    sta_actor_destroy(dst);
+    sta_actor_terminate(src);
+    sta_actor_terminate(dst);
 }
 
 static void test_copy_empty_array(void) {
@@ -479,8 +479,8 @@ static void test_copy_empty_array(void) {
     assert(ch->class_index == STA_CLS_ARRAY);
     assert(ch->size == 0);
 
-    sta_actor_destroy(src);
-    sta_actor_destroy(dst);
+    sta_actor_terminate(src);
+    sta_actor_terminate(dst);
 }
 
 /* ── Main ─────────────────────────────────────────────────────────────── */

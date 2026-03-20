@@ -121,7 +121,7 @@ static void test_restart_new_actor(void) {
     /* New actor should have an initialize message in its mailbox. */
     assert(!sta_mailbox_is_empty(&spec->current_actor->mailbox));
 
-    sta_actor_destroy(sup);
+    sta_actor_terminate(sup);
     teardown();
     printf("  PASS: test_restart_new_actor\n");
 }
@@ -166,7 +166,7 @@ static void test_restart_fresh_heap(void) {
     /* Fresh heap should have minimal usage (just the behavior_obj). */
     assert(new_child->heap.used < old_used);
 
-    sta_actor_destroy(sup);
+    sta_actor_terminate(sup);
     teardown();
     printf("  PASS: test_restart_fresh_heap\n");
 }
@@ -202,7 +202,7 @@ static void test_restart_old_actor_freed(void) {
     struct STA_Actor *new_child = sup->sup_data->children->current_actor;
     assert(new_child != NULL);
 
-    sta_actor_destroy(sup);
+    sta_actor_terminate(sup);
     teardown();
     printf("  PASS: test_restart_old_actor_freed\n");
 }
@@ -255,7 +255,7 @@ static void test_restart_processes_messages(void) {
     rc = sta_actor_process_one_preemptible(g_vm, new_child);
     assert(rc == STA_ACTOR_MSG_PROCESSED);
 
-    sta_actor_destroy(sup);
+    sta_actor_terminate(sup);
     teardown();
     printf("  PASS: test_restart_processes_messages\n");
 }
@@ -306,7 +306,7 @@ static void test_scheduler_restart(void) {
     assert(spec->current_actor->actor_id != old_child_id);
 
     sta_scheduler_destroy(g_vm);
-    sta_actor_destroy(sup);
+    sta_actor_terminate(sup);
     teardown();
     printf("  PASS: test_scheduler_restart\n");
 }

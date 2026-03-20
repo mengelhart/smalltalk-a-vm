@@ -4,6 +4,7 @@
  */
 #include "registry.h"
 #include "actor.h"
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -202,6 +203,13 @@ struct STA_Actor *sta_registry_lookup(STA_ActorRegistry *reg, uint32_t actor_id)
             break;
         }
         idx = (idx + 1) & mask;
+    }
+
+    /* Increment refcount UNDER the mutex — prevents TOCTOU where the
+     * actor is found, the mutex is released, and then the actor is freed
+     * before the caller uses it. Fixes #317. */
+    if (result) {
+        atomic_fetch_add_explicit(&result->refcount, 1, memory_order_relaxed);
     }
 
     pthread_mutex_unlock(&reg->lock);

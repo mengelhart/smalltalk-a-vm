@@ -33,7 +33,7 @@ static void test_create_destroy(void) {
     assert(a->supervisor == NULL);
     assert(a->behavior_class == 0);
     assert(a->vm == NULL);
-    sta_actor_destroy(a);
+    sta_actor_terminate(a);
 }
 
 static void test_heap_initialized(void) {
@@ -41,7 +41,7 @@ static void test_heap_initialized(void) {
     assert(a != NULL);
     assert(sta_heap_capacity(&a->heap) >= 4096);
     assert(sta_heap_used(&a->heap) == 0);
-    sta_actor_destroy(a);
+    sta_actor_terminate(a);
 }
 
 static void test_slab_initialized(void) {
@@ -51,7 +51,7 @@ static void test_slab_initialized(void) {
     assert(a->slab.end > a->slab.base);
     assert(a->slab.top == a->slab.base);
     assert(a->slab.sp == a->slab.base);
-    sta_actor_destroy(a);
+    sta_actor_terminate(a);
 }
 
 static void test_state_constants(void) {
@@ -68,12 +68,12 @@ static void test_actor_id_default(void) {
     assert(a->actor_id == 0);
     a->actor_id = 42;
     assert(a->actor_id == 42);
-    sta_actor_destroy(a);
+    sta_actor_terminate(a);
 }
 
 static void test_destroy_null(void) {
     /* Should not crash. */
-    sta_actor_destroy(NULL);
+    sta_actor_terminate(NULL);
 }
 
 static void test_sizeof_actor(void) {
@@ -92,7 +92,7 @@ static void test_heap_alloc_on_actor(void) {
     assert(h->size == 2);
     assert(sta_heap_used(&a->heap) > 0);
 
-    sta_actor_destroy(a);
+    sta_actor_terminate(a);
 }
 
 static void test_two_actors_independent(void) {
@@ -116,8 +116,8 @@ static void test_two_actors_independent(void) {
     /* Heaps are at different addresses. */
     assert(a->heap.base != b->heap.base);
 
-    sta_actor_destroy(a);
-    sta_actor_destroy(b);
+    sta_actor_terminate(a);
+    sta_actor_terminate(b);
 }
 
 /* ── Main ────────────────────────────────────────────────────────────── */

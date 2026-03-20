@@ -112,7 +112,7 @@ static void test_estimate_single_array(void) {
     size_t expected = (sta_alloc_size(5) + 15u) & ~(size_t)15u;
     assert(est == expected);
 
-    sta_actor_destroy(src);
+    sta_actor_terminate(src);
 }
 
 static void test_estimate_nested(void) {
@@ -128,7 +128,7 @@ static void test_estimate_nested(void) {
     size_t inner_sz = (sta_alloc_size(2) + 15u) & ~(size_t)15u;
     assert(est == outer_sz + inner_sz);
 
-    sta_actor_destroy(src);
+    sta_actor_terminate(src);
 }
 
 static void test_estimate_shared_not_double_counted(void) {
@@ -153,7 +153,7 @@ static void test_estimate_shared_not_double_counted(void) {
     /* 3 objects of size 1: a, b, shared */
     assert(est == 3 * obj1);
 
-    sta_actor_destroy(src);
+    sta_actor_terminate(src);
 }
 
 static void test_estimate_cycle(void) {
@@ -170,7 +170,7 @@ static void test_estimate_cycle(void) {
     size_t obj1 = (sta_alloc_size(1) + 15u) & ~(size_t)15u;
     assert(est == 2 * obj1);
 
-    sta_actor_destroy(src);
+    sta_actor_terminate(src);
 }
 
 /* ── Large payload send tests ─────────────────────────────────────────── */
@@ -230,8 +230,8 @@ static void test_send_large_payload_to_small_heap(void) {
     assert(tgt->heap.capacity > 128);
 
     sta_mailbox_msg_destroy(msg);
-    sta_actor_destroy(src);
-    sta_actor_destroy(tgt);
+    sta_actor_terminate(src);
+    sta_actor_terminate(tgt);
 }
 
 static void test_send_multiple_large_messages(void) {
@@ -287,8 +287,8 @@ static void test_send_multiple_large_messages(void) {
     /* Heap should have grown from the initial 128 bytes. */
     assert(tgt->heap.capacity > 128);
 
-    sta_actor_destroy(src);
-    sta_actor_destroy(tgt);
+    sta_actor_terminate(src);
+    sta_actor_terminate(tgt);
 }
 
 static void test_send_deeply_nested_structure(void) {
@@ -327,8 +327,8 @@ static void test_send_deeply_nested_structure(void) {
     assert(current == STA_SMALLINT_OOP(999));
 
     sta_mailbox_msg_destroy(msg);
-    sta_actor_destroy(src);
-    sta_actor_destroy(tgt);
+    sta_actor_terminate(src);
+    sta_actor_terminate(tgt);
 }
 
 static void test_send_small_payload_no_regression(void) {
@@ -352,8 +352,8 @@ static void test_send_small_payload_no_regression(void) {
     assert(msg->args[0] == STA_SMALLINT_OOP(42));
 
     sta_mailbox_msg_destroy(msg);
-    sta_actor_destroy(src);
-    sta_actor_destroy(tgt);
+    sta_actor_terminate(src);
+    sta_actor_terminate(tgt);
 }
 
 static void test_send_all_immediates_no_growth(void) {
@@ -384,8 +384,8 @@ static void test_send_all_immediates_no_growth(void) {
     assert(msg->args[2] == sym);
 
     sta_mailbox_msg_destroy(msg);
-    sta_actor_destroy(src);
-    sta_actor_destroy(tgt);
+    sta_actor_terminate(src);
+    sta_actor_terminate(tgt);
 }
 
 /* ── Main ─────────────────────────────────────────────────────────────── */

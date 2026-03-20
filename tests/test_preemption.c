@@ -131,7 +131,7 @@ static void test_preempt_long_loop(void) {
 
     printf("  PASS: preempt_long_loop (preemptions=%d)\n", preemptions);
 
-    sta_actor_destroy(child);
+    sta_actor_terminate(child);
     sta_vm_destroy(vm);
 }
 
@@ -153,7 +153,7 @@ static void test_short_method_no_preempt(void) {
     assert(rc == STA_INTERPRET_COMPLETED);
     assert(child->saved_frame == NULL);
 
-    sta_actor_destroy(child);
+    sta_actor_terminate(child);
     sta_vm_destroy(vm);
     printf("  PASS: short_method_no_preempt\n");
 }
@@ -193,7 +193,7 @@ static void test_process_one_preemptible(void) {
     assert(rc == STA_ACTOR_MSG_PROCESSED);
     assert(child->saved_frame == NULL);
 
-    sta_actor_destroy(child);
+    sta_actor_terminate(child);
     sta_vm_destroy(vm);
     printf("  PASS: process_one_preemptible (preemptions=%d)\n", preemptions);
 }
@@ -248,7 +248,7 @@ static void test_scheduler_preemption(void) {
            (unsigned long long)vm->scheduler->workers[0].actors_run);
 
     sta_scheduler_destroy(vm);
-    sta_actor_destroy(child);
+    sta_actor_terminate(child);
     sta_vm_destroy(vm);
 }
 

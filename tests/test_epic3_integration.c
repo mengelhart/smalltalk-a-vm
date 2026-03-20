@@ -128,8 +128,8 @@ static void test_e2e_send_and_process(void) {
     /* A's heap is unchanged — no side effects. */
     /* (A didn't have any mutable state to check, but heap used is stable.) */
 
-    sta_actor_destroy(a);
-    sta_actor_destroy(b);
+    sta_actor_terminate(a);
+    sta_actor_terminate(b);
 }
 
 static void test_e2e_deep_copy_isolation(void) {
@@ -164,8 +164,8 @@ static void test_e2e_deep_copy_isolation(void) {
     sta_payload(copy_h)[0] = STA_SMALLINT_OOP(999);
     assert(sta_payload(arr_h)[0] == STA_SMALLINT_OOP(10));
 
-    sta_actor_destroy(a);
-    sta_actor_destroy(b);
+    sta_actor_terminate(a);
+    sta_actor_terminate(b);
 }
 
 /* ── Bounded mailbox ──────────────────────────────────────────────────── */
@@ -191,8 +191,8 @@ static void test_bounded_mailbox_flow(void) {
 
     assert(sta_actor_send_msg(g_vm, a, b->actor_id, sel, NULL, 0) == 0);
 
-    sta_actor_destroy(a);
-    sta_actor_destroy(b);
+    sta_actor_terminate(a);
+    sta_actor_terminate(b);
 }
 
 /* ── Deep copy edge cases ─────────────────────────────────────────────── */
@@ -225,8 +225,8 @@ static void test_deep_copy_large_graph(void) {
     }
     assert(cur == STA_SMALLINT_OOP(0));
 
-    sta_actor_destroy(src);
-    sta_actor_destroy(dst);
+    sta_actor_terminate(src);
+    sta_actor_terminate(dst);
 }
 
 static void test_deep_copy_deeply_nested(void) {
@@ -252,8 +252,8 @@ static void test_deep_copy_deeply_nested(void) {
     }
     assert(cur == STA_SMALLINT_OOP(7));
 
-    sta_actor_destroy(src);
-    sta_actor_destroy(dst);
+    sta_actor_terminate(src);
+    sta_actor_terminate(dst);
 }
 
 static void test_deep_copy_multiple_cycles(void) {
@@ -296,8 +296,8 @@ static void test_deep_copy_multiple_cycles(void) {
     assert(sta_payload((STA_ObjHeader *)(uintptr_t)copy_c)[0] == copy_d);
     assert(sta_payload((STA_ObjHeader *)(uintptr_t)copy_d)[0] == copy_c);
 
-    sta_actor_destroy(src);
-    sta_actor_destroy(dst);
+    sta_actor_terminate(src);
+    sta_actor_terminate(dst);
 }
 
 static void test_deep_copy_mixed_graph(void) {
@@ -324,8 +324,8 @@ static void test_deep_copy_mixed_graph(void) {
     assert(cs[2] == STA_SMALLINT_OOP(99));
     assert(cs[3] == g_vm->specials[SPC_NIL]);  /* nil shared */
 
-    sta_actor_destroy(src);
-    sta_actor_destroy(dst);
+    sta_actor_terminate(src);
+    sta_actor_terminate(dst);
 }
 
 /* ── Multi-actor: chain A → B → C ────────────────────────────────────── */
@@ -355,9 +355,9 @@ static void test_three_actor_chain(void) {
     assert(sta_payload(bh)[1] == STA_SMALLINT_OOP(100));
     assert(sta_payload(ch2)[1] == STA_SMALLINT_OOP(200));
 
-    sta_actor_destroy(a);
-    sta_actor_destroy(b);
-    sta_actor_destroy(c);
+    sta_actor_terminate(a);
+    sta_actor_terminate(b);
+    sta_actor_terminate(c);
 }
 
 static void test_same_message_to_multiple_actors(void) {
@@ -391,9 +391,9 @@ static void test_same_message_to_multiple_actors(void) {
     assert(on_heap(&b->heap, b_key));
     assert(on_heap(&c->heap, c_key));
 
-    sta_actor_destroy(a);
-    sta_actor_destroy(b);
-    sta_actor_destroy(c);
+    sta_actor_terminate(a);
+    sta_actor_terminate(b);
+    sta_actor_terminate(c);
 }
 
 /* ── Main ─────────────────────────────────────────────────────────────── */

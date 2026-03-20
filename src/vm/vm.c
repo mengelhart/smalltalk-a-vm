@@ -216,7 +216,7 @@ STA_VM* sta_vm_create(const STA_VMConfig* config) {
         rsup->behavior_class = obj_cls;
         STA_ObjHeader *obj_h = sta_heap_alloc(&rsup->heap, STA_CLS_OBJECT, 0);
         if (!obj_h) {
-            sta_actor_destroy(rsup);
+            sta_actor_terminate(rsup);
             set_error(vm, "failed to allocate root supervisor behavior obj");
             goto fail;
         }
@@ -227,7 +227,7 @@ STA_VM* sta_vm_create(const STA_VMConfig* config) {
                               memory_order_relaxed);
 
         if (sta_supervisor_init(rsup, 10, 10) != 0) {
-            sta_actor_destroy(rsup);
+            sta_actor_terminate(rsup);
             set_error(vm, "failed to init root supervisor data");
             goto fail;
         }
@@ -266,10 +266,10 @@ void sta_vm_destroy(STA_VM* vm) {
     /* Teardown in reverse order of initialization. */
 
     /* Tear down supervision tree BEFORE root actor — no actor should be
-     * processing messages during teardown. sta_actor_destroy on the root
+     * processing messages during teardown. sta_actor_terminate on the root
      * supervisor recursively destroys all children depth-first. */
     if (vm->root_supervisor) {
-        sta_actor_destroy(vm->root_supervisor);
+        sta_actor_terminate(vm->root_supervisor);
         vm->root_supervisor = NULL;
     }
 
@@ -277,7 +277,7 @@ void sta_vm_destroy(STA_VM* vm) {
 
     /* Destroy root actor (owns heap and slab). */
     if (vm->root_actor) {
-        sta_actor_destroy(vm->root_actor);
+        sta_actor_terminate(vm->root_actor);
         vm->root_actor = NULL;
     } else {
         /* No root actor — VM still owns heap and slab (failed early). */

@@ -125,7 +125,7 @@ static void test_alloc_gc_triggers(void) {
     assert(sta_payload(surviving)[0] == STA_SMALLINT_OOP(42));
     assert(sta_payload(surviving)[1] == STA_SMALLINT_OOP(99));
 
-    sta_actor_destroy(actor);
+    sta_actor_terminate(actor);
     destroy_test_vm(vm);
 }
 
@@ -169,7 +169,7 @@ static void test_repeated_gc_cycles(void) {
     assert(sta_payload(child)[0] == STA_SMALLINT_OOP(5));
     assert(sta_payload(child)[1] == STA_SMALLINT_OOP(50));
 
-    sta_actor_destroy(actor);
+    sta_actor_terminate(actor);
     destroy_test_vm(vm);
 }
 
@@ -236,7 +236,7 @@ static void test_heap_growth(void) {
     }
     assert(count == 8);
 
-    sta_actor_destroy(actor);
+    sta_actor_terminate(actor);
     destroy_test_vm(vm);
 }
 
@@ -256,7 +256,7 @@ static void test_alloc_gc_no_gc_needed(void) {
     assert(obj->class_index == STA_CLS_ASSOCIATION);
     assert(actor->heap.used == used_before + 32);
 
-    sta_actor_destroy(actor);
+    sta_actor_terminate(actor);
     destroy_test_vm(vm);
 }
 
@@ -276,7 +276,7 @@ static void test_heap_min_size(void) {
     assert(rc == 0);
     assert(actor->heap.capacity >= 128);
 
-    sta_actor_destroy(actor);
+    sta_actor_terminate(actor);
     destroy_test_vm(vm);
 }
 
@@ -336,7 +336,7 @@ static void test_refs_survive_growth(void) {
     assert(sta_payload(c1)[0] == STA_SMALLINT_OOP(333));
     assert(sta_payload(c1)[1] == STA_SMALLINT_OOP(444));
 
-    sta_actor_destroy(actor);
+    sta_actor_terminate(actor);
     destroy_test_vm(vm);
 }
 
@@ -374,8 +374,8 @@ static void test_independent_actor_gc(void) {
     assert(a2->behavior_obj == (STA_OOP)(uintptr_t)obj2);
     assert(sta_payload(obj2)[0] == STA_SMALLINT_OOP(3));
 
-    sta_actor_destroy(a1);
-    sta_actor_destroy(a2);
+    sta_actor_terminate(a1);
+    sta_actor_terminate(a2);
     destroy_test_vm(vm);
 }
 

@@ -104,8 +104,8 @@ static void test_send_no_args(void) {
     assert(msg->sender_id == a->actor_id);
 
     sta_mailbox_msg_destroy(msg);
-    sta_actor_destroy(a);
-    sta_actor_destroy(b);
+    sta_actor_terminate(a);
+    sta_actor_terminate(b);
 }
 
 static void test_send_with_smallint_arg(void) {
@@ -127,8 +127,8 @@ static void test_send_with_smallint_arg(void) {
     assert(msg->args[0] == STA_SMALLINT_OOP(42));
 
     sta_mailbox_msg_destroy(msg);
-    sta_actor_destroy(a);
-    sta_actor_destroy(b);
+    sta_actor_terminate(a);
+    sta_actor_terminate(b);
 }
 
 static void test_send_deep_copies_mutable_arg(void) {
@@ -161,8 +161,8 @@ static void test_send_deep_copies_mutable_arg(void) {
     assert(sta_payload(ch)[2] == STA_SMALLINT_OOP(3));
 
     sta_mailbox_msg_destroy(msg);
-    sta_actor_destroy(a);
-    sta_actor_destroy(b);
+    sta_actor_terminate(a);
+    sta_actor_terminate(b);
 }
 
 static void test_send_symbol_arg_shared(void) {
@@ -181,8 +181,8 @@ static void test_send_symbol_arg_shared(void) {
     assert(msg->args[0] == sym_arg);
 
     sta_mailbox_msg_destroy(msg);
-    sta_actor_destroy(a);
-    sta_actor_destroy(b);
+    sta_actor_terminate(a);
+    sta_actor_terminate(b);
 }
 
 static void test_send_multiple_args(void) {
@@ -209,8 +209,8 @@ static void test_send_multiple_args(void) {
     assert(memcmp(sta_payload(sh), "hello", 5) == 0);
 
     sta_mailbox_msg_destroy(msg);
-    sta_actor_destroy(a);
-    sta_actor_destroy(b);
+    sta_actor_terminate(a);
+    sta_actor_terminate(b);
 }
 
 static void test_send_mailbox_full(void) {
@@ -239,8 +239,8 @@ static void test_send_mailbox_full(void) {
     rc = sta_actor_send_msg(g_vm, a, b->actor_id, sel, NULL, 0);
     assert(rc == 0);
 
-    sta_actor_destroy(a);
-    sta_actor_destroy(b);
+    sta_actor_terminate(a);
+    sta_actor_terminate(b);
 }
 
 static void test_send_preserves_sender_id(void) {
@@ -254,8 +254,8 @@ static void test_send_preserves_sender_id(void) {
     assert(msg->sender_id == a->actor_id);
 
     sta_mailbox_msg_destroy(msg);
-    sta_actor_destroy(a);
-    sta_actor_destroy(b);
+    sta_actor_terminate(a);
+    sta_actor_terminate(b);
 }
 
 static void test_send_heap_isolation(void) {
@@ -280,8 +280,8 @@ static void test_send_heap_isolation(void) {
     assert(sta_payload(orig_h)[0] == STA_SMALLINT_OOP(1));
 
     sta_mailbox_msg_destroy(msg);
-    sta_actor_destroy(a);
-    sta_actor_destroy(b);
+    sta_actor_terminate(a);
+    sta_actor_terminate(b);
 }
 
 static void test_send_fifo_order(void) {
@@ -307,8 +307,8 @@ static void test_send_fifo_order(void) {
         sta_mailbox_msg_destroy(msg);
     }
 
-    sta_actor_destroy(a);
-    sta_actor_destroy(b);
+    sta_actor_terminate(a);
+    sta_actor_terminate(b);
 }
 
 static void test_send_to_dead_actor(void) {
@@ -317,13 +317,13 @@ static void test_send_to_dead_actor(void) {
     uint32_t b_id = b->actor_id;
 
     /* Destroy the target — this should unregister it from the registry. */
-    sta_actor_destroy(b);
+    sta_actor_terminate(b);
 
     STA_OOP sel = intern("ping");
     int rc = sta_actor_send_msg(g_vm, a, b_id, sel, NULL, 0);
     assert(rc == STA_ERR_ACTOR_DEAD);
 
-    sta_actor_destroy(a);
+    sta_actor_terminate(a);
 }
 
 static void test_send_after_unregister(void) {
@@ -338,10 +338,10 @@ static void test_send_after_unregister(void) {
     int rc = sta_actor_send_msg(g_vm, a, b_id, sel, NULL, 0);
     assert(rc == STA_ERR_ACTOR_DEAD);
 
-    /* Re-register before destroy so sta_actor_destroy doesn't double-unregister. */
+    /* Re-register before destroy so sta_actor_terminate doesn't double-unregister. */
     sta_registry_register(g_vm->registry, b);
-    sta_actor_destroy(a);
-    sta_actor_destroy(b);
+    sta_actor_terminate(a);
+    sta_actor_terminate(b);
 }
 
 /* ── Main ─────────────────────────────────────────────────────────────── */
