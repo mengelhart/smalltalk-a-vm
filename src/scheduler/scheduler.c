@@ -80,24 +80,32 @@ static void *worker_thread_main(void *arg) {
                                   memory_order_release);
             worker->current = actor;
 
-            /* Process messages until mailbox empty or preempted.
-             * Story 1: process all available messages (no preemption). */
-            while (sta_actor_process_one(vm, actor) > 0) {
+            /* Process one message (or resume preempted execution).
+             * Preemption-aware: returns PREEMPTED if reduction quota
+             * was exhausted mid-execution. */
+            int rc = sta_actor_process_one_preemptible(vm, actor);
+            if (rc == STA_ACTOR_MSG_PROCESSED) {
                 worker->messages_processed++;
             }
             worker->actors_run++;
 
             worker->current = NULL;
 
-            /* Check if actor still has messages (might have arrived
-             * during processing). */
-            if (!sta_mailbox_is_empty(&actor->mailbox)) {
-                /* RUNNING → READY, re-enqueue */
+            if (rc == STA_ACTOR_MSG_PREEMPTED) {
+                /* Actor was preempted — re-enqueue immediately.
+                 * RUNNING → READY. */
+                atomic_store_explicit(&actor->state, STA_ACTOR_READY,
+                                      memory_order_release);
+                sta_scheduler_enqueue(sched, actor);
+            } else if (!sta_mailbox_is_empty(&actor->mailbox)) {
+                /* More messages waiting — re-enqueue.
+                 * RUNNING → READY. */
                 atomic_store_explicit(&actor->state, STA_ACTOR_READY,
                                       memory_order_release);
                 sta_scheduler_enqueue(sched, actor);
             } else {
-                /* RUNNING → SUSPENDED */
+                /* No more work — suspend.
+                 * RUNNING → SUSPENDED. */
                 atomic_store_explicit(&actor->state, STA_ACTOR_SUSPENDED,
                                       memory_order_release);
             }

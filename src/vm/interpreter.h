@@ -9,8 +9,9 @@
 #include "class_table.h"
 #include <stdint.h>
 
-/* Forward declaration — full definition in vm_state.h */
+/* Forward declarations — full definitions in vm_state.h and actor.h */
 struct STA_VM;
+struct STA_Actor;
 
 /* ── Opcode constants (bytecode spec §3, §12) ─────────────────────────── */
 
@@ -96,6 +97,11 @@ static inline STA_OOP sta_class_method_dict(STA_OOP class_oop) {
     return sta_payload(h)[STA_CLASS_SLOT_METHODDICT];
 }
 
+/* ── Interpret status codes ────────────────────────────────────────────── */
+
+#define STA_INTERPRET_COMPLETED  0
+#define STA_INTERPRET_PREEMPTED  1
+
 /* ── Interpreter entry points ──────────────────────────────────────────── */
 
 /* Execute a method on a receiver with arguments.
@@ -110,3 +116,17 @@ STA_OOP sta_interpret(struct STA_VM *vm,
 STA_OOP sta_eval_block(struct STA_VM *vm,
                         STA_OOP block_closure,
                         STA_OOP *args, uint8_t nargs);
+
+/* ── Scheduled actor execution (with preemption) ─────────────────────── */
+
+/* Execute a method on a scheduled actor with preemption support.
+ * Uses the actor's own slab and heap. Returns STA_INTERPRET_COMPLETED
+ * or STA_INTERPRET_PREEMPTED. If preempted, actor->saved_frame is set
+ * for later resumption via sta_interpret_resume. */
+int sta_interpret_actor(struct STA_VM *vm, struct STA_Actor *actor,
+                        STA_OOP method, STA_OOP receiver,
+                        STA_OOP *args, uint8_t nargs);
+
+/* Resume a preempted actor from its saved frame.
+ * Returns STA_INTERPRET_COMPLETED or STA_INTERPRET_PREEMPTED. */
+int sta_interpret_resume(struct STA_VM *vm, struct STA_Actor *actor);
