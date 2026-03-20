@@ -4,6 +4,7 @@
  */
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <stdatomic.h>
@@ -443,6 +444,149 @@ static void test_eval_under_stress(void) {
     printf("  PASS: eval_under_stress\n");
 }
 
+/* ── Test 10: full-core stress (all CPU cores, 200 actors × 500 msgs) ── */
+
+static void test_full_core_stress(void) {
+    STA_VM *vm = make_vm();
+
+    /* Auto-detect cores — uses all available (16 on M4 Max). */
+    int rc = sta_scheduler_init(vm, 0);
+    assert(rc == 0);
+    uint32_t nthreads = vm->scheduler->num_threads;
+    rc = sta_scheduler_start(vm);
+    assert(rc == 0);
+
+    #define FC_ACTORS  200
+    #define FC_MSGS    500
+
+    struct STA_Actor **actors = calloc(FC_ACTORS, sizeof(struct STA_Actor *));
+    assert(actors != NULL);
+    STA_OOP sel = intern(vm, "yourself");
+    struct STA_Actor *root = vm->root_actor;
+
+    for (int i = 0; i < FC_ACTORS; i++) {
+        actors[i] = make_child_actor(vm);
+        actors[i]->actor_id = (uint32_t)(10000 + i);
+    }
+
+    /* Send FC_MSGS messages to each actor. */
+    for (int msg = 0; msg < FC_MSGS; msg++) {
+        for (int i = 0; i < FC_ACTORS; i++) {
+            sta_actor_send_msg(root, actors[i], sel, NULL, 0);
+        }
+    }
+
+    /* Wait for all to complete. */
+    bool done = wait_all_suspended(actors, FC_ACTORS, 15000);
+    sta_scheduler_stop(vm);
+    assert(done);
+
+    /* All mailboxes empty. */
+    for (int i = 0; i < FC_ACTORS; i++) {
+        assert(sta_mailbox_is_empty(&actors[i]->mailbox));
+    }
+
+    /* Verify stats. */
+    uint64_t total_msgs = 0;
+    uint64_t total_runs = 0;
+    uint64_t total_steals = 0;
+    int active_workers = 0;
+    for (uint32_t i = 0; i < nthreads; i++) {
+        total_msgs += vm->scheduler->workers[i].messages_processed;
+        total_runs += vm->scheduler->workers[i].actors_run;
+        total_steals += vm->scheduler->workers[i].steals;
+        if (vm->scheduler->workers[i].actors_run > 0) active_workers++;
+    }
+    uint64_t expected = (uint64_t)FC_ACTORS * FC_MSGS;
+    assert(total_msgs >= expected);
+
+    printf("  PASS: full_core_stress (%d threads, %d actors × %d msgs = %llu,"
+           " runs=%llu, steals=%llu, active=%d)\n",
+           (int)nthreads, FC_ACTORS, FC_MSGS,
+           (unsigned long long)total_msgs,
+           (unsigned long long)total_runs,
+           (unsigned long long)total_steals,
+           active_workers);
+
+    sta_scheduler_destroy(vm);
+    for (int i = 0; i < FC_ACTORS; i++) sta_actor_destroy(actors[i]);
+    free(actors);
+    sta_vm_destroy(vm);
+
+    #undef FC_ACTORS
+    #undef FC_MSGS
+}
+
+/* ── Test 11: heavy contention (1000 actors × 100 msgs, all cores) ──── */
+
+static void test_heavy_contention(void) {
+    STA_VM *vm = make_vm();
+
+    int rc = sta_scheduler_init(vm, 0);
+    assert(rc == 0);
+    uint32_t nthreads = vm->scheduler->num_threads;
+    rc = sta_scheduler_start(vm);
+    assert(rc == 0);
+
+    #define HC_ACTORS  1000
+    #define HC_MSGS    100
+
+    struct STA_Actor **actors = calloc(HC_ACTORS, sizeof(struct STA_Actor *));
+    assert(actors != NULL);
+    STA_OOP sel = intern(vm, "yourself");
+    struct STA_Actor *root = vm->root_actor;
+
+    for (int i = 0; i < HC_ACTORS; i++) {
+        actors[i] = make_child_actor(vm);
+        actors[i]->actor_id = (uint32_t)(20000 + i);
+    }
+
+    /* Send HC_MSGS messages to each actor. */
+    for (int msg = 0; msg < HC_MSGS; msg++) {
+        for (int i = 0; i < HC_ACTORS; i++) {
+            sta_actor_send_msg(root, actors[i], sel, NULL, 0);
+        }
+    }
+
+    /* Wait for all to complete. More actors = more time needed. */
+    bool done = wait_all_suspended(actors, HC_ACTORS, 30000);
+    sta_scheduler_stop(vm);
+    assert(done);
+
+    for (int i = 0; i < HC_ACTORS; i++) {
+        assert(sta_mailbox_is_empty(&actors[i]->mailbox));
+    }
+
+    uint64_t total_msgs = 0;
+    uint64_t total_runs = 0;
+    uint64_t total_steals = 0;
+    int active_workers = 0;
+    for (uint32_t i = 0; i < nthreads; i++) {
+        total_msgs += vm->scheduler->workers[i].messages_processed;
+        total_runs += vm->scheduler->workers[i].actors_run;
+        total_steals += vm->scheduler->workers[i].steals;
+        if (vm->scheduler->workers[i].actors_run > 0) active_workers++;
+    }
+    uint64_t expected = (uint64_t)HC_ACTORS * HC_MSGS;
+    assert(total_msgs >= expected);
+
+    printf("  PASS: heavy_contention (%d threads, %d actors × %d msgs = %llu,"
+           " runs=%llu, steals=%llu, active=%d)\n",
+           (int)nthreads, HC_ACTORS, HC_MSGS,
+           (unsigned long long)total_msgs,
+           (unsigned long long)total_runs,
+           (unsigned long long)total_steals,
+           active_workers);
+
+    sta_scheduler_destroy(vm);
+    for (int i = 0; i < HC_ACTORS; i++) sta_actor_destroy(actors[i]);
+    free(actors);
+    sta_vm_destroy(vm);
+
+    #undef HC_ACTORS
+    #undef HC_MSGS
+}
+
 /* ── Main ────────────────────────────────────────────────────────────── */
 
 int main(void) {
@@ -457,6 +601,8 @@ int main(void) {
     test_many_actors_few_messages();
     test_steal_verification();
     test_eval_under_stress();
+    test_full_core_stress();
+    test_heavy_contention();
 
     printf("All stress tests passed.\n");
     return 0;
