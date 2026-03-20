@@ -210,9 +210,8 @@ static void test_running_actor_not_reenqueued(void) {
     /* Send — should NOT enqueue (actor is RUNNING). */
     sta_actor_send_msg(root, child, sel, NULL, 0);
 
-    /* Run queue should be empty — actor was RUNNING, CAS fails. */
-    struct STA_Actor *dequeued = sta_scheduler_dequeue(vm->scheduler);
-    assert(dequeued == NULL);
+    /* Overflow queue should be empty — actor was RUNNING, CAS fails. */
+    assert(vm->scheduler->overflow_head == NULL);
 
     /* State should still be RUNNING. */
     assert(atomic_load(&child->state) == STA_ACTOR_RUNNING);

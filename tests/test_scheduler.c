@@ -68,13 +68,12 @@ static void test_start_stop_empty(void) {
 
 /* ── Test 3: enqueue/dequeue actors ──────────────────────────────────── */
 
-static void test_enqueue_dequeue(void) {
+static void test_enqueue_overflow(void) {
     STA_VM *vm = make_vm();
 
     int rc = sta_scheduler_init(vm, 1);
     assert(rc == 0);
 
-    /* Create two test actors. */
     struct STA_Actor *a1 = sta_actor_create(vm, 1024, 512);
     struct STA_Actor *a2 = sta_actor_create(vm, 1024, 512);
     assert(a1 && a2);
@@ -83,29 +82,16 @@ static void test_enqueue_dequeue(void) {
 
     STA_Scheduler *sched = vm->scheduler;
 
-    /* Enqueue a1, a2. */
+    /* Enqueue goes to overflow queue. */
     sta_scheduler_enqueue(sched, a1);
     sta_scheduler_enqueue(sched, a2);
-    assert(sched->run_queue.count == 2);
-
-    /* Dequeue — FIFO order. */
-    struct STA_Actor *d1 = sta_scheduler_dequeue(sched);
-    assert(d1 == a1);
-    assert(d1->actor_id == 10);
-
-    struct STA_Actor *d2 = sta_scheduler_dequeue(sched);
-    assert(d2 == a2);
-    assert(d2->actor_id == 20);
-
-    /* Empty. */
-    struct STA_Actor *d3 = sta_scheduler_dequeue(sched);
-    assert(d3 == NULL);
+    assert(sched->overflow_head != NULL);
 
     sta_actor_destroy(a1);
     sta_actor_destroy(a2);
     sta_scheduler_destroy(vm);
     sta_vm_destroy(vm);
-    printf("  PASS: enqueue_dequeue\n");
+    printf("  PASS: enqueue_overflow\n");
 }
 
 /* ── Test 4: single actor dispatched by scheduler ────────────────────── */
@@ -281,7 +267,7 @@ int main(void) {
 
     test_init_destroy();
     test_start_stop_empty();
-    test_enqueue_dequeue();
+    test_enqueue_overflow();
     test_single_actor_dispatch();
     test_multiple_messages();
     test_vm_destroy_stops_scheduler();

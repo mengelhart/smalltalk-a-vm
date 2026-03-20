@@ -1,6 +1,9 @@
 /* src/scheduler/scheduler.c
  * Production work-stealing scheduler — Phase 2 Epic 4.
- * See scheduler.h and ADR 009 for design rationale.
+ * See scheduler.h, deque.h, and ADR 009 for design rationale.
+ *
+ * Story 5: per-thread Chase-Lev deques with work stealing.
+ * Owner pushes/pops from bottom (LIFO); stealers take from top (FIFO).
  */
 #include "scheduler.h"
 #include "actor/actor.h"
@@ -10,56 +13,95 @@
 #include <time.h>
 #include <unistd.h>  /* sysconf */
 
-/* ── Run queue operations ─────────────────────────────────────────────── */
-
-static void run_queue_init(STA_RunQueue *rq) {
-    rq->head = NULL;
-    rq->tail = NULL;
-    rq->count = 0;
-    pthread_mutex_init(&rq->mutex, NULL);
-}
-
-static void run_queue_destroy(STA_RunQueue *rq) {
-    pthread_mutex_destroy(&rq->mutex);
-}
+/* ── External enqueue ─────────────────────────────────────────────────── */
 
 void sta_scheduler_enqueue(STA_Scheduler *sched, struct STA_Actor *actor) {
+    /* Round-robin across worker deques for external pushes.
+     * sta_deque_push is safe: only the owner thread pops, but any thread
+     * can push (the push path uses release store on bottom which is safe
+     * from any thread — only pop has the owner-only constraint).
+     *
+     * Actually, Chase-Lev push is owner-only by design. For external
+     * enqueue from non-worker threads, we use a simple approach:
+     * pick a target worker and push via the deque. Since the deque's
+     * push reads bottom with relaxed ordering (owner-private), calling
+     * push from a non-owner thread is technically a data race.
+     *
+     * Solution: push always goes through a thread-safe path.
+     * We use atomic fetch_add for round-robin and deque_push which
+     * only the owner should call. For external enqueue, we need a
+     * different strategy.
+     *
+     * Simplest correct approach: keep a small mutex-protected overflow
+     * queue for external pushes. Workers drain it periodically.
+     * But that adds complexity. Alternative: make push safe for
+     * external callers by noting that bottom is _Atomic and the
+     * store is release. The issue is the relaxed load of bottom in
+     * push — if two threads push simultaneously, they read the same
+     * bottom and overwrite the same slot.
+     *
+     * Final design: external enqueue uses the deque's steal interface
+     * in reverse — no, that doesn't work either.
+     *
+     * Pragmatic solution: keep a global overflow queue (mutex-protected)
+     * for external pushes. Workers check it when their deque is empty.
+     */
+
+    /* Push to global overflow queue. Workers drain this. */
     actor->next_runnable = NULL;
 
-    pthread_mutex_lock(&sched->run_queue.mutex);
-    if (sched->run_queue.tail) {
-        sched->run_queue.tail->next_runnable = actor;
-    } else {
-        sched->run_queue.head = actor;
-    }
-    sched->run_queue.tail = actor;
-    sched->run_queue.count++;
-    pthread_mutex_unlock(&sched->run_queue.mutex);
-
-    /* Wake an idle worker. */
     pthread_mutex_lock(&sched->wake_mutex);
+    /* Link into overflow list. */
+    actor->next_runnable = sched->overflow_head;
+    sched->overflow_head = actor;
     pthread_cond_signal(&sched->wake_cond);
     pthread_mutex_unlock(&sched->wake_mutex);
 }
 
-struct STA_Actor *sta_scheduler_dequeue(STA_Scheduler *sched) {
-    pthread_mutex_lock(&sched->run_queue.mutex);
-    struct STA_Actor *actor = sched->run_queue.head;
-    if (actor) {
-        sched->run_queue.head = actor->next_runnable;
-        if (!sched->run_queue.head) {
-            sched->run_queue.tail = NULL;
+/* Drain overflow queue into the worker's local deque.
+ * Called by the worker thread under the wake_mutex. */
+static struct STA_Actor *drain_overflow(STA_Scheduler *sched,
+                                         STA_SchedWorker *worker) {
+    struct STA_Actor *list = sched->overflow_head;
+    sched->overflow_head = NULL;
+
+    struct STA_Actor *first = NULL;
+    while (list) {
+        struct STA_Actor *next = list->next_runnable;
+        list->next_runnable = NULL;
+        if (!first) {
+            first = list;  /* return the first one directly */
+        } else {
+            sta_deque_push(&worker->deque, list);
         }
-        sched->run_queue.count--;
-        actor->next_runnable = NULL;
+        list = next;
     }
-    pthread_mutex_unlock(&sched->run_queue.mutex);
-    return actor;
+    return first;
+}
+
+/* ── Work stealing ────────────────────────────────────────────────────── */
+
+/* Try to steal one actor from any other worker's deque.
+ * Random victim selection to avoid herding. */
+static struct STA_Actor *try_steal(STA_Scheduler *sched,
+                                    STA_SchedWorker *self) {
+    uint32_t n = sched->num_threads;
+    if (n <= 1) return NULL;
+
+    /* Simple round-robin starting from (self+1). */
+    for (uint32_t i = 1; i < n; i++) {
+        uint32_t victim = ((uint32_t)self->index + i) % n;
+        struct STA_Actor *a = sta_deque_steal(&sched->workers[victim].deque);
+        if (a) {
+            self->steals++;
+            return a;
+        }
+    }
+    return NULL;
 }
 
 /* ── Worker dispatch loop ─────────────────────────────────────────────── */
 
-/* Thread arg: passed to each worker thread at creation, freed by worker. */
 typedef struct {
     STA_SchedWorker *worker;
     STA_Scheduler   *sched;
@@ -70,26 +112,38 @@ static void *worker_thread_main(void *arg) {
     STA_SchedWorker *worker = wa->worker;
     STA_Scheduler *sched = wa->sched;
     STA_VM *vm = sched->vm;
-    free(wa);  /* allocated per-thread in scheduler_start */
+    free(wa);
 
     while (atomic_load_explicit(&sched->running, memory_order_acquire)) {
-        struct STA_Actor *actor = sta_scheduler_dequeue(sched);
+        struct STA_Actor *actor = NULL;
+
+        /* 1. Pop from own deque (LIFO — cache-friendly). */
+        actor = sta_deque_pop(&worker->deque);
+
+        /* 2. Try stealing from other workers. */
+        if (!actor) {
+            actor = try_steal(sched, worker);
+        }
+
+        /* 3. Check overflow queue (external enqueues). */
+        if (!actor) {
+            pthread_mutex_lock(&sched->wake_mutex);
+            if (sched->overflow_head) {
+                actor = drain_overflow(sched, worker);
+            }
+            pthread_mutex_unlock(&sched->wake_mutex);
+        }
 
         if (actor) {
-            /* READY → RUNNING (atomic claim — only one thread can win). */
+            /* READY → RUNNING (atomic claim). */
             uint32_t expected = STA_ACTOR_READY;
             if (!atomic_compare_exchange_strong_explicit(
                     &actor->state, &expected, STA_ACTOR_RUNNING,
                     memory_order_acq_rel, memory_order_relaxed)) {
-                /* Another thread claimed this actor (should not happen
-                 * with mutex queue, but defense-in-depth for Story 5). */
                 continue;
             }
             worker->current = actor;
 
-            /* Process one message (or resume preempted execution).
-             * Preemption-aware: returns PREEMPTED if reduction quota
-             * was exhausted mid-execution. */
             int rc = sta_actor_process_one_preemptible(vm, actor);
             if (rc == STA_ACTOR_MSG_PROCESSED) {
                 worker->messages_processed++;
@@ -99,29 +153,22 @@ static void *worker_thread_main(void *arg) {
             worker->current = NULL;
 
             if (rc == STA_ACTOR_MSG_PREEMPTED) {
-                /* Actor was preempted — re-enqueue immediately.
-                 * RUNNING → READY. */
                 atomic_store_explicit(&actor->state, STA_ACTOR_READY,
                                       memory_order_release);
-                sta_scheduler_enqueue(sched, actor);
+                sta_deque_push(&worker->deque, actor);
             } else if (!sta_mailbox_is_empty(&actor->mailbox)) {
-                /* More messages waiting — re-enqueue.
-                 * RUNNING → READY. */
                 atomic_store_explicit(&actor->state, STA_ACTOR_READY,
                                       memory_order_release);
-                sta_scheduler_enqueue(sched, actor);
+                sta_deque_push(&worker->deque, actor);
             } else {
-                /* No more work — suspend.
-                 * RUNNING → SUSPENDED. */
                 atomic_store_explicit(&actor->state, STA_ACTOR_SUSPENDED,
                                       memory_order_release);
             }
         } else {
-            /* No work — sleep on condition variable.
-             * Re-check under the mutex to prevent lost wakeups. */
+            /* No work anywhere — sleep. */
             pthread_mutex_lock(&sched->wake_mutex);
-            /* Double-check: work may have arrived between dequeue and lock. */
-            if (atomic_load_explicit(&sched->running, memory_order_acquire)) {
+            if (atomic_load_explicit(&sched->running, memory_order_acquire)
+                && !sched->overflow_head) {
                 struct timespec deadline;
                 clock_gettime(CLOCK_REALTIME, &deadline);
                 deadline.tv_nsec += 5000000;  /* 5 ms timeout */
@@ -153,14 +200,14 @@ int sta_scheduler_init(struct STA_VM *vm, uint32_t num_threads) {
     sched->vm = vm;
     sched->num_threads = num_threads;
     atomic_store_explicit(&sched->running, false, memory_order_relaxed);
+    atomic_store_explicit(&sched->enqueue_rr, 0u, memory_order_relaxed);
+    sched->overflow_head = NULL;
 
-    run_queue_init(&sched->run_queue);
     pthread_mutex_init(&sched->wake_mutex, NULL);
     pthread_cond_init(&sched->wake_cond, NULL);
 
     sched->workers = calloc(num_threads, sizeof(STA_SchedWorker));
     if (!sched->workers) {
-        run_queue_destroy(&sched->run_queue);
         pthread_mutex_destroy(&sched->wake_mutex);
         pthread_cond_destroy(&sched->wake_cond);
         free(sched);
@@ -173,6 +220,7 @@ int sta_scheduler_init(struct STA_VM *vm, uint32_t num_threads) {
         sched->workers[i].actors_run = 0;
         sched->workers[i].messages_processed = 0;
         sched->workers[i].steals = 0;
+        sta_deque_init(&sched->workers[i].deque);
     }
 
     vm->scheduler = sched;
@@ -203,7 +251,6 @@ void sta_scheduler_stop(struct STA_VM *vm) {
 
     atomic_store_explicit(&sched->running, false, memory_order_release);
 
-    /* Wake all workers so they observe the stop flag. */
     pthread_mutex_lock(&sched->wake_mutex);
     pthread_cond_broadcast(&sched->wake_cond);
     pthread_mutex_unlock(&sched->wake_mutex);
@@ -217,7 +264,6 @@ void sta_scheduler_destroy(struct STA_VM *vm) {
     STA_Scheduler *sched = vm->scheduler;
     if (!sched) return;
 
-    run_queue_destroy(&sched->run_queue);
     pthread_mutex_destroy(&sched->wake_mutex);
     pthread_cond_destroy(&sched->wake_cond);
     free(sched->workers);
