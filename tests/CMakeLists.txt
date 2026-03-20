@@ -562,7 +562,8 @@ target_compile_definitions(bench_mailbox_spike PRIVATE STA_BENCH=1)
 target_compile_options(bench_mailbox_spike PRIVATE -O2)
 target_link_libraries(bench_mailbox_spike PRIVATE Threads::Threads)
 
-# ── Spike 003: Work-stealing scheduler — TSan correctness gate ────────────
+# ── Spike 003: Work-stealing scheduler — superseded by production tests ────
+# Build target retained for reference; ctest target removed (was DISABLED).
 add_executable(test_scheduler_spike
     test_scheduler_spike.c
     ../src/scheduler/scheduler_spike.c)
@@ -570,10 +571,6 @@ target_include_directories(test_scheduler_spike PRIVATE ${CMAKE_SOURCE_DIR})
 target_compile_options(test_scheduler_spike PRIVATE -fsanitize=thread)
 target_link_options(test_scheduler_spike PRIVATE -fsanitize=thread)
 target_link_libraries(test_scheduler_spike PRIVATE Threads::Threads)
-add_test(NAME scheduler_spike COMMAND test_scheduler_spike)
-# Flaky timing-sensitive spike test — see PROJECT_STATUS.md open decision #4
-# Will be superseded by production scheduler tests in Phase 2 Epic 5
-set_tests_properties(scheduler_spike PROPERTIES TIMEOUT 120 DISABLED TRUE)
 
 # ── Spike 003: Scheduler — benchmark build (run manually, not via ctest) ───
 add_executable(bench_scheduler_spike

@@ -740,7 +740,7 @@ ArrayedCollection, Character, String, Symbol, ByteArray, Array, OrderedCollectio
 - Total: 82 CTest targets passing
 
 ### Epic 6: Supervision — COMPLETE
-- GitHub: Issues #312, #313 (open — known limitations filed)
+- GitHub: Issues #311, #312, #313 (all closed)
 - Branch: phase2/epic-6-supervision
 - New files:
   - `src/actor/supervisor.h` — STA_SupervisorData, STA_ChildSpec, restart strategies (enum moved to sta/vm.h)
@@ -751,25 +751,30 @@ ArrayedCollection, Character, String, Symbol, ByteArray, Array, OrderedCollectio
   - `tests/test_stop_escalate.c` — 7 stop/escalate tests
   - `tests/test_restart_intensity.c` — 8 intensity limiting tests
   - `tests/test_supervision_tree.c` — 8 root supervisor and tree tests
-  - `tests/test_supervision_stress.c` — 5 scheduler-based stress tests
+  - `tests/test_supervision_stress.c` — 5 scheduler-based stress tests (multi-threaded, full core count)
 - Modified files:
   - `include/sta/vm.h` — STA_RestartStrategy enum, sta_vm_spawn_supervised declaration
-  - `src/vm/vm_state.h` — STA_VM gains root_supervisor field, event callback table, sta_vm_fire_event declaration
-  - `src/vm/vm.c` — Root supervisor creation in sta_vm_create, teardown in sta_vm_destroy, sta_vm_spawn_supervised, sta_event_register/unregister/fire_event
-  - `src/actor/actor.h` — STA_Actor gains supervisor and sup_data fields (16 bytes), STA_ACTOR_MSG_EXCEPTION return code
-  - `src/actor/actor.c` — handle_actor_exception (TERMINATED + notify supervisor + drain mailbox), supervisor-aware dispatch in sta_actor_process_one_preemptible
+  - `src/vm/vm_state.h` — STA_VM gains root_supervisor field, event callback table, sta_vm_fire_event declaration, actor registry, next_actor_id counter
+  - `src/vm/vm.c` — Root supervisor creation in sta_vm_create, teardown in sta_vm_destroy, sta_vm_spawn_supervised, sta_event_register/unregister/fire_event, registry lifecycle
+  - `src/actor/actor.h` — STA_Actor gains supervisor and sup_data fields (16 bytes), STA_ACTOR_MSG_EXCEPTION return code, STA_ERR_ACTOR_DEAD
+  - `src/actor/actor.c` — handle_actor_exception (TERMINATED + notify supervisor + drain mailbox), supervisor-aware dispatch, registry-based send, zero-copy fast path, exception class name extraction
+  - `src/actor/registry.h/c` — VM-wide actor_id→STA_Actor* hash map (mutex-protected)
+  - `src/actor/mailbox_msg.h/c` — args_owned flag for zero-copy sends
 - Design decisions:
   - OTP-style supervision: restart, stop, escalate strategies per child spec
   - Restart intensity limiting: configurable max_restarts within max_seconds window
   - Root supervisor never terminates — fires event and resets counters on intensity exceeded
   - Teardown order: scheduler stop → supervision tree (depth-first) → root actor → cleanup
   - Event system: sta_event_register/unregister with 16-slot callback table, sta_vm_fire_event internal API
+  - Actor registry: actor_id→STA_Actor* indirection layer; sta_actor_send_msg resolves by ID
+  - Zero-copy fast path: immediates/immutables skip target heap entirely (malloc'd args array)
+  - Lightweight notifications: SmallInt actor_id + immutable Symbol reason, zero supervisor heap allocation
 - sizeof(STA_Actor) = 200 bytes (184 + 16 for supervisor/sup_data pointers)
-- Known limitations (filed as issues):
-  - #312: Supervisor notification drops when heap too small — notify_supervisor allocates args on supervisor heap; workaround: grow supervisor heaps
-  - #313: Raw actor pointer race — sta_actor_send_msg dereferences target pointer that may be freed by supervisor restart; workaround: pre-enqueue messages; fix requires actor indirection layer
-  - Stress tests use single-threaded scheduler to avoid #313; multi-threaded supervision stress requires the actor indirection fix
-- Tests: 90 CTest targets (89 enabled, 1 disabled spike), all passing
+- Known issues (filed separately):
+  - #316: spec->current_actor pointer race during supervisor restart (non-atomic field, test/diagnostic only)
+  - #317: mailbox destroy races with in-flight enqueue during restart (requires actor reference counting)
+- Tests: 90 CTest targets, all passing
+- Removed: scheduler_spike disabled test target (superseded by production scheduler tests)
 
 ---
 
