@@ -10,6 +10,8 @@
 #include "primitive_table.h"
 #include "method_dict.h"
 #include "special_objects.h"
+#include "handler.h"
+#include "class_table.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -946,13 +948,36 @@ int sta_interpret_actor(STA_VM *vm, struct STA_Actor *actor,
     }
 
     actor->saved_frame = NULL;
-    STA_OOP result = interpret_loop_ex(vm, frame, actor);
 
-    if (result == STA_OOP_PREEMPTED) {
-        return STA_INTERPRET_PREEMPTED;
+    /* Install a catch-all exception handler for supervision (Epic 6).
+     * If an unhandled exception reaches this handler, prim_signal will
+     * longjmp here instead of calling abort(). ensure: blocks fire
+     * during normal unwinding before we reach this point. */
+    STA_ExecContext exc_ctx = { .vm = vm, .actor = actor };
+    STA_HandlerEntry catch_all;
+    memset(&catch_all, 0, sizeof(catch_all));
+    catch_all.exception_class = sta_class_table_get(&vm->class_table,
+                                                      STA_CLS_EXCEPTION);
+    catch_all.saved_slab_top = slab->top;
+    catch_all.saved_slab_sp  = slab->sp;
+
+    if (setjmp(catch_all.jmp) == 0) {
+        sta_handler_push_ctx(&exc_ctx, &catch_all);
+        STA_OOP result = interpret_loop_ex(vm, frame, actor);
+        sta_handler_pop_ctx(&exc_ctx);
+
+        if (result == STA_OOP_PREEMPTED) {
+            return STA_INTERPRET_PREEMPTED;
+        }
+        actor->saved_frame = NULL;
+        return STA_INTERPRET_COMPLETED;
+    } else {
+        /* Unhandled exception caught. Restore slab state. */
+        slab->top = catch_all.saved_slab_top;
+        slab->sp  = catch_all.saved_slab_sp;
+        actor->saved_frame = NULL;
+        return STA_INTERPRET_EXCEPTION;
     }
-    actor->saved_frame = NULL;
-    return STA_INTERPRET_COMPLETED;
 }
 
 int sta_interpret_resume(STA_VM *vm, struct STA_Actor *actor)
@@ -960,12 +985,32 @@ int sta_interpret_resume(STA_VM *vm, struct STA_Actor *actor)
     STA_Frame *frame = actor->saved_frame;
     if (!frame) return STA_INTERPRET_COMPLETED;
 
+    STA_StackSlab *slab = &actor->slab;
     actor->saved_frame = NULL;
-    STA_OOP result = interpret_loop_ex(vm, frame, actor);
 
-    if (result == STA_OOP_PREEMPTED) {
-        return STA_INTERPRET_PREEMPTED;
+    /* Same catch-all handler as sta_interpret_actor. */
+    STA_ExecContext exc_ctx = { .vm = vm, .actor = actor };
+    STA_HandlerEntry catch_all;
+    memset(&catch_all, 0, sizeof(catch_all));
+    catch_all.exception_class = sta_class_table_get(&vm->class_table,
+                                                      STA_CLS_EXCEPTION);
+    catch_all.saved_slab_top = slab->top;
+    catch_all.saved_slab_sp  = slab->sp;
+
+    if (setjmp(catch_all.jmp) == 0) {
+        sta_handler_push_ctx(&exc_ctx, &catch_all);
+        STA_OOP result = interpret_loop_ex(vm, frame, actor);
+        sta_handler_pop_ctx(&exc_ctx);
+
+        if (result == STA_OOP_PREEMPTED) {
+            return STA_INTERPRET_PREEMPTED;
+        }
+        actor->saved_frame = NULL;
+        return STA_INTERPRET_COMPLETED;
+    } else {
+        slab->top = catch_all.saved_slab_top;
+        slab->sp  = catch_all.saved_slab_sp;
+        actor->saved_frame = NULL;
+        return STA_INTERPRET_EXCEPTION;
     }
-    actor->saved_frame = NULL;
-    return STA_INTERPRET_COMPLETED;
 }

@@ -101,6 +101,7 @@ static inline STA_OOP sta_class_method_dict(STA_OOP class_oop) {
 
 #define STA_INTERPRET_COMPLETED  0
 #define STA_INTERPRET_PREEMPTED  1
+#define STA_INTERPRET_EXCEPTION  2  /* Unhandled exception (Epic 6) */
 
 /* ── Interpreter entry points ──────────────────────────────────────────── */
 

@@ -116,6 +116,7 @@ int sta_actor_send_msg(struct STA_Actor *sender,
 #define STA_ACTOR_MSG_EMPTY      0
 #define STA_ACTOR_MSG_ERROR     (-1)
 #define STA_ACTOR_MSG_PREEMPTED  2
+#define STA_ACTOR_MSG_EXCEPTION  3  /* Unhandled exception (Epic 6) */
 
 /* Process one message from the actor's mailbox.
  *

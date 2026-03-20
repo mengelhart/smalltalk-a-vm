@@ -152,7 +152,12 @@ static void *worker_thread_main(void *arg) {
 
             worker->current = NULL;
 
-            if (rc == STA_ACTOR_MSG_PREEMPTED) {
+            if (rc == STA_ACTOR_MSG_EXCEPTION) {
+                /* Actor terminated due to unhandled exception.
+                 * handle_actor_exception already set state to TERMINATED,
+                 * notified supervisor, and drained the mailbox. Do not
+                 * re-enqueue or change state. */
+            } else if (rc == STA_ACTOR_MSG_PREEMPTED) {
                 atomic_store_explicit(&actor->state, STA_ACTOR_READY,
                                       memory_order_release);
                 sta_deque_push(&worker->deque, actor);

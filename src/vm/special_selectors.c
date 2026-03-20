@@ -86,5 +86,9 @@ int sta_intern_special_selectors(STA_ImmutableSpace *sp, STA_SymbolTable *st) {
     if (sym == 0) return -1;
     sta_spc_set(SPC_RUN, sym);
 
+    sym = sta_symbol_intern(sp, st, "childFailed:reason:", 19);
+    if (sym == 0) return -1;
+    sta_spc_set(SPC_CHILD_FAILED_REASON, sym);
+
     return 0;
 }

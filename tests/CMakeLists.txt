@@ -485,6 +485,14 @@ target_include_directories(test_supervisor_linkage PRIVATE
 target_link_libraries(test_supervisor_linkage PRIVATE sta_vm)
 add_test(NAME supervisor_linkage COMMAND test_supervisor_linkage)
 
+add_executable(test_failure_detection test_failure_detection.c)
+target_include_directories(test_failure_detection PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_compile_definitions(test_failure_detection PRIVATE
+    KERNEL_DIR="${CMAKE_SOURCE_DIR}/kernel")
+target_link_libraries(test_failure_detection PRIVATE sta_vm Threads::Threads)
+add_test(NAME failure_detection COMMAND test_failure_detection)
+
 # ── Spike 002: MPSC mailbox — TSan correctness gate ───────────────────────
 find_package(Threads REQUIRED)
 
