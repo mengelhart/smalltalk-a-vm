@@ -65,3 +65,18 @@ struct STA_Actor *sta_supervisor_add_child(struct STA_Actor *supervisor,
 /* Destroy supervisor data — frees child specs and the data struct.
  * Does NOT destroy child actors (caller must handle that). */
 void sta_supervisor_data_destroy(STA_SupervisorData *data);
+
+/* ── Failure handling ─────────────────────────────────────────────────── */
+
+/* Handle a childFailed:reason: notification.
+ * Looks up the child spec by actor_id, applies the restart strategy:
+ *   RESTART:  destroy old actor, create new one, update child spec
+ *   STOP:     destroy old actor, set current_actor = NULL
+ *   ESCALATE: destroy old actor, forward failure to grandparent
+ *
+ * args[0] = failed actor_id (SmallInt OOP)
+ * args[1] = error reason (Symbol OOP)
+ *
+ * Returns 0 on success, -1 on error. */
+int sta_supervisor_handle_failure(struct STA_Actor *supervisor,
+                                   STA_OOP *args, uint32_t arg_count);

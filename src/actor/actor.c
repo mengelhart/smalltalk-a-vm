@@ -15,6 +15,7 @@
 #include "vm/special_objects.h"
 #include "vm/symbol_table.h"
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 
 /* Public API stubs — still required by sta/vm.h declarations. */
@@ -280,25 +281,11 @@ static void notify_supervisor(struct STA_VM *vm, struct STA_Actor *actor) {
      *   args[1] = error description symbol (intern a simple string) */
     STA_OOP actor_id_oop = STA_SMALLINT_OOP((intptr_t)actor->actor_id);
 
-    /* Use the signaled exception to extract error info if available. */
-    STA_OOP reason;
-    STA_OOP signaled = actor->signaled_exception;
-    if (signaled != 0 && STA_IS_HEAP(signaled)) {
-        /* Try to get the exception class name as an error reason. */
-        STA_ObjHeader *exc_h = (STA_ObjHeader *)(uintptr_t)signaled;
-        STA_OOP cls_oop = sta_class_table_get(&vm->class_table, exc_h->class_index);
-        if (cls_oop != 0) {
-            /* Class slot 3 is the class name (a Symbol). */
-            STA_OOP *cls_slots = sta_payload((STA_ObjHeader *)(uintptr_t)cls_oop);
-            reason = cls_slots[3];  /* class name symbol */
-        } else {
-            reason = sta_symbol_intern(&vm->immutable_space, &vm->symbol_table,
+    /* Reason: intern "unknownError" as a symbol in immutable space.
+     * TODO: extract the actual exception class name from signaled_exception
+     * once thread-safe access to the actor's heap is guaranteed. */
+    STA_OOP reason = sta_symbol_intern(&vm->immutable_space, &vm->symbol_table,
                                         "unknownError", 12);
-        }
-    } else {
-        reason = sta_symbol_intern(&vm->immutable_space, &vm->symbol_table,
-                                    "unknownError", 12);
-    }
 
     STA_OOP selector = sta_spc_get(SPC_CHILD_FAILED_REASON);
 
@@ -377,6 +364,16 @@ int sta_actor_process_one_preemptible(struct STA_VM *vm, struct STA_Actor *actor
     /* Dequeue a new message. */
     STA_MailboxMsg *msg = sta_mailbox_dequeue(&actor->mailbox);
     if (!msg) return STA_ACTOR_MSG_EMPTY;
+
+    /* Supervisor-aware dispatch (Epic 6 Story 3):
+     * If this actor is a supervisor and the message is childFailed:reason:,
+     * route to C-level failure handler instead of Smalltalk dispatch. */
+    if (actor->sup_data &&
+        msg->selector == sta_spc_get(SPC_CHILD_FAILED_REASON)) {
+        sta_supervisor_handle_failure(actor, msg->args, msg->arg_count);
+        sta_mailbox_msg_destroy(msg);
+        return STA_ACTOR_MSG_PROCESSED;
+    }
 
     /* Look up the method. */
     STA_ObjHeader *beh_h = (STA_ObjHeader *)(uintptr_t)actor->behavior_obj;
