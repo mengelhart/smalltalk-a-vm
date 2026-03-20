@@ -3,6 +3,7 @@
  * See actor.h for documentation.
  */
 #include "actor.h"
+#include "supervisor.h"
 #include "deep_copy.h"
 #include "mailbox_msg.h"
 #include "scheduler/scheduler.h"
@@ -74,12 +75,27 @@ struct STA_Actor *sta_actor_create(struct STA_VM *vm,
     actor->behavior_obj = 0;
     actor->saved_frame = NULL;
     actor->supervisor = NULL;
+    actor->sup_data = NULL;
 
     return actor;
 }
 
 void sta_actor_destroy(struct STA_Actor *actor) {
     if (!actor) return;
+
+    /* If this actor is a supervisor, destroy children depth-first. */
+    if (actor->sup_data) {
+        STA_ChildSpec *spec = actor->sup_data->children;
+        while (spec) {
+            if (spec->current_actor) {
+                sta_actor_destroy(spec->current_actor);
+                spec->current_actor = NULL;
+            }
+            spec = spec->next;
+        }
+        sta_supervisor_data_destroy(actor->sup_data);
+        actor->sup_data = NULL;
+    }
 
     sta_mailbox_destroy(&actor->mailbox);
     sta_stack_slab_deinit(&actor->slab);

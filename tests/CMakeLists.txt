@@ -478,6 +478,13 @@ target_link_libraries(test_gc_scheduled PRIVATE sta_vm Threads::Threads)
 add_test(NAME gc_scheduled COMMAND test_gc_scheduled)
 set_tests_properties(gc_scheduled PROPERTIES TIMEOUT 60)
 
+# ── Phase 2 Epic 6: Supervision ──────────────────────────────────────────
+add_executable(test_supervisor_linkage test_supervisor_linkage.c)
+target_include_directories(test_supervisor_linkage PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(test_supervisor_linkage PRIVATE sta_vm)
+add_test(NAME supervisor_linkage COMMAND test_supervisor_linkage)
+
 # ── Spike 002: MPSC mailbox — TSan correctness gate ───────────────────────
 find_package(Threads REQUIRED)
 
