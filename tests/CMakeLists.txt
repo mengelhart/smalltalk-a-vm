@@ -478,6 +478,62 @@ target_link_libraries(test_gc_scheduled PRIVATE sta_vm Threads::Threads)
 add_test(NAME gc_scheduled COMMAND test_gc_scheduled)
 set_tests_properties(gc_scheduled PROPERTIES TIMEOUT 60)
 
+# ── Phase 2 Epic 6: Supervision ──────────────────────────────────────────
+add_executable(test_supervisor_linkage test_supervisor_linkage.c)
+target_include_directories(test_supervisor_linkage PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(test_supervisor_linkage PRIVATE sta_vm)
+add_test(NAME supervisor_linkage COMMAND test_supervisor_linkage)
+
+add_executable(test_failure_detection test_failure_detection.c)
+target_include_directories(test_failure_detection PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_compile_definitions(test_failure_detection PRIVATE
+    KERNEL_DIR="${CMAKE_SOURCE_DIR}/kernel")
+target_link_libraries(test_failure_detection PRIVATE sta_vm Threads::Threads)
+add_test(NAME failure_detection COMMAND test_failure_detection)
+
+add_executable(test_restart test_restart.c)
+target_include_directories(test_restart PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_compile_definitions(test_restart PRIVATE
+    KERNEL_DIR="${CMAKE_SOURCE_DIR}/kernel")
+target_link_libraries(test_restart PRIVATE sta_vm Threads::Threads)
+add_test(NAME restart COMMAND test_restart)
+
+add_executable(test_stop_escalate test_stop_escalate.c)
+target_include_directories(test_stop_escalate PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_compile_definitions(test_stop_escalate PRIVATE
+    KERNEL_DIR="${CMAKE_SOURCE_DIR}/kernel")
+target_link_libraries(test_stop_escalate PRIVATE sta_vm Threads::Threads)
+add_test(NAME stop_escalate COMMAND test_stop_escalate)
+
+add_executable(test_restart_intensity test_restart_intensity.c)
+target_include_directories(test_restart_intensity PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_compile_definitions(test_restart_intensity PRIVATE
+    KERNEL_DIR="${CMAKE_SOURCE_DIR}/kernel")
+target_link_libraries(test_restart_intensity PRIVATE sta_vm Threads::Threads)
+add_test(NAME restart_intensity COMMAND test_restart_intensity)
+
+add_executable(test_supervision_tree test_supervision_tree.c)
+target_include_directories(test_supervision_tree PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_compile_definitions(test_supervision_tree PRIVATE
+    KERNEL_DIR="${CMAKE_SOURCE_DIR}/kernel")
+target_link_libraries(test_supervision_tree PRIVATE sta_vm Threads::Threads)
+add_test(NAME supervision_tree COMMAND test_supervision_tree)
+
+add_executable(test_supervision_stress test_supervision_stress.c)
+target_include_directories(test_supervision_stress PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_compile_definitions(test_supervision_stress PRIVATE
+    KERNEL_DIR="${CMAKE_SOURCE_DIR}/kernel")
+target_link_libraries(test_supervision_stress PRIVATE sta_vm Threads::Threads)
+add_test(NAME supervision_stress COMMAND test_supervision_stress)
+set_tests_properties(supervision_stress PROPERTIES TIMEOUT 60)
+
 # ── Spike 002: MPSC mailbox — TSan correctness gate ───────────────────────
 find_package(Threads REQUIRED)
 

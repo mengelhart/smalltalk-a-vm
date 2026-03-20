@@ -3,6 +3,7 @@
  * See actor.h for documentation.
  */
 #include "actor.h"
+#include "supervisor.h"
 #include "deep_copy.h"
 #include "mailbox_msg.h"
 #include "scheduler/scheduler.h"
@@ -13,6 +14,7 @@
 #include "vm/class_table.h"
 #include "vm/special_objects.h"
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 
 /* Public API stubs — still required by sta/vm.h declarations. */
@@ -74,12 +76,27 @@ struct STA_Actor *sta_actor_create(struct STA_VM *vm,
     actor->behavior_obj = 0;
     actor->saved_frame = NULL;
     actor->supervisor = NULL;
+    actor->sup_data = NULL;
 
     return actor;
 }
 
 void sta_actor_destroy(struct STA_Actor *actor) {
     if (!actor) return;
+
+    /* If this actor is a supervisor, destroy children depth-first. */
+    if (actor->sup_data) {
+        STA_ChildSpec *spec = actor->sup_data->children;
+        while (spec) {
+            if (spec->current_actor) {
+                sta_actor_destroy(spec->current_actor);
+                spec->current_actor = NULL;
+            }
+            spec = spec->next;
+        }
+        sta_supervisor_data_destroy(actor->sup_data);
+        actor->sup_data = NULL;
+    }
 
     sta_mailbox_destroy(&actor->mailbox);
     sta_stack_slab_deinit(&actor->slab);
@@ -239,6 +256,95 @@ int sta_actor_process_one(struct STA_VM *vm, struct STA_Actor *actor)
     return STA_ACTOR_MSG_PROCESSED;
 }
 
+/* Drain all remaining messages from a terminated actor's mailbox. */
+static void drain_mailbox(struct STA_Actor *actor) {
+    STA_MailboxMsg *msg;
+    while ((msg = sta_mailbox_dequeue(&actor->mailbox)) != NULL) {
+        sta_mailbox_msg_destroy(msg);
+    }
+}
+
+/* Send a failure notification to the actor's supervisor.
+ * Constructs a childFailed:reason: message with the failed actor's ID
+ * and an error description symbol. */
+static void notify_supervisor(struct STA_VM *vm, struct STA_Actor *actor) {
+    struct STA_Actor *sup = actor->supervisor;
+    if (!sup) return;
+
+    /* Don't notify if supervisor is already terminated. */
+    uint32_t sup_state = atomic_load_explicit(&sup->state, memory_order_acquire);
+    if (sup_state == STA_ACTOR_TERMINATED) return;
+
+    /* Build notification args:
+     *   args[0] = failed actor_id as SmallInt OOP
+     *   args[1] = error description symbol (intern a simple string) */
+    STA_OOP actor_id_oop = STA_SMALLINT_OOP((intptr_t)actor->actor_id);
+
+    /* Reason: use pre-interned symbol from special objects table.
+     * TODO: extract the actual exception class name from signaled_exception
+     * once thread-safe access to the actor's heap is guaranteed. */
+    STA_OOP reason = sta_spc_get(SPC_UNKNOWN_ERROR);
+
+    STA_OOP selector = sta_spc_get(SPC_CHILD_FAILED_REASON);
+
+    /* Create the message envelope directly (args are immutable SmallInt +
+     * Symbol, no deep copy needed — they survive the failed actor's heap). */
+    STA_OOP notif_args[2] = { actor_id_oop, reason };
+
+    /* Allocate an args array on the supervisor's heap. */
+    STA_ObjHeader *args_h = sta_heap_alloc(&sup->heap, STA_CLS_ARRAY, 2);
+    if (!args_h) return;  /* Supervisor heap full — drop notification */
+    STA_OOP *copied = sta_payload(args_h);
+    copied[0] = notif_args[0];
+    copied[1] = notif_args[1];
+
+    STA_MailboxMsg *notif = sta_mailbox_msg_create(selector, copied, 2,
+                                                     actor->actor_id);
+    if (!notif) return;
+
+    int rc = sta_mailbox_enqueue(&sup->mailbox, notif);
+    if (rc != 0) {
+        /* Supervisor mailbox full — drop notification. */
+        sta_mailbox_msg_destroy(notif);
+        return;
+    }
+
+    /* Auto-schedule the supervisor if idle. */
+    STA_Scheduler *sched = sup->vm ? sup->vm->scheduler : NULL;
+    if (sched && atomic_load_explicit(&sched->running, memory_order_acquire)) {
+        uint32_t expected = STA_ACTOR_SUSPENDED;
+        if (atomic_compare_exchange_strong_explicit(
+                &sup->state, &expected, STA_ACTOR_READY,
+                memory_order_acq_rel, memory_order_relaxed)) {
+            sta_scheduler_enqueue(sched, sup);
+        } else {
+            expected = STA_ACTOR_CREATED;
+            if (atomic_compare_exchange_strong_explicit(
+                    &sup->state, &expected, STA_ACTOR_READY,
+                    memory_order_acq_rel, memory_order_relaxed)) {
+                sta_scheduler_enqueue(sched, sup);
+            }
+        }
+    }
+}
+
+/* Handle an unhandled exception in a scheduled actor:
+ * 1. Transition to TERMINATED (CAS for thread safety)
+ * 2. Notify supervisor (if any)
+ * 3. Drain remaining messages */
+static int handle_actor_exception(struct STA_VM *vm, struct STA_Actor *actor) {
+    /* CAS to TERMINATED — another thread should not race on this. */
+    uint32_t expected = STA_ACTOR_RUNNING;
+    atomic_compare_exchange_strong_explicit(
+        &actor->state, &expected, STA_ACTOR_TERMINATED,
+        memory_order_acq_rel, memory_order_relaxed);
+
+    notify_supervisor(vm, actor);
+    drain_mailbox(actor);
+
+    return STA_ACTOR_MSG_EXCEPTION;
+}
+
 int sta_actor_process_one_preemptible(struct STA_VM *vm, struct STA_Actor *actor)
 {
     /* If the actor was preempted mid-execution, resume. */
@@ -247,12 +353,25 @@ int sta_actor_process_one_preemptible(struct STA_VM *vm, struct STA_Actor *actor
         if (rc == STA_INTERPRET_PREEMPTED) {
             return STA_ACTOR_MSG_PREEMPTED;
         }
+        if (rc == STA_INTERPRET_EXCEPTION) {
+            return handle_actor_exception(vm, actor);
+        }
         return STA_ACTOR_MSG_PROCESSED;
     }
 
     /* Dequeue a new message. */
     STA_MailboxMsg *msg = sta_mailbox_dequeue(&actor->mailbox);
     if (!msg) return STA_ACTOR_MSG_EMPTY;
+
+    /* Supervisor-aware dispatch (Epic 6 Story 3):
+     * If this actor is a supervisor and the message is childFailed:reason:,
+     * route to C-level failure handler instead of Smalltalk dispatch. */
+    if (actor->sup_data &&
+        msg->selector == sta_spc_get(SPC_CHILD_FAILED_REASON)) {
+        sta_supervisor_handle_failure(actor, msg->args, msg->arg_count);
+        sta_mailbox_msg_destroy(msg);
+        return STA_ACTOR_MSG_PROCESSED;
+    }
 
     /* Look up the method. */
     STA_ObjHeader *beh_h = (STA_ObjHeader *)(uintptr_t)actor->behavior_obj;
@@ -275,6 +394,9 @@ int sta_actor_process_one_preemptible(struct STA_VM *vm, struct STA_Actor *actor
 
     if (rc == STA_INTERPRET_PREEMPTED) {
         return STA_ACTOR_MSG_PREEMPTED;
+    }
+    if (rc == STA_INTERPRET_EXCEPTION) {
+        return handle_actor_exception(vm, actor);
     }
     return STA_ACTOR_MSG_PROCESSED;
 }

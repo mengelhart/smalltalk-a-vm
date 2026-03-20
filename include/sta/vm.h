@@ -120,6 +120,24 @@ typedef struct {
 typedef void (*STA_EventCallback)(STA_VM* vm, const STA_Event* event, void* ctx);
 
 /* -------------------------------------------------------------------------
+ * Supervision (Phase 2 Epic 6)
+ * ---------------------------------------------------------------------- */
+
+typedef enum {
+    STA_RESTART_RESTART  = 0,  /* Create new actor of same class */
+    STA_RESTART_STOP     = 1,  /* Terminate permanently */
+    STA_RESTART_ESCALATE = 2   /* Forward failure to parent supervisor */
+} STA_RestartStrategy;
+
+/* Spawn a new actor as a child of the root supervisor.
+ * This is the default way to create supervised actors.
+ * behavior_class is the raw OOP of the class for the actor's behavior.
+ * strategy determines what happens when this actor crashes.
+ * Returns the new actor, or NULL on failure. */
+STA_Actor* sta_vm_spawn_supervised(STA_VM* vm, STA_OOP behavior_class,
+                                    STA_RestartStrategy strategy);
+
+/* -------------------------------------------------------------------------
  * Actor interface
  * ---------------------------------------------------------------------- */
 

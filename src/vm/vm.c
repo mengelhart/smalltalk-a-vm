@@ -4,7 +4,9 @@
  */
 #include "vm/vm_state.h"
 #include "vm/special_objects.h"
+#include "vm/class_table.h"
 #include "actor/actor.h"
+#include "actor/supervisor.h"
 #include "scheduler/scheduler.h"
 #include "bootstrap/bootstrap.h"
 #include "bootstrap/kernel_load.h"
@@ -15,6 +17,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <time.h>
 
 /* ── Defaults ──────────────────────────────────────────────────────── */
 
@@ -186,6 +189,37 @@ STA_VM* sta_vm_create(const STA_VMConfig* config) {
         vm->root_actor = root;
     }
 
+    /* Create root supervisor — top of the supervision tree.
+     * Generous defaults: 10 restarts within 10 seconds. */
+    {
+        STA_OOP obj_cls = sta_class_table_get(&vm->class_table, STA_CLS_OBJECT);
+        struct STA_Actor *rsup = sta_actor_create(vm, 16384, 2048);
+        if (!rsup) {
+            set_error(vm, "failed to allocate root supervisor");
+            goto fail;
+        }
+        rsup->behavior_class = obj_cls;
+        STA_ObjHeader *obj_h = sta_heap_alloc(&rsup->heap, STA_CLS_OBJECT, 0);
+        if (!obj_h) {
+            sta_actor_destroy(rsup);
+            set_error(vm, "failed to allocate root supervisor behavior obj");
+            goto fail;
+        }
+        rsup->behavior_obj = (STA_OOP)(uintptr_t)obj_h;
+        rsup->actor_id = 2;  /* root_actor is 1 */
+        rsup->supervisor = NULL;  /* root of the tree */
+        atomic_store_explicit(&rsup->state, STA_ACTOR_SUSPENDED,
+                              memory_order_relaxed);
+
+        if (sta_supervisor_init(rsup, 10, 10) != 0) {
+            sta_actor_destroy(rsup);
+            set_error(vm, "failed to init root supervisor data");
+            goto fail;
+        }
+
+        vm->root_supervisor = rsup;
+    }
+
     return vm;
 
 fail:
@@ -214,6 +248,15 @@ void sta_vm_destroy(STA_VM* vm) {
     }
 
     /* Teardown in reverse order of initialization. */
+
+    /* Tear down supervision tree BEFORE root actor — no actor should be
+     * processing messages during teardown. sta_actor_destroy on the root
+     * supervisor recursively destroys all children depth-first. */
+    if (vm->root_supervisor) {
+        sta_actor_destroy(vm->root_supervisor);
+        vm->root_supervisor = NULL;
+    }
+
     sta_handle_table_destroy(&vm->handles);
 
     /* Destroy root actor (owns heap and slab). */
@@ -289,4 +332,62 @@ int sta_vm_load_source(STA_VM* vm, const char* path) {
         return STA_ERR_COMPILE;
     }
     return STA_OK;
+}
+
+/* ── sta_vm_spawn_supervised ───────────────────────────────────────── */
+
+STA_Actor* sta_vm_spawn_supervised(STA_VM* vm, STA_OOP behavior_class,
+                                    STA_RestartStrategy strategy) {
+    if (!vm || !vm->root_supervisor) return NULL;
+    return sta_supervisor_add_child(vm->root_supervisor,
+                                     behavior_class, strategy);
+}
+
+/* ── Event callbacks ───────────────────────────────────────────────── */
+
+#define STA_EVENT_CB_MAX 16u
+
+int sta_event_register(STA_VM* vm, STA_EventCallback callback, void* ctx) {
+    if (!vm || !callback) return STA_ERR_INVALID;
+    if (vm->event_cb_count >= STA_EVENT_CB_MAX) return STA_ERR_OOM;
+
+    vm->event_cbs[vm->event_cb_count].callback = callback;
+    vm->event_cbs[vm->event_cb_count].ctx = ctx;
+    vm->event_cb_count++;
+    return STA_OK;
+}
+
+void sta_event_unregister(STA_VM* vm, STA_EventCallback callback, void* ctx) {
+    if (!vm || !callback) return;
+
+    for (uint8_t i = 0; i < vm->event_cb_count; i++) {
+        if (vm->event_cbs[i].callback == callback &&
+            vm->event_cbs[i].ctx == ctx) {
+            /* Shift remaining entries down. */
+            for (uint8_t j = i; j + 1 < vm->event_cb_count; j++)
+                vm->event_cbs[j] = vm->event_cbs[j + 1];
+            vm->event_cb_count--;
+            return;
+        }
+    }
+}
+
+/* Fire an event to all registered callbacks. Internal use only. */
+void sta_vm_fire_event(STA_VM *vm, STA_EventType type, const char *message) {
+    if (!vm || vm->event_cb_count == 0) return;
+
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+
+    STA_Event event = {
+        .type = type,
+        .actor = NULL,
+        .message = message,
+        .timestamp_ns = (uint64_t)ts.tv_sec * 1000000000ULL +
+                        (uint64_t)ts.tv_nsec,
+    };
+
+    for (uint8_t i = 0; i < vm->event_cb_count; i++) {
+        vm->event_cbs[i].callback(vm, &event, vm->event_cbs[i].ctx);
+    }
 }

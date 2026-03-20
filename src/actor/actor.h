@@ -16,8 +16,9 @@
 #include <stdatomic.h>
 #include <stdint.h>
 
-/* Forward-declare STA_VM to avoid circular include. */
+/* Forward-declare STA_VM and STA_SupervisorData to avoid circular include. */
 struct STA_VM;
+struct STA_SupervisorData;
 
 /* ── Actor lifecycle states ──────────────────────────────────────────── */
 
@@ -69,8 +70,11 @@ struct STA_Actor {
     /* Per-actor GC statistics (Story 6). 24 bytes inline. */
     STA_GCStats       gc_stats;
 
-    /* Supervisor linkage — NULL placeholder, wired in Epic 6 */
-    void             *supervisor;
+    /* Supervisor linkage — Epic 6.
+     * supervisor: pointer to the supervising actor (NULL if unsupervised).
+     * sup_data: non-NULL only for actors that ARE supervisors. */
+    struct STA_Actor           *supervisor;
+    struct STA_SupervisorData  *sup_data;
 };
 
 /* ── Lifecycle ───────────────────────────────────────────────────────── */
@@ -112,6 +116,7 @@ int sta_actor_send_msg(struct STA_Actor *sender,
 #define STA_ACTOR_MSG_EMPTY      0
 #define STA_ACTOR_MSG_ERROR     (-1)
 #define STA_ACTOR_MSG_PREEMPTED  2
+#define STA_ACTOR_MSG_EXCEPTION  3  /* Unhandled exception (Epic 6) */
 
 /* Process one message from the actor's mailbox.
  *
