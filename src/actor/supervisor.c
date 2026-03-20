@@ -10,10 +10,13 @@
 #include "vm/oop.h"
 #include "vm/heap.h"
 #include "vm/special_objects.h"
+#include "vm/symbol_table.h"
+#include "vm/immutable_space.h"
 #include "scheduler/scheduler.h"
 #include <stdlib.h>
 #include <stdatomic.h>
 #include <stdio.h>
+#include <time.h>
 
 /* Default heap and stack sizes for child actors. */
 #define CHILD_HEAP_SIZE  128u
@@ -181,6 +184,135 @@ static struct STA_Actor *restart_child(struct STA_Actor *supervisor,
     return child;
 }
 
+/* Get current monotonic time in nanoseconds. */
+static uint64_t now_ns(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec;
+}
+
+/* Terminate all living children of a supervisor.
+ * Used when restart intensity is exceeded. */
+static void terminate_all_children(struct STA_Actor *supervisor) {
+    STA_ChildSpec *spec = supervisor->sup_data->children;
+    while (spec) {
+        if (spec->current_actor) {
+            spec->current_actor->supervisor = NULL;
+            sta_actor_destroy(spec->current_actor);
+            spec->current_actor = NULL;
+        }
+        spec = spec->next;
+    }
+}
+
+/* Send escalation notification to this supervisor's parent.
+ * reason_oop is the reason symbol to include. */
+static void escalate_to_parent(struct STA_Actor *supervisor, STA_OOP reason_oop) {
+    struct STA_Actor *parent = supervisor->supervisor;
+    if (!parent) {
+        fprintf(stderr, "supervisor %u: intensity exceeded but no parent — "
+                "dropping escalation\n", supervisor->actor_id);
+        return;
+    }
+
+    uint32_t p_state = atomic_load_explicit(&parent->state, memory_order_acquire);
+    if (p_state == STA_ACTOR_TERMINATED) return;
+
+    STA_OOP sup_id_oop = STA_SMALLINT_OOP((intptr_t)supervisor->actor_id);
+    STA_OOP selector = sta_spc_get(SPC_CHILD_FAILED_REASON);
+
+    STA_ObjHeader *p_args_h = sta_heap_alloc(&parent->heap, STA_CLS_ARRAY, 2);
+    if (!p_args_h) return;
+    STA_OOP *p_copied = sta_payload(p_args_h);
+    p_copied[0] = sup_id_oop;
+    p_copied[1] = reason_oop;
+
+    STA_MailboxMsg *notif = sta_mailbox_msg_create(selector, p_copied, 2,
+                                                     supervisor->actor_id);
+    if (!notif) return;
+
+    int rc = sta_mailbox_enqueue(&parent->mailbox, notif);
+    if (rc != 0) {
+        sta_mailbox_msg_destroy(notif);
+        return;
+    }
+
+    /* Auto-schedule parent if idle. */
+    STA_Scheduler *sched = parent->vm ? parent->vm->scheduler : NULL;
+    if (sched && atomic_load_explicit(&sched->running, memory_order_acquire)) {
+        uint32_t expected = STA_ACTOR_SUSPENDED;
+        if (atomic_compare_exchange_strong_explicit(
+                &parent->state, &expected, STA_ACTOR_READY,
+                memory_order_acq_rel, memory_order_relaxed)) {
+            sta_scheduler_enqueue(sched, parent);
+        } else {
+            expected = STA_ACTOR_CREATED;
+            if (atomic_compare_exchange_strong_explicit(
+                    &parent->state, &expected, STA_ACTOR_READY,
+                    memory_order_acq_rel, memory_order_relaxed)) {
+                sta_scheduler_enqueue(sched, parent);
+            }
+        }
+    }
+}
+
+/* Check restart intensity. Returns 0 if restart is allowed, -1 if exceeded.
+ * When exceeded, terminates all children, escalates to parent, and
+ * transitions this supervisor to TERMINATED. */
+static int check_intensity(struct STA_Actor *supervisor, STA_OOP reason) {
+    STA_SupervisorData *data = supervisor->sup_data;
+    uint64_t current = now_ns();
+
+    /* First restart in window — set window start. */
+    if (data->restart_count == 0) {
+        data->window_start_ns = current;
+    }
+
+    /* Check if window has elapsed — if so, reset. */
+    uint64_t elapsed = current - data->window_start_ns;
+    uint64_t window_ns = (uint64_t)data->max_seconds * 1000000000ULL;
+    if (elapsed > window_ns) {
+        data->restart_count = 0;
+        data->window_start_ns = current;
+    }
+
+    /* Increment and check. */
+    data->restart_count++;
+    if (data->restart_count > data->max_restarts) {
+        /* Intensity exceeded. */
+        terminate_all_children(supervisor);
+
+        /* Intern a reason symbol for escalation. */
+        STA_OOP intensity_reason = reason;  /* Pass through original reason */
+        (void)intensity_reason;
+
+        /* Use a pre-interned symbol if available, otherwise fall back. */
+        struct STA_VM *vm = supervisor->vm;
+        STA_OOP escalation_reason = 0;
+        if (vm) {
+            escalation_reason = sta_symbol_intern(
+                &vm->immutable_space, &vm->symbol_table,
+                "restartIntensityExceeded", 24);
+        }
+        if (escalation_reason == 0) {
+            escalation_reason = sta_spc_get(SPC_UNKNOWN_ERROR);
+        }
+
+        /* Escalate to parent if one exists. */
+        if (supervisor->supervisor) {
+            escalate_to_parent(supervisor, escalation_reason);
+        }
+
+        /* Transition this supervisor to TERMINATED. */
+        atomic_store_explicit(&supervisor->state, STA_ACTOR_TERMINATED,
+                              memory_order_release);
+
+        return -1;  /* Intensity exceeded */
+    }
+
+    return 0;  /* Restart allowed */
+}
+
 int sta_supervisor_handle_failure(struct STA_Actor *supervisor,
                                    STA_OOP *args, uint32_t arg_count)
 {
@@ -202,6 +334,13 @@ int sta_supervisor_handle_failure(struct STA_Actor *supervisor,
 
     switch (spec->strategy) {
     case STA_RESTART_RESTART: {
+        /* Check restart intensity before applying RESTART. */
+        if (check_intensity(supervisor, args[1]) != 0) {
+            /* Intensity exceeded — all children terminated, supervisor
+             * transitioned to TERMINATED, escalation sent. */
+            return 0;
+        }
+
         /* Destroy old actor. */
         if (old_actor) {
             old_actor->supervisor = NULL;  /* Prevent recursive teardown */
@@ -237,62 +376,7 @@ int sta_supervisor_handle_failure(struct STA_Actor *supervisor,
         spec->current_actor = NULL;
 
         /* Forward the failure to this supervisor's supervisor. */
-        struct STA_Actor *grandparent = supervisor->supervisor;
-        if (!grandparent) {
-            fprintf(stderr, "supervisor %u: ESCALATE but no grandparent — "
-                    "dropping failure for child %u\n",
-                    supervisor->actor_id, failed_id);
-            break;
-        }
-
-        /* Don't escalate to a terminated grandparent. */
-        uint32_t gp_state = atomic_load_explicit(&grandparent->state,
-                                                   memory_order_acquire);
-        if (gp_state == STA_ACTOR_TERMINATED) break;
-
-        /* Build childFailed:reason: notification for grandparent.
-         * args[0] = THIS supervisor's actor_id (not original child's).
-         * args[1] = original reason symbol (from args[1]). */
-        STA_OOP sup_id_oop = STA_SMALLINT_OOP((intptr_t)supervisor->actor_id);
-        STA_OOP reason = args[1];
-        STA_OOP selector = sta_spc_get(SPC_CHILD_FAILED_REASON);
-
-        /* Allocate args array on the grandparent's heap. */
-        STA_ObjHeader *gp_args_h = sta_heap_alloc(&grandparent->heap,
-                                                     STA_CLS_ARRAY, 2);
-        if (!gp_args_h) break;  /* Grandparent heap full — drop */
-        STA_OOP *gp_copied = sta_payload(gp_args_h);
-        gp_copied[0] = sup_id_oop;
-        gp_copied[1] = reason;
-
-        STA_MailboxMsg *notif = sta_mailbox_msg_create(selector, gp_copied, 2,
-                                                         supervisor->actor_id);
-        if (!notif) break;
-
-        int rc = sta_mailbox_enqueue(&grandparent->mailbox, notif);
-        if (rc != 0) {
-            sta_mailbox_msg_destroy(notif);
-            break;
-        }
-
-        /* Auto-schedule grandparent if idle. */
-        STA_Scheduler *sched = grandparent->vm ? grandparent->vm->scheduler : NULL;
-        if (sched && atomic_load_explicit(&sched->running,
-                                            memory_order_acquire)) {
-            uint32_t expected = STA_ACTOR_SUSPENDED;
-            if (atomic_compare_exchange_strong_explicit(
-                    &grandparent->state, &expected, STA_ACTOR_READY,
-                    memory_order_acq_rel, memory_order_relaxed)) {
-                sta_scheduler_enqueue(sched, grandparent);
-            } else {
-                expected = STA_ACTOR_CREATED;
-                if (atomic_compare_exchange_strong_explicit(
-                        &grandparent->state, &expected, STA_ACTOR_READY,
-                        memory_order_acq_rel, memory_order_relaxed)) {
-                    sta_scheduler_enqueue(sched, grandparent);
-                }
-            }
-        }
+        escalate_to_parent(supervisor, args[1]);
         break;
     }
     }

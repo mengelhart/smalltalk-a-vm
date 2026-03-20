@@ -509,6 +509,14 @@ target_compile_definitions(test_stop_escalate PRIVATE
 target_link_libraries(test_stop_escalate PRIVATE sta_vm Threads::Threads)
 add_test(NAME stop_escalate COMMAND test_stop_escalate)
 
+add_executable(test_restart_intensity test_restart_intensity.c)
+target_include_directories(test_restart_intensity PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_compile_definitions(test_restart_intensity PRIVATE
+    KERNEL_DIR="${CMAKE_SOURCE_DIR}/kernel")
+target_link_libraries(test_restart_intensity PRIVATE sta_vm Threads::Threads)
+add_test(NAME restart_intensity COMMAND test_restart_intensity)
+
 # ── Spike 002: MPSC mailbox — TSan correctness gate ───────────────────────
 find_package(Threads REQUIRED)
 
