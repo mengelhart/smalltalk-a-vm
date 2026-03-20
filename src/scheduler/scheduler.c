@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>  /* sysconf */
 
 /* ── Run queue operations ─────────────────────────────────────────────── */
 
@@ -75,9 +76,15 @@ static void *worker_thread_main(void *arg) {
         struct STA_Actor *actor = sta_scheduler_dequeue(sched);
 
         if (actor) {
-            /* READY → RUNNING */
-            atomic_store_explicit(&actor->state, STA_ACTOR_RUNNING,
-                                  memory_order_release);
+            /* READY → RUNNING (atomic claim — only one thread can win). */
+            uint32_t expected = STA_ACTOR_READY;
+            if (!atomic_compare_exchange_strong_explicit(
+                    &actor->state, &expected, STA_ACTOR_RUNNING,
+                    memory_order_acq_rel, memory_order_relaxed)) {
+                /* Another thread claimed this actor (should not happen
+                 * with mutex queue, but defense-in-depth for Story 5). */
+                continue;
+            }
             worker->current = actor;
 
             /* Process one message (or resume preempted execution).
@@ -135,7 +142,10 @@ static void *worker_thread_main(void *arg) {
 /* ── Lifecycle ────────────────────────────────────────────────────────── */
 
 int sta_scheduler_init(struct STA_VM *vm, uint32_t num_threads) {
-    if (num_threads == 0) num_threads = 1;
+    if (num_threads == 0) {
+        long cores = sysconf(_SC_NPROCESSORS_ONLN);
+        num_threads = (cores > 0) ? (uint32_t)cores : 1;
+    }
 
     STA_Scheduler *sched = calloc(1, sizeof(STA_Scheduler));
     if (!sched) return -1;

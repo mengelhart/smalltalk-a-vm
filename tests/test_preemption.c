@@ -225,16 +225,17 @@ static void test_scheduler_preemption(void) {
     struct STA_Actor *root = vm->root_actor;
     sta_actor_send_msg(root, child, sel, NULL, 0);
 
-    /* Wait for completion. */
+    /* Wait for completion — only check atomic state to avoid TSan races
+     * on non-atomic saved_frame. saved_frame is checked after stop (which
+     * joins all threads, establishing happens-before). */
     for (int i = 0; i < 200; i++) {
-        if (sta_mailbox_is_empty(&child->mailbox) &&
-            child->saved_frame == NULL &&
-            atomic_load(&child->state) == STA_ACTOR_SUSPENDED) break;
+        if (atomic_load(&child->state) == STA_ACTOR_SUSPENDED) break;
         usleep(5000);
     }
 
     sta_scheduler_stop(vm);
 
+    /* After stop/join, all worker threads are done — safe to read. */
     assert(sta_mailbox_is_empty(&child->mailbox));
     assert(child->saved_frame == NULL);
     uint32_t state = atomic_load(&child->state);

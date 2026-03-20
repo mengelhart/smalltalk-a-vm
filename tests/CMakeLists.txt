@@ -390,6 +390,14 @@ target_compile_definitions(test_preemption PRIVATE
 target_link_libraries(test_preemption PRIVATE sta_vm Threads::Threads)
 add_test(NAME preemption COMMAND test_preemption)
 
+add_executable(test_scheduler_mt test_scheduler_mt.c)
+target_include_directories(test_scheduler_mt PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_compile_definitions(test_scheduler_mt PRIVATE
+    KERNEL_DIR="${CMAKE_SOURCE_DIR}/kernel")
+target_link_libraries(test_scheduler_mt PRIVATE sta_vm Threads::Threads)
+add_test(NAME scheduler_mt COMMAND test_scheduler_mt)
+
 # ── Spike 002: MPSC mailbox — TSan correctness gate ───────────────────────
 find_package(Threads REQUIRED)
 
