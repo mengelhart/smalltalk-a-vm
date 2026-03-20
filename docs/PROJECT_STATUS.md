@@ -726,8 +726,18 @@ ArrayedCollection, Character, String, Symbol, ByteArray, Array, OrderedCollectio
   - GC + preemption: 8 actors × 2000-iteration allocating loops, preempted and resumed correctly
   - Concurrent GC all cores: 32 actors on 16 threads, 100 messages each, no corruption
 - Sanitizers: ASan clean (all test files), TSan clean (all test files)
-- Deferred: Deep copy heap growth on allocation failure (GitHub #295), immutable space atomic bounds for concurrent GC reads (GitHub #296)
+- Deferred: immutable space atomic bounds for concurrent GC reads (GitHub #296)
 - Tests: 81 CTest targets passing (75 existing + 6 new test files, 38 new tests)
+
+### Fix #295: Deep Copy Heap Growth — COMPLETE
+- Branch: fix/295-deep-copy-heap-growth
+- Problem: Deep copy during cross-actor message send could fail if the target heap was too small for the payload, even after GC (no garbage to collect on a fresh actor).
+- Solution: Pre-flight size estimation in `sta_actor_send_msg`. Before deep copying, walks all arg graphs in a single pass to estimate total allocation cost. If the target heap lacks sufficient free space, grows it once upfront (used + estimate * 1.5 breathing room).
+- New API: `sta_deep_copy_estimate()` and `sta_deep_copy_estimate_roots()` in deep_copy.h/c — same traversal rules as deep copy (skip immediates, immutables, visited-set for DAG/cycles), measurement only.
+- Design choice: pre-flight only grows (no GC) because mailbox-referenced objects are not GC roots and would be incorrectly collected. Per-object `sta_heap_alloc_gc` remains as defense-in-depth during actual copy.
+- Known limitation: `STA_MailboxMsg.args` holds raw C pointers into the target heap; if heap grows between sends (without draining), prior message pointers become stale. In production, the scheduler drains promptly; a future fix would make mailbox references GC-aware.
+- Tests: 11 new (6 estimation unit tests + 5 send tests including 128-byte→816-byte growth). ASan clean.
+- Total: 82 CTest targets passing
 
 ---
 
