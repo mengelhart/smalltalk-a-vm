@@ -220,7 +220,7 @@ int sta_supervisor_handle_failure(struct STA_Actor *supervisor,
     }
 
     case STA_RESTART_STOP:
-        /* Story 4 — for now, just destroy. */
+        /* Permanently stop — do not restart. Slot remains with NULL actor. */
         if (old_actor) {
             old_actor->supervisor = NULL;
             sta_actor_destroy(old_actor);
@@ -228,14 +228,73 @@ int sta_supervisor_handle_failure(struct STA_Actor *supervisor,
         spec->current_actor = NULL;
         break;
 
-    case STA_RESTART_ESCALATE:
-        /* Story 4 — for now, just destroy and log. */
+    case STA_RESTART_ESCALATE: {
+        /* Destroy the failed child. */
         if (old_actor) {
             old_actor->supervisor = NULL;
             sta_actor_destroy(old_actor);
         }
         spec->current_actor = NULL;
+
+        /* Forward the failure to this supervisor's supervisor. */
+        struct STA_Actor *grandparent = supervisor->supervisor;
+        if (!grandparent) {
+            fprintf(stderr, "supervisor %u: ESCALATE but no grandparent — "
+                    "dropping failure for child %u\n",
+                    supervisor->actor_id, failed_id);
+            break;
+        }
+
+        /* Don't escalate to a terminated grandparent. */
+        uint32_t gp_state = atomic_load_explicit(&grandparent->state,
+                                                   memory_order_acquire);
+        if (gp_state == STA_ACTOR_TERMINATED) break;
+
+        /* Build childFailed:reason: notification for grandparent.
+         * args[0] = THIS supervisor's actor_id (not original child's).
+         * args[1] = original reason symbol (from args[1]). */
+        STA_OOP sup_id_oop = STA_SMALLINT_OOP((intptr_t)supervisor->actor_id);
+        STA_OOP reason = args[1];
+        STA_OOP selector = sta_spc_get(SPC_CHILD_FAILED_REASON);
+
+        /* Allocate args array on the grandparent's heap. */
+        STA_ObjHeader *gp_args_h = sta_heap_alloc(&grandparent->heap,
+                                                     STA_CLS_ARRAY, 2);
+        if (!gp_args_h) break;  /* Grandparent heap full — drop */
+        STA_OOP *gp_copied = sta_payload(gp_args_h);
+        gp_copied[0] = sup_id_oop;
+        gp_copied[1] = reason;
+
+        STA_MailboxMsg *notif = sta_mailbox_msg_create(selector, gp_copied, 2,
+                                                         supervisor->actor_id);
+        if (!notif) break;
+
+        int rc = sta_mailbox_enqueue(&grandparent->mailbox, notif);
+        if (rc != 0) {
+            sta_mailbox_msg_destroy(notif);
+            break;
+        }
+
+        /* Auto-schedule grandparent if idle. */
+        STA_Scheduler *sched = grandparent->vm ? grandparent->vm->scheduler : NULL;
+        if (sched && atomic_load_explicit(&sched->running,
+                                            memory_order_acquire)) {
+            uint32_t expected = STA_ACTOR_SUSPENDED;
+            if (atomic_compare_exchange_strong_explicit(
+                    &grandparent->state, &expected, STA_ACTOR_READY,
+                    memory_order_acq_rel, memory_order_relaxed)) {
+                sta_scheduler_enqueue(sched, grandparent);
+            } else {
+                expected = STA_ACTOR_CREATED;
+                if (atomic_compare_exchange_strong_explicit(
+                        &grandparent->state, &expected, STA_ACTOR_READY,
+                        memory_order_acq_rel, memory_order_relaxed)) {
+                    sta_scheduler_enqueue(sched, grandparent);
+                }
+            }
+        }
         break;
+    }
     }
 
     return 0;
