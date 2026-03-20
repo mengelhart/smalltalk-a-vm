@@ -8,19 +8,11 @@
 #pragma once
 
 #include "vm/oop.h"
+#include <sta/vm.h>    /* STA_RestartStrategy, STA_OOP, struct STA_VM */
 #include <stdint.h>
 
 /* Forward declarations. */
 struct STA_Actor;
-struct STA_VM;
-
-/* ── Restart strategies ───────────────────────────────────────────────── */
-
-typedef enum {
-    STA_RESTART_RESTART  = 0,  /* Create new actor of same class */
-    STA_RESTART_STOP     = 1,  /* Terminate permanently */
-    STA_RESTART_ESCALATE = 2   /* Forward failure to parent supervisor */
-} STA_RestartStrategy;
 
 /* ── Child specification ──────────────────────────────────────────────── */
 

@@ -60,11 +60,23 @@ struct STA_VM {
     /* Root actor — created after bootstrap; all execution runs inside it. */
     struct STA_Actor    *root_actor;
 
+    /* Root supervisor — top of the supervision tree. Created at VM init.
+     * All actors created via sta_vm_spawn_supervised become children of
+     * the root supervisor. The root supervisor's supervisor is NULL. */
+    struct STA_Actor    *root_supervisor;
+
     /* Scheduler — optionally started for multi-core execution. */
     struct STA_Scheduler *scheduler;
 
     /* Handle table (per ADR 013: reference-counted, growable) */
     STA_HandleTable      handles;
+
+    /* Event callback table (max 16 callbacks). */
+    struct {
+        STA_EventCallback callback;
+        void             *ctx;
+    }                    event_cbs[16];
+    uint8_t              event_cb_count;
 
     /* Error reporting */
     char                 last_error[512];
@@ -79,3 +91,6 @@ struct STA_VM {
     bool                 bootstrapped;
     bool                 destroyed;
 };
+
+/* Fire an event to all registered callbacks. Internal API. */
+void sta_vm_fire_event(STA_VM *vm, STA_EventType type, const char *message);

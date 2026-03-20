@@ -279,15 +279,23 @@ static int check_intensity(struct STA_Actor *supervisor, STA_OOP reason) {
     /* Increment and check. */
     data->restart_count++;
     if (data->restart_count > data->max_restarts) {
-        /* Intensity exceeded. */
+        struct STA_VM *vm = supervisor->vm;
+
+        if (vm && supervisor == vm->root_supervisor) {
+            /* Root supervisor — do NOT terminate. Fire event, reset, continue.
+             * The failing subtree is already terminated (child supervisor
+             * tore itself down before escalating). */
+            sta_vm_fire_event(vm, STA_EVT_ACTOR_CRASH,
+                              "root supervisor intensity exceeded");
+            /* Reset BOTH counters so next crash doesn't re-trigger. */
+            data->restart_count = 0;
+            data->window_start_ns = now_ns();
+            return -1;  /* Skip the individual restart */
+        }
+
+        /* Non-root supervisor: terminate all children and escalate. */
         terminate_all_children(supervisor);
 
-        /* Intern a reason symbol for escalation. */
-        STA_OOP intensity_reason = reason;  /* Pass through original reason */
-        (void)intensity_reason;
-
-        /* Use a pre-interned symbol if available, otherwise fall back. */
-        struct STA_VM *vm = supervisor->vm;
         STA_OOP escalation_reason = 0;
         if (vm) {
             escalation_reason = sta_symbol_intern(
@@ -298,7 +306,6 @@ static int check_intensity(struct STA_Actor *supervisor, STA_OOP reason) {
             escalation_reason = sta_spc_get(SPC_UNKNOWN_ERROR);
         }
 
-        /* Escalate to parent if one exists. */
         if (supervisor->supervisor) {
             escalate_to_parent(supervisor, escalation_reason);
         }
@@ -328,6 +335,14 @@ int sta_supervisor_handle_failure(struct STA_Actor *supervisor,
     if (!spec) {
         /* Unknown child or already removed — log and return. */
         return 0;
+    }
+
+    /* Root supervisor: fire STA_EVT_ACTOR_CRASH for visibility. */
+    if (supervisor->vm && supervisor == supervisor->vm->root_supervisor) {
+        char msg[128];
+        snprintf(msg, sizeof(msg), "child %u failed under root supervisor",
+                 failed_id);
+        sta_vm_fire_event(supervisor->vm, STA_EVT_ACTOR_CRASH, msg);
     }
 
     struct STA_Actor *old_actor = spec->current_actor;
