@@ -571,6 +571,16 @@ target_compile_definitions(test_reply_routing PRIVATE
 target_link_libraries(test_reply_routing PRIVATE sta_vm Threads::Threads)
 add_test(NAME reply_routing COMMAND test_reply_routing)
 
+# ── Future soak test (manual, not in default ctest) ──────────────────────
+add_executable(test_future_soak test_future_soak.c)
+target_include_directories(test_future_soak PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_compile_definitions(test_future_soak PRIVATE
+    KERNEL_DIR="${CMAKE_SOURCE_DIR}/kernel")
+target_link_libraries(test_future_soak PRIVATE sta_vm Threads::Threads)
+add_test(NAME future_soak COMMAND test_future_soak)
+set_tests_properties(future_soak PROPERTIES DISABLED TRUE LABELS "soak")
+
 # ── Soak test (manual, not in default ctest) ─────────────────────────────
 add_executable(test_soak test_soak.c)
 target_include_directories(test_soak PRIVATE
