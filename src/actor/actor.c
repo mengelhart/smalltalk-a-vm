@@ -216,12 +216,10 @@ int sta_actor_send_msg(struct STA_VM *vm,
             for (uint8_t i = 0; i < nargs; i++)
                 copied_args[i] = args[i];
         } else {
-            /* Deep copy path: target heap allocation required. */
-
-            /* Add the args array allocation cost. */
-            size_t args_alloc = sta_alloc_size((uint32_t)nargs);
-            args_alloc = (args_alloc + 15u) & ~(size_t)15u;
-            estimated += args_alloc;
+            /* Deep copy path: target heap allocation required.
+             * Args array is always malloc'd (not on the target heap) to
+             * avoid stale pointers if sta_heap_grow reallocates the heap
+             * buffer later.  See GitHub #340. */
 
             size_t free_space = target->heap.capacity - target->heap.used;
             if (estimated > free_space) {
@@ -233,11 +231,9 @@ int sta_actor_send_msg(struct STA_VM *vm,
                 }
             }
 
-            STA_ObjHeader *args_h = sta_heap_alloc_gc(vm, target,
-                                                        STA_CLS_ARRAY,
-                                                        (uint32_t)nargs);
-            if (!args_h) { sta_actor_release(target); return -1; }
-            copied_args = sta_payload(args_h);
+            copied_args = malloc((size_t)nargs * sizeof(STA_OOP));
+            if (!copied_args) { sta_actor_release(target); return -1; }
+            args_mallocd = true;
 
             for (uint8_t i = 0; i < nargs; i++) {
                 copied_args[i] = sta_deep_copy_gc(args[i],
@@ -245,6 +241,7 @@ int sta_actor_send_msg(struct STA_VM *vm,
                                                    vm, target, ct);
                 if (copied_args[i] == 0 && args[i] != 0 &&
                     !STA_IS_IMMEDIATE(args[i])) {
+                    free(copied_args);
                     sta_actor_release(target);
                     return -1;
                 }
@@ -364,10 +361,8 @@ struct STA_Future *sta_actor_ask_msg(struct STA_VM *vm,
             for (uint32_t i = 0; i < arg_count; i++)
                 copied_args[i] = args[i];
         } else {
-            /* Deep copy path: target heap allocation required. */
-            size_t args_alloc = sta_alloc_size((uint32_t)arg_count);
-            args_alloc = (args_alloc + 15u) & ~(size_t)15u;
-            estimated += args_alloc;
+            /* Deep copy path: target heap allocation required.
+             * Args array is always malloc'd — see GitHub #340. */
 
             size_t free_space = target->heap.capacity - target->heap.used;
             if (estimated > free_space) {
@@ -382,17 +377,15 @@ struct STA_Future *sta_actor_ask_msg(struct STA_VM *vm,
                 }
             }
 
-            STA_ObjHeader *args_h = sta_heap_alloc_gc(vm, target,
-                                                        STA_CLS_ARRAY,
-                                                        (uint32_t)arg_count);
-            if (!args_h) {
+            copied_args = malloc((size_t)arg_count * sizeof(STA_OOP));
+            if (!copied_args) {
                 sta_future_table_remove(vm->future_table, future->future_id);
                 sta_future_release(future);
                 sta_actor_release(target);
                 *err = STA_ERR_OOM;
                 return NULL;
             }
-            copied_args = sta_payload(args_h);
+            args_mallocd = true;
 
             /* Look up sender actor for deep copy source heap. */
             struct STA_Actor *sender = sta_registry_lookup(vm->registry, sender_id);
@@ -404,6 +397,7 @@ struct STA_Future *sta_actor_ask_msg(struct STA_VM *vm,
                 if (copied_args[i] == 0 && args[i] != 0 &&
                     !STA_IS_IMMEDIATE(args[i])) {
                     if (sender) sta_actor_release(sender);
+                    free(copied_args);
                     sta_future_table_remove(vm->future_table, future->future_id);
                     sta_future_release(future);
                     sta_actor_release(target);
