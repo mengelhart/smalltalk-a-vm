@@ -98,7 +98,6 @@ Now: scheduler, supervision, async I/O, headless lifecycle.
 
 Resolved items moved to `docs/PROJECT_HISTORY.md`.
 
-2. **Forwarding pointer mechanics** — decide before GC is implemented
 3. **Class table concurrency** — decide before method cache is built
 4. **Variant B deque root cause** (ADR 009) — investigate in Phase 1
 5. **Per-actor scheduling fairness** (ADR 009) — measure with real bytecode in Phase 1
@@ -106,8 +105,6 @@ Resolved items moved to `docs/PROJECT_HISTORY.md`.
 12. **Resume point protocol for mid-message I/O suspension** (ADR 011) — define valid suspension points before Phase 2 I/O primitives
 13. **Lock-free I/O request queue** (ADR 011) — replace mutex-protected FIFO with `STA_MpscList`, Phase 2
 14. **I/O backpressure integration with §9.4 bounded mailboxes** (ADR 011) — Phase 2 design question
-15. **⚠ Density headroom consumed** — STA_Actor grew to 208B in Epic 7A. Creation cost 864B.
-19. **Growable handle table** (ADR 013, #88) — Phase 3 blocker
 20. **Handle validity after `sta_vm_destroy`** (ADR 013, #89) — Phase 3 blocker
 21. **`sta_inspect_cstring` caller-provided buffer** (ADR 013, #90) — Phase 3 blocker
 22. **Event callback re-entrancy rules** (ADR 013, #91) — Phase 3 blocker
@@ -116,12 +113,10 @@ Resolved items moved to `docs/PROJECT_HISTORY.md`.
 
 ## Known issues (open)
 
-- #320: Actor registered before fully initialized — behavior_obj is zero during registration window
-- #321: restart_child skips scheduling when scheduler is stopping — new child stranded in CREATED
 - #243: SmallInteger = with non-SmallInt arg returns receiver instead of false
 - #244: Catching DNU via on:do: triggers unhandled BlockCannotReturn
-- SmallInteger >> #/ needs Smalltalk fallback for ZeroDivide (prim 10 returns out-of-range, DNU results)
-- `STA_MailboxMsg.args` holds raw C pointers into target heap — stale if heap grows between sends
+- #339: SmallInteger >> #/ does not raise ZeroDivide — returns DNU on zero divisor
+- #340: STA_MailboxMsg.args stale pointer after target heap growth
 - #337: TSan race in sta_scheduler_enqueue — next_runnable written outside wake_mutex
 
 ---
@@ -129,12 +124,6 @@ Resolved items moved to `docs/PROJECT_HISTORY.md`.
 ## Deferred items
 
 - **Stream classes (ReadStream, WriteStream)** — Phase 3
-- **Byte-aware at:/at:put: for String/ByteArray** — done (Batch 2, prims 60–64)
-- **OrderedCollection** — done (Batch 3)
-- **Full closures** — done (Phase 2 Epic 1)
-- **ensure: during exception unwinding** — done (Phase 2 Epic 1)
-- **Real handle table** — done (Phase 2 Epic 0)
-- **Per-instance state** — done (Phase 2 Epic 0)
 
 ---
 
