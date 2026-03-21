@@ -29,6 +29,8 @@ add_library(sta_vm STATIC
     src/actor/mailbox.c
     src/actor/mailbox_msg.c
     src/actor/deep_copy.c
+    src/actor/future.c
+    src/actor/future_table.c
     src/actor/supervisor.c
     src/bootstrap/bootstrap.c
     src/bootstrap/filein.c

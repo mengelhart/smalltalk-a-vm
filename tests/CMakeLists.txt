@@ -548,6 +548,13 @@ target_include_directories(test_actor_refcount PRIVATE
 target_link_libraries(test_actor_refcount PRIVATE sta_vm Threads::Threads)
 add_test(NAME actor_refcount COMMAND test_actor_refcount)
 
+# ── Phase 2 Epic 7A: Futures Infrastructure ──────────────────────────────
+add_executable(test_future test_future.c)
+target_include_directories(test_future PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(test_future PRIVATE sta_vm Threads::Threads)
+add_test(NAME future COMMAND test_future)
+
 # ── Soak test (manual, not in default ctest) ─────────────────────────────
 add_executable(test_soak test_soak.c)
 target_include_directories(test_soak PRIVATE
