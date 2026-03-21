@@ -548,6 +548,26 @@ target_include_directories(test_actor_refcount PRIVATE
 target_link_libraries(test_actor_refcount PRIVATE sta_vm Threads::Threads)
 add_test(NAME actor_refcount COMMAND test_actor_refcount)
 
+# ── Soak test (manual, not in default ctest) ─────────────────────────────
+add_executable(test_soak test_soak.c)
+target_include_directories(test_soak PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_compile_definitions(test_soak PRIVATE
+    KERNEL_DIR="${CMAKE_SOURCE_DIR}/kernel")
+target_link_libraries(test_soak PRIVATE sta_vm Threads::Threads)
+add_test(NAME soak COMMAND test_soak)
+set_tests_properties(soak PROPERTIES LABELS "soak" TIMEOUT 300 DISABLED TRUE)
+
+# ── Microbenchmark (manual, not in default ctest) ────────────────────────
+add_executable(test_microbench test_microbench.c)
+target_include_directories(test_microbench PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_compile_definitions(test_microbench PRIVATE
+    KERNEL_DIR="${CMAKE_SOURCE_DIR}/kernel")
+target_link_libraries(test_microbench PRIVATE sta_vm)
+add_test(NAME microbench COMMAND test_microbench)
+set_tests_properties(microbench PROPERTIES LABELS "soak" TIMEOUT 60 DISABLED TRUE)
+
 # ── Spike 002: MPSC mailbox — TSan correctness gate ───────────────────────
 find_package(Threads REQUIRED)
 
