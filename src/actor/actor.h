@@ -16,9 +16,10 @@
 #include <stdatomic.h>
 #include <stdint.h>
 
-/* Forward-declare STA_VM and STA_SupervisorData to avoid circular include. */
+/* Forward-declare STA_VM, STA_SupervisorData, STA_Future to avoid circular include. */
 struct STA_VM;
 struct STA_SupervisorData;
+struct STA_Future;
 
 /* ── Actor lifecycle states ──────────────────────────────────────────── */
 
@@ -72,6 +73,11 @@ struct STA_Actor {
      * NULL means the actor is not mid-execution (start fresh from mailbox).
      * Non-NULL means the actor was preempted and should resume here. */
     struct STA_Frame *saved_frame;
+
+    /* Pending future ID for ask: reply routing (Epic 7A).
+     * Non-zero while executing an ask: message. Set before dispatch,
+     * cleared after reply routing or on exception. 0 = fire-and-forget. */
+    uint32_t          pending_future_id;
 
     /* Per-actor GC statistics (Story 6). 24 bytes inline. */
     STA_GCStats       gc_stats;
@@ -140,6 +146,18 @@ int sta_actor_send_msg(struct STA_VM *vm,
                        uint32_t target_id,
                        STA_OOP selector,
                        STA_OOP *args, uint8_t nargs);
+
+/* Send an ask: message. Creates a future, attaches future_id to envelope,
+ * enqueues to target mailbox. Returns retained STA_Future* on success.
+ * On failure (target dead, mailbox full), returns NULL and sets *err.
+ * Caller must sta_future_release() the returned future when done. */
+struct STA_Future *sta_actor_ask_msg(struct STA_VM *vm,
+                                     uint32_t sender_id,
+                                     uint32_t target_id,
+                                     STA_OOP selector,
+                                     STA_OOP *args,
+                                     uint32_t arg_count,
+                                     int *err);
 
 /* ── Message dispatch (Epic 3 Story 5) ───────────────────────────────── */
 

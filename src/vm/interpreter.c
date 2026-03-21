@@ -970,6 +970,11 @@ int sta_interpret_actor(STA_VM *vm, struct STA_Actor *actor,
             return STA_INTERPRET_PREEMPTED;
         }
         actor->saved_frame = NULL;
+        /* Push the method return value onto the slab so the caller
+         * (sta_actor_process_one_preemptible) can retrieve it for
+         * reply routing on ask: messages. For fire-and-forget messages
+         * this value is simply ignored. See Epic 7A Story 3. */
+        sta_stack_push(slab, result);
         return STA_INTERPRET_COMPLETED;
     } else {
         /* Unhandled exception caught. Restore slab state. */
@@ -1006,6 +1011,8 @@ int sta_interpret_resume(STA_VM *vm, struct STA_Actor *actor)
             return STA_INTERPRET_PREEMPTED;
         }
         actor->saved_frame = NULL;
+        /* Same as sta_interpret_actor: push return value for reply routing. */
+        sta_stack_push(slab, result);
         return STA_INTERPRET_COMPLETED;
     } else {
         slab->top = catch_all.saved_slab_top;

@@ -6,6 +6,8 @@
 #include "registry.h"
 #include "supervisor.h"
 #include "deep_copy.h"
+#include "future.h"
+#include "future_table.h"
 #include "mailbox_msg.h"
 #include "scheduler/scheduler.h"
 #include "gc/gc.h"
@@ -307,6 +309,162 @@ int sta_actor_send_msg(struct STA_VM *vm,
     return 0;
 }
 
+/* ── Ask messaging (Epic 7A) ─────────────────────────────────────────── */
+
+struct STA_Future *sta_actor_ask_msg(struct STA_VM *vm,
+                                     uint32_t sender_id,
+                                     uint32_t target_id,
+                                     STA_OOP selector,
+                                     STA_OOP *args,
+                                     uint32_t arg_count,
+                                     int *err)
+{
+    /* 1. Resolve target — do NOT create the future before validation. */
+    struct STA_Actor *target = sta_registry_lookup(vm->registry, target_id);
+    if (!target) {
+        *err = STA_ERR_ACTOR_DEAD;
+        return NULL;
+    }
+
+    /* 2. Check if terminated. */
+    uint32_t tstate = atomic_load_explicit(&target->state, memory_order_acquire);
+    if (tstate == STA_ACTOR_TERMINATED) {
+        sta_actor_release(target);
+        *err = STA_ERR_ACTOR_DEAD;
+        return NULL;
+    }
+
+    /* 3. Create the future. */
+    STA_Future *future = sta_future_table_new(vm->future_table, sender_id);
+    if (!future) {
+        sta_actor_release(target);
+        *err = STA_ERR_OOM;
+        return NULL;
+    }
+
+    /* 4. Build message envelope — same deep copy logic as sta_actor_send_msg. */
+    STA_OOP *copied_args = NULL;
+    bool args_mallocd = false;
+
+    if (arg_count > 0) {
+        STA_ClassTable *ct = &vm->class_table;
+        size_t estimated = sta_deep_copy_estimate_roots(args, (uint8_t)arg_count, ct);
+
+        if (estimated == 0) {
+            /* Zero-copy fast path: all immediates/immutables. */
+            copied_args = malloc((size_t)arg_count * sizeof(STA_OOP));
+            if (!copied_args) {
+                sta_future_table_remove(vm->future_table, future->future_id);
+                sta_future_release(future);
+                sta_actor_release(target);
+                *err = STA_ERR_OOM;
+                return NULL;
+            }
+            args_mallocd = true;
+            for (uint32_t i = 0; i < arg_count; i++)
+                copied_args[i] = args[i];
+        } else {
+            /* Deep copy path: target heap allocation required. */
+            size_t args_alloc = sta_alloc_size((uint32_t)arg_count);
+            args_alloc = (args_alloc + 15u) & ~(size_t)15u;
+            estimated += args_alloc;
+
+            size_t free_space = target->heap.capacity - target->heap.used;
+            if (estimated > free_space) {
+                size_t needed = target->heap.used + estimated;
+                size_t new_cap = needed + needed / 2;
+                if (sta_heap_grow(&target->heap, new_cap) != 0) {
+                    sta_future_table_remove(vm->future_table, future->future_id);
+                    sta_future_release(future);
+                    sta_actor_release(target);
+                    *err = STA_ERR_OOM;
+                    return NULL;
+                }
+            }
+
+            STA_ObjHeader *args_h = sta_heap_alloc_gc(vm, target,
+                                                        STA_CLS_ARRAY,
+                                                        (uint32_t)arg_count);
+            if (!args_h) {
+                sta_future_table_remove(vm->future_table, future->future_id);
+                sta_future_release(future);
+                sta_actor_release(target);
+                *err = STA_ERR_OOM;
+                return NULL;
+            }
+            copied_args = sta_payload(args_h);
+
+            /* Look up sender actor for deep copy source heap. */
+            struct STA_Actor *sender = sta_registry_lookup(vm->registry, sender_id);
+            STA_Heap *src_heap = sender ? &sender->heap : &vm->root_actor->heap;
+
+            for (uint32_t i = 0; i < arg_count; i++) {
+                copied_args[i] = sta_deep_copy_gc(args[i], src_heap,
+                                                    vm, target, ct);
+                if (copied_args[i] == 0 && args[i] != 0 &&
+                    !STA_IS_IMMEDIATE(args[i])) {
+                    if (sender) sta_actor_release(sender);
+                    sta_future_table_remove(vm->future_table, future->future_id);
+                    sta_future_release(future);
+                    sta_actor_release(target);
+                    *err = STA_ERR_OOM;
+                    return NULL;
+                }
+            }
+            if (sender) sta_actor_release(sender);
+        }
+    }
+
+    /* 5. Create the message envelope. */
+    STA_MailboxMsg *msg = sta_mailbox_msg_create(
+        selector, copied_args, (uint8_t)arg_count, sender_id);
+    if (!msg) {
+        if (args_mallocd) free(copied_args);
+        sta_future_table_remove(vm->future_table, future->future_id);
+        sta_future_release(future);
+        sta_actor_release(target);
+        *err = STA_ERR_OOM;
+        return NULL;
+    }
+    msg->args_owned = args_mallocd;
+    msg->future_id = future->future_id;
+
+    /* 6. Enqueue in target's mailbox. */
+    int rc = sta_mailbox_enqueue(&target->mailbox, msg);
+    if (rc != 0) {
+        sta_mailbox_msg_destroy(msg);
+        sta_future_table_remove(vm->future_table, future->future_id);
+        sta_future_release(future);
+        sta_actor_release(target);
+        *err = STA_ERR_MAILBOX_FULL;
+        return NULL;
+    }
+
+    /* 7. Auto-schedule: same wakeup logic as sta_actor_send_msg. */
+    atomic_thread_fence(memory_order_seq_cst);
+
+    STA_Scheduler *sched = target->vm ? target->vm->scheduler : NULL;
+    if (sched && atomic_load_explicit(&sched->running, memory_order_acquire)) {
+        uint32_t expected = STA_ACTOR_SUSPENDED;
+        if (atomic_compare_exchange_strong_explicit(
+                &target->state, &expected, STA_ACTOR_READY,
+                memory_order_acq_rel, memory_order_relaxed)) {
+            sta_scheduler_enqueue(sched, target);
+        } else {
+            expected = STA_ACTOR_CREATED;
+            if (atomic_compare_exchange_strong_explicit(
+                    &target->state, &expected, STA_ACTOR_READY,
+                    memory_order_acq_rel, memory_order_relaxed)) {
+                sta_scheduler_enqueue(sched, target);
+            }
+        }
+    }
+
+    /* 8. Release target ref and return the future. */
+    sta_actor_release(target);
+    return future;
+}
+
 /* ── Message dispatch ────────────────────────────────────────────────── */
 
 /* Look up selector in class hierarchy starting from class_index. */
@@ -430,6 +588,71 @@ static int handle_actor_exception(struct STA_VM *vm, struct STA_Actor *actor) {
     return STA_ACTOR_MSG_EXCEPTION;
 }
 
+/* ── Reply routing (Epic 7A Story 3) ──────────────────────────────────
+ * After an ask: message completes, route the return value back to the
+ * sender's future. The return value was popped from the actor's slab
+ * by the caller. */
+static void route_reply(struct STA_VM *vm, struct STA_Actor *actor,
+                        uint32_t future_id, STA_OOP return_val) {
+    if (future_id == 0) return;
+
+    STA_Future *f = sta_future_table_lookup(vm->future_table, future_id);
+    if (!f) return;  /* Future already cleaned up — nothing to do. */
+
+    STA_OOP *buf = malloc(sizeof(STA_OOP));
+    if (!buf) {
+        sta_future_release(f);
+        return;
+    }
+
+    STA_Heap *transfer_heap = NULL;
+
+    if (STA_IS_IMMEDIATE(return_val) || return_val == 0) {
+        /* Immediate value — safe to share directly. */
+        buf[0] = return_val;
+    } else {
+        STA_ObjHeader *h = (STA_ObjHeader *)(uintptr_t)return_val;
+        if (h->obj_flags & STA_OBJ_IMMUTABLE) {
+            /* Immutable (Symbol, class, etc.) — safe to share. */
+            buf[0] = return_val;
+        } else {
+            /* Mutable heap object — deep copy into standalone transfer heap. */
+            size_t est = sta_deep_copy_estimate(return_val, &vm->class_table);
+            size_t heap_size = est < 256 ? 256 : est * 2;
+
+            transfer_heap = malloc(sizeof(STA_Heap));
+            if (!transfer_heap) {
+                free(buf);
+                sta_future_release(f);
+                return;
+            }
+            if (sta_heap_init(transfer_heap, heap_size) != 0) {
+                free(transfer_heap);
+                free(buf);
+                sta_future_release(f);
+                return;
+            }
+
+            STA_OOP copied = sta_deep_copy_to_transfer(
+                return_val, &actor->heap, transfer_heap, vm);
+            if (copied == 0) {
+                sta_heap_deinit(transfer_heap);
+                free(transfer_heap);
+                free(buf);
+                sta_future_release(f);
+                return;
+            }
+            buf[0] = copied;
+        }
+    }
+
+    sta_future_resolve(f, buf, 1, transfer_heap);
+    /* If resolve lost the CAS (future already failed by supervisor),
+     * sta_future_resolve freed buf and transfer_heap. */
+
+    sta_future_release(f);  /* release table-lookup ref */
+}
+
 int sta_actor_process_one_preemptible(struct STA_VM *vm, struct STA_Actor *actor)
 {
     /* If the actor was preempted mid-execution, resume. */
@@ -439,8 +662,14 @@ int sta_actor_process_one_preemptible(struct STA_VM *vm, struct STA_Actor *actor
             return STA_ACTOR_MSG_PREEMPTED;
         }
         if (rc == STA_INTERPRET_EXCEPTION) {
+            actor->pending_future_id = 0;
             return handle_actor_exception(vm, actor);
         }
+        /* COMPLETED — pop return value and route reply if ask: message. */
+        STA_OOP return_val = sta_stack_pop(&actor->slab);
+        uint32_t fid = actor->pending_future_id;
+        actor->pending_future_id = 0;
+        route_reply(vm, actor, fid, return_val);
         return STA_ACTOR_MSG_PROCESSED;
     }
 
@@ -468,6 +697,10 @@ int sta_actor_process_one_preemptible(struct STA_VM *vm, struct STA_Actor *actor
         return STA_ACTOR_MSG_ERROR;
     }
 
+    /* Save future_id before destroying the message — needed for reply
+     * routing after execution completes (including after preemption). */
+    actor->pending_future_id = msg->future_id;
+
     /* Execute with preemption support. */
     int rc = sta_interpret_actor(vm, actor, method, actor->behavior_obj,
                                   msg->args, msg->arg_count);
@@ -478,10 +711,18 @@ int sta_actor_process_one_preemptible(struct STA_VM *vm, struct STA_Actor *actor
     sta_mailbox_msg_destroy(msg);
 
     if (rc == STA_INTERPRET_PREEMPTED) {
+        /* pending_future_id stays set — resume path will use it. */
         return STA_ACTOR_MSG_PREEMPTED;
     }
     if (rc == STA_INTERPRET_EXCEPTION) {
+        actor->pending_future_id = 0;
         return handle_actor_exception(vm, actor);
     }
+
+    /* COMPLETED — pop return value and route reply if ask: message. */
+    STA_OOP return_val = sta_stack_pop(&actor->slab);
+    uint32_t fid = actor->pending_future_id;
+    actor->pending_future_id = 0;
+    route_reply(vm, actor, fid, return_val);
     return STA_ACTOR_MSG_PROCESSED;
 }

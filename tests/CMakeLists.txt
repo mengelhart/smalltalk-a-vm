@@ -555,6 +555,22 @@ target_include_directories(test_future PRIVATE
 target_link_libraries(test_future PRIVATE sta_vm Threads::Threads)
 add_test(NAME future COMMAND test_future)
 
+add_executable(test_ask_send test_ask_send.c)
+target_include_directories(test_ask_send PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_compile_definitions(test_ask_send PRIVATE
+    KERNEL_DIR="${CMAKE_SOURCE_DIR}/kernel")
+target_link_libraries(test_ask_send PRIVATE sta_vm)
+add_test(NAME ask_send COMMAND test_ask_send)
+
+add_executable(test_reply_routing test_reply_routing.c)
+target_include_directories(test_reply_routing PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_compile_definitions(test_reply_routing PRIVATE
+    KERNEL_DIR="${CMAKE_SOURCE_DIR}/kernel")
+target_link_libraries(test_reply_routing PRIVATE sta_vm Threads::Threads)
+add_test(NAME reply_routing COMMAND test_reply_routing)
+
 # ── Soak test (manual, not in default ctest) ─────────────────────────────
 add_executable(test_soak test_soak.c)
 target_include_directories(test_soak PRIVATE
