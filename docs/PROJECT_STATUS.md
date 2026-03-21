@@ -127,12 +127,12 @@ These must be resolved before the corresponding component is built:
 7. ~~**TCO with callee having more locals**~~ — **Resolved in ADR 014 — decline TCO when callee frame does not fit current frame space.**
 8. ~~**Closure and non-local return compatibility**~~ — **Resolved in Epic 1.** Heap contexts, OP_NON_LOCAL_RETURN, BlockCannotReturn safety.
 9. ~~**Deep-copy visited set**~~ — **Resolved in Epic 3.** Open-addressing hash map (initial cap 64, 70% load grow) for cycle detection and shared structure preservation.
-10. **`ask:` future on mailbox-full** (ADR 008) — future resolution path, Phase 2
+10. ~~**`ask:` future on mailbox-full** (ADR 008)~~ — **Resolved in Epic 7A. Mailbox-full returns STA_ERR_MAILBOX_FULL, no future created.**
 11. **Transfer buffer allocator** (ADR 008) — replace malloc stub with runtime slab, Phase 1
 12. **Resume point protocol for mid-message I/O suspension** (ADR 011) — define valid suspension points before Phase 2 I/O primitives
 13. **Lock-free I/O request queue** (ADR 011) — replace mutex-protected FIFO with `STA_MpscList`, Phase 2
 14. **I/O backpressure integration with §9.4 bounded mailboxes** (ADR 011) — Phase 2 design question
-15. **⚠ 4-byte density headroom** (ADR 012) — next `STA_Actor` addition requires a new ADR; breach of 300-byte target must be explicitly justified per CLAUDE.md
+15. **⚠ Density headroom consumed** (ADR 012) — `STA_Actor` grew from 200→208 bytes in Epic 7A (`pending_future_id` for ask: reply routing). Phase 1 300-byte target was a forcing function; Phase 2 targets are per ADR 014. Creation cost now 864 bytes.
 16. ~~**Quiescing protocol for live actors**~~ — **Resolved in ADR 012 amendment — quiesce at safe point (end of quantum), bounded wait, Phase 1 trivially correct.**
 17. ~~**Root table for multi-root images**~~ — **Resolved in ADR 012 amendment — root-of-roots Array convention, no format change.**
 18. ~~**Class identifier portability**~~ — **Resolved in ADR 012 amendment — fixed indices 0-31, name-based resolution for 32+.**
@@ -820,6 +820,35 @@ ArrayedCollection, Character, String, Symbol, ByteArray, Array, OrderedCollectio
 - Known issues (filed during cleanup):
   - #320: Actor registered before fully initialized — behavior_obj is zero during registration window
   - #321: restart_child skips scheduling when scheduler is stopping — new child stranded in CREATED
+
+### Epic 7A: Futures Infrastructure — COMPLETE
+- Branch: phase2/epic-7a-futures
+- New files:
+  - `src/actor/future.h`, `src/actor/future.c` — STA_Future struct (40 bytes): CAS state machine with intermediate-state pattern (PENDING→RESOLVING→RESOLVED, PENDING→FAILING→FAILED). Refcounted, malloc'd, freed on last release.
+  - `src/actor/future_table.h`, `src/actor/future_table.c` — STA_FutureTable (88 bytes): VM-wide future_id→STA_Future* hash map. Mutex-protected open-addressing with linear probe, shift-back deletion, grow at 70% load. Initial capacity 256.
+  - `tests/test_future.c` — 10 tests (create, resolve, fail, double-resolve, race, refcount, lookup, remove, grow, destroy cleanup)
+  - `tests/test_ask_send.c` — 6 tests (ask creates future, dead actor, mailbox full, envelope future_id, deep copy args, fire-and-forget zero)
+  - `tests/test_reply_routing.c` — 7 tests (immediate reply, immutable reply, mutable reply with transfer heap, fire-and-forget no routing, future-already-failed, manual round trip, scheduled round trip)
+- Modified files:
+  - `src/vm/vm_state.h` — STA_VM gains `STA_FutureTable *future_table`
+  - `src/vm/vm.c` — Create/destroy future table in VM lifecycle
+  - `src/actor/mailbox_msg.h` — STA_MailboxMsg gains `uint32_t future_id` (+4 bytes, 0=fire-and-forget)
+  - `src/actor/actor.h` — STA_Actor gains `uint32_t pending_future_id` (+8 bytes with padding, 200→208); declares `sta_actor_ask_msg`
+  - `src/actor/actor.c` — `sta_actor_ask_msg` (ask send path), `route_reply` (reply routing after COMPLETED)
+  - `src/actor/deep_copy.h`, `src/actor/deep_copy.c` — `sta_deep_copy_to_transfer` for mutable return values
+  - `src/vm/interpreter.c` — `sta_interpret_actor`/`sta_interpret_resume` push return value onto slab on COMPLETED
+  - `CMakeLists.txt` — future.c, future_table.c added to sta_vm sources
+- Design decisions:
+  - D1: VM-wide future table (mutex-protected hash map, same pattern as actor registry)
+  - D2: future_id field on STA_MailboxMsg (4 bytes, 0 = fire-and-forget)
+  - D3: Deferred copy via malloc'd transfer buffer + optional transfer_heap
+  - D4: Mailbox-full on ask: returns STA_ERR_MAILBOX_FULL, no future created (resolves open decision #10)
+  - D5: Intermediate-state CAS pattern (PENDING→RESOLVING→RESOLVED) — TSan-clean, no data race on non-atomic fields
+- sizeof(STA_Future) = 40 bytes, sizeof(STA_FutureTable) = 88 bytes
+- sizeof(STA_Actor) = 208 bytes (was 200, +4 for pending_future_id + 4 padding)
+- Density: creation cost = 864 bytes (208 struct + 128 nursery + 512 stack + 16 identity)
+- Tests: 23 new, 94 total CTest targets (all passing). ASan clean. TSan clean on multi-threaded tests.
+- Note: Epic 7B (wait primitive, crash-triggered future failure, stress tests) follows
 
 ---
 

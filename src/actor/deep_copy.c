@@ -3,6 +3,7 @@
  * See deep_copy.h and ADR 008.
  */
 #include "deep_copy.h"
+#include "vm/vm_state.h"     /* STA_VM (for sta_deep_copy_to_transfer) */
 #include "vm/class_table.h"
 #include "vm/format.h"
 #include "vm/interpreter.h"  /* STA_CLASS_SLOT_FORMAT */
@@ -304,6 +305,40 @@ STA_OOP sta_deep_copy_gc(STA_OOP root,
     ctx.failed = false;
     ctx.vm = vm;
     ctx.actor = target_actor;
+
+    if (visited_init(&ctx.visited) != 0) return 0;
+
+    STA_OOP result = copy_heap_object(&ctx, h);
+
+    visited_destroy(&ctx.visited);
+
+    return ctx.failed ? 0 : result;
+}
+
+/* ── Transfer copy (Epic 7A) ─────────────────────────────────────────── */
+
+STA_OOP sta_deep_copy_to_transfer(STA_OOP root,
+                                   STA_Heap *src_heap,
+                                   STA_Heap *dst_heap,
+                                   struct STA_VM *vm) {
+    /* Reuse sta_deep_copy — it targets an arbitrary STA_Heap* and does
+     * not require GC or an actor. The vm parameter is reserved for
+     * future use (e.g., class table access for format lookup).
+     * The class table is needed by the copy context internally. */
+    (void)src_heap;  /* same as sta_deep_copy — follows OOP pointers directly */
+
+    if (STA_IS_SMALLINT(root) || STA_IS_CHAR(root) || root == 0)
+        return root;
+
+    STA_ObjHeader *h = (STA_ObjHeader *)(uintptr_t)root;
+    if (h->obj_flags & STA_OBJ_IMMUTABLE) return root;
+
+    CopyCtx ctx;
+    ctx.target = dst_heap;
+    ctx.class_table = &vm->class_table;
+    ctx.failed = false;
+    ctx.vm = NULL;     /* no GC path — transfer heap is standalone */
+    ctx.actor = NULL;
 
     if (visited_init(&ctx.visited) != 0) return 0;
 

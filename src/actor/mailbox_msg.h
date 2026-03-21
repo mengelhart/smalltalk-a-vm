@@ -31,6 +31,10 @@ typedef struct STA_MailboxMsg {
 
     /* Sender actor ID — for reply routing (used by Epic 7 ask: semantics). */
     uint32_t    sender_id;
+
+    /* Future ID — non-zero for ask: messages, 0 for fire-and-forget.
+     * Set by sta_actor_ask_msg after envelope creation. */
+    uint32_t    future_id;
 } STA_MailboxMsg;
 
 /* ── Allocation helpers ──────────────────────────────────────────────── */

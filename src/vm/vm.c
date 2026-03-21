@@ -7,6 +7,7 @@
 #include "vm/class_table.h"
 #include "actor/actor.h"
 #include "actor/registry.h"
+#include "actor/future_table.h"
 #include "actor/supervisor.h"
 #include "scheduler/scheduler.h"
 #include "bootstrap/bootstrap.h"
@@ -106,6 +107,11 @@ STA_VM* sta_vm_create(const STA_VMConfig* config) {
         set_error(vm, "actor registry allocation failed"); goto fail;
     }
     inited |= INIT_REGISTRY;
+
+    vm->future_table = sta_future_table_create(256);
+    if (!vm->future_table) {
+        set_error(vm, "future table allocation failed"); goto fail;
+    }
 
     /* Initialize actor ID counter. Root actor (manually created) gets ID 1;
      * all subsequent actors get IDs from this counter via sta_actor_create. */
@@ -240,6 +246,7 @@ STA_VM* sta_vm_create(const STA_VMConfig* config) {
     return vm;
 
 fail:
+    if (vm->future_table) sta_future_table_destroy(vm->future_table);
     if (inited & INIT_REGISTRY) sta_registry_destroy(vm->registry);
     if (inited & INIT_HANDLES) sta_handle_table_destroy(&vm->handles);
     if (inited & INIT_SLAB)     sta_stack_slab_deinit(&vm->slab);
@@ -285,6 +292,12 @@ void sta_vm_destroy(STA_VM* vm) {
         /* No root actor — VM still owns heap and slab (failed early). */
         sta_stack_slab_deinit(&vm->slab);
         sta_heap_deinit(&vm->heap);
+    }
+
+    /* Destroy future table BEFORE registry — futures reference actor IDs. */
+    if (vm->future_table) {
+        sta_future_table_destroy(vm->future_table);
+        vm->future_table = NULL;
     }
 
     /* Destroy registry AFTER all actors — unregister calls during

@@ -54,6 +54,24 @@ STA_OOP sta_deep_copy_gc(STA_OOP root,
                           struct STA_Actor *target_actor,
                           STA_ClassTable *class_table);
 
+/* ── Transfer copy (for future reply routing, Epic 7A) ────────────────── */
+
+/* Deep copy the object graph rooted at 'root' into a standalone
+ * transfer heap (malloc'd, not owned by any actor). Used by reply
+ * routing to deep-copy a mutable return value out of the target
+ * actor's heap into a transfer buffer that the sender can later
+ * copy from.
+ *
+ * Same semantics as sta_deep_copy: immediates and immutables pass
+ * through unchanged. Mutable heap objects are recursively copied
+ * into dst_heap (which must be initialized by the caller).
+ *
+ * Returns the copy of root in dst_heap. Returns 0 on failure. */
+STA_OOP sta_deep_copy_to_transfer(STA_OOP root,
+                                   STA_Heap *src_heap,
+                                   STA_Heap *dst_heap,
+                                   struct STA_VM *vm);
+
 /* ── Pre-flight size estimation ──────────────────────────────────────── */
 
 /* Estimate the total heap bytes needed to deep copy the object graph

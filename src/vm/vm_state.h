@@ -69,6 +69,9 @@ struct STA_VM {
     /* Actor registry — VM-wide actor_id → STA_Actor* lookup table. */
     struct STA_ActorRegistry *registry;
 
+    /* Future table — VM-wide future_id → STA_Future* lookup table (Epic 7A). */
+    struct STA_FutureTable *future_table;
+
     /* Next actor ID counter — atomic for thread-safe assignment. */
     _Atomic uint32_t next_actor_id;
 

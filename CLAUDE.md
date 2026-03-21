@@ -41,12 +41,32 @@ Phase 0 spikes are complete — all spike code in `src/` is exploratory referenc
 - Cross-actor messages: deep copy semantics by default
 - Language: standard Smalltalk — Blue Book is the authoritative reference
 
-## Build
-Always run these as TWO SEPARATE bash commands, never combined:
-```bash
-cmake -B build -DCMAKE_BUILD_TYPE=Debug && cmake --build build
-cd build && ctest --output-on-failure
-```
+## Build and test
+**Never cd into `build/`.** All commands run from the repo root. Always.
+
+Build:
+
+    cmake -B build -DCMAKE_BUILD_TYPE=Debug && cmake --build build
+
+After moving or reordering functions within a file, always do a full clean rebuild
+before testing. Incremental builds with partially-failed compilations can produce
+stale binaries that mask the real issue:
+
+    cmake -B build -DCMAKE_BUILD_TYPE=Debug && cmake --build build
+
+Run a single test by name (use `-R` regex filter):
+
+    ctest --test-dir build --output-on-failure -R test_name_pattern
+
+Run the full test suite:
+
+    ctest --test-dir build --output-on-failure
+
+**Testing new code — mandatory order:**
+1. Build.
+2. Run the NEW test in isolation first: `ctest --test-dir build --output-on-failure -R new_test_name`
+3. Only after the new test passes, run the full suite: `ctest --test-dir build --output-on-failure`
+4. Never run the full suite as the first validation of new code.
 
 ## File layout
 ```
@@ -186,5 +206,3 @@ gh issue edit <number> --body "<updated status and where things stand>"
 ```
 
 Never leave work stranded locally. Push before ending the session.
-
-

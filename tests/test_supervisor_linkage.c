@@ -149,8 +149,8 @@ static void test_sizeof_actor(void) {
     size_t sz = sizeof(struct STA_Actor);
     printf("  sizeof(STA_Actor) = %zu bytes\n", sz);
 
-    /* Was 192 bytes (Epic 6). Added _Atomic uint32_t refcount (#316/#317). */
-    assert(sz == 200);
+    /* Was 200 bytes (#316/#317). Added uint32_t pending_future_id (Epic 7A). */
+    assert(sz == 208);
 
     printf("  PASS: test_sizeof_actor\n");
 }
