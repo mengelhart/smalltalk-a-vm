@@ -48,7 +48,9 @@ int main(void) {
     CHECK(STA_CLS_MESSAGENOTUNDERSTOOD == 29,  "CLS_MESSAGENOTUNDERSTOOD == 29");
     CHECK(STA_CLS_BLOCKCANNOTRETURN == 30,     "CLS_BLOCKCANNOTRETURN == 30");
     CHECK(STA_CLS_SYSTEMDICTIONARY == 31,      "CLS_SYSTEMDICTIONARY == 31");
-    CHECK(STA_CLS_RESERVED_COUNT == 32,        "CLS_RESERVED_COUNT == 32");
+    CHECK(STA_CLS_FUTURE == 32,                "CLS_FUTURE == 32");
+    CHECK(STA_CLS_FUTUREFAILURE == 33,         "CLS_FUTUREFAILURE == 33");
+    CHECK(STA_CLS_RESERVED_COUNT == 34,        "CLS_RESERVED_COUNT == 34");
 
     /* ── Create ──────────────────────────────────────────── */
     printf("\n=== Create ===\n");

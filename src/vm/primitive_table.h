@@ -53,3 +53,4 @@ void sta_primitive_table_init(void);
 #define STA_PRIM_OUT_OF_RANGE     3
 #define STA_PRIM_NO_MEMORY        4
 #define STA_PRIM_NOT_AVAILABLE    5
+#define STA_PRIM_SUSPEND          6   /* actor should be suspended (Epic 7B) */

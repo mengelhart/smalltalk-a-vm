@@ -1,5 +1,5 @@
 /* src/actor/future.c
- * Future lifecycle — Phase 2 Epic 7A.
+ * Future lifecycle — Phase 2 Epic 7A + 7B waiter wake.
  * See future.h for documentation.
  *
  * Memory ordering protocol (intermediate-state pattern):
@@ -7,7 +7,9 @@
  *     1. CAS state PENDING → RESOLVING/FAILING (acq_rel). Only winner proceeds.
  *     2. Winner stores result_buf, result_count, transfer_heap (plain writes).
  *     3. atomic_store state → RESOLVED/FAILED (release). Publishes all prior stores.
- *   Reader (Epic 7B):
+ *     4. (Epic 7B) Check waiter_actor_id. If non-zero, CAS waiter
+ *        SUSPENDED → READY and push to scheduler.
+ *   Reader (Epic 7B wait primitive):
  *     1. acquire-load state. Only acts on RESOLVED or FAILED.
  *     2. The acquire synchronizes-with the release store in step 3,
  *        guaranteeing all field stores in step 2 are visible.
@@ -17,8 +19,42 @@
  *   the final RESOLVED/FAILED state via acquire-load.
  */
 #include "future.h"
+#include "actor.h"
+#include "registry.h"
+#include "scheduler/scheduler.h"
+#include "vm/vm_state.h"
 #include "vm/heap.h"
 #include <stdlib.h>
+
+/* ── Waiter wake (Epic 7B) ─────────────────────────────────────────────── */
+
+/* After a future transitions to a terminal state, check if an actor is
+ * suspended waiting on it. If so, CAS SUSPENDED → READY and push to
+ * the scheduler so the waiter resumes execution. */
+static void wake_waiter(STA_Future *f) {
+    uint32_t waiter = atomic_load_explicit(&f->waiter_actor_id,
+                                            memory_order_acquire);
+    if (waiter == 0) return;
+    if (!f->vm) return;
+
+    struct STA_Actor *a = sta_registry_lookup(f->vm->registry, waiter);
+    if (!a) return;
+
+    uint32_t expected = STA_ACTOR_SUSPENDED;
+    if (atomic_compare_exchange_strong_explicit(
+            &a->state, &expected, STA_ACTOR_READY,
+            memory_order_acq_rel, memory_order_relaxed)) {
+        /* Push to scheduler. The seq_cst fence in sta_actor_send_msg
+         * isn't needed here because we're the only thread transitioning
+         * this particular actor from SUSPENDED → READY. */
+        STA_Scheduler *sched = f->vm->scheduler;
+        if (sched && atomic_load_explicit(&sched->running,
+                                            memory_order_acquire)) {
+            sta_scheduler_enqueue(sched, a);
+        }
+    }
+    sta_actor_release(a);
+}
 
 STA_Future *sta_future_retain(STA_Future *f) {
     if (!f) return NULL;
@@ -69,6 +105,9 @@ bool sta_future_resolve(STA_Future *f, STA_OOP *buf, uint32_t count,
          * to any thread that acquire-loads state and sees RESOLVED. */
         atomic_store_explicit(&f->state, STA_FUTURE_RESOLVED,
                               memory_order_release);
+
+        /* Step 4 (Epic 7B): Wake any actor suspended on this future. */
+        wake_waiter(f);
     } else {
         /* CAS lost — someone else already claimed the future. */
         free(buf);
@@ -101,6 +140,9 @@ bool sta_future_fail(STA_Future *f, STA_OOP *buf, uint32_t count) {
         /* Step 3: Publish. */
         atomic_store_explicit(&f->state, STA_FUTURE_FAILED,
                               memory_order_release);
+
+        /* Step 4 (Epic 7B): Wake any actor suspended on this future. */
+        wake_waiter(f);
     } else {
         free(buf);
     }

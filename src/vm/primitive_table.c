@@ -1156,6 +1156,181 @@ static int prim_subclass(STA_ExecContext *ctx, STA_OOP *args, uint8_t nargs, STA
     return STA_PRIM_SUCCESS;
 }
 
+/* ── Future wait primitive (Epic 7B) ──────────────────────────────────── */
+
+#include "actor/future.h"
+#include "actor/future_table.h"
+#include "actor/deep_copy.h"
+
+/* Copy the resolved future's result onto the waiting actor's heap.
+ * Consumes the transfer heap (if any). */
+static STA_OOP copy_future_result(STA_Future *f, STA_ExecContext *ctx) {
+    STA_OOP val = f->result_buf[0];
+
+    if (!f->transfer_heap) {
+        /* Immediate or immutable — safe to use directly. */
+        return val;
+    }
+
+    /* Mutable result — deep copy from transfer heap to actor's heap.
+     * Take ownership of the transfer heap first to prevent double-free
+     * when the future is eventually released. */
+    STA_Heap *th = f->transfer_heap;
+    f->transfer_heap = NULL;
+
+    STA_OOP copied = sta_deep_copy_gc(val, th, ctx->vm, ctx->actor,
+                                        &ctx->vm->class_table);
+
+    sta_heap_deinit(th);
+    free(th);
+
+    return copied;
+}
+
+/* Signal a FutureFailure exception on the current actor/handler chain.
+ * Allocates the exception on the actor's heap, sets messageText from
+ * the failure reason, and longjmps to the matching handler.
+ * Does NOT return if a handler is found. */
+static void signal_future_failure(STA_ExecContext *ctx, STA_OOP reason) {
+    STA_Heap *heap = ctx->actor ? &ctx->actor->heap : &ctx->vm->heap;
+    STA_ObjHeader *exc_h = sta_heap_alloc(heap, STA_CLS_FUTUREFAILURE, 2);
+    if (!exc_h) {
+        fprintf(stderr, "FATAL: failed to allocate FutureFailure\n");
+        abort();
+    }
+    STA_OOP *eslots = sta_payload(exc_h);
+    eslots[0] = reason;               /* messageText */
+    eslots[1] = ctx->vm->specials[SPC_NIL]; /* signalContext */
+
+    STA_OOP exc_oop = (STA_OOP)(uintptr_t)exc_h;
+
+    /* Walk handler chain — same pattern as prim_signal. */
+    STA_HandlerEntry **top_ptr = sta_handler_top_ptr(ctx);
+    STA_HandlerEntry *target = NULL;
+    {
+        STA_HandlerEntry *e = *top_ptr;
+        while (e) {
+            if (!e->is_ensure) {
+                STA_HandlerEntry *saved_top = *top_ptr;
+                *top_ptr = e;
+                STA_HandlerEntry *match = sta_handler_find_ctx(ctx, exc_oop);
+                *top_ptr = saved_top;
+                if (match == e) {
+                    target = e;
+                    break;
+                }
+            }
+            e = e->prev;
+        }
+    }
+
+    if (target) {
+        /* Fire ensure: blocks between handler_top and target. */
+        while (*top_ptr != target) {
+            STA_HandlerEntry *top = *top_ptr;
+            *top_ptr = top->prev;
+            if (top->is_ensure) {
+                (void)sta_eval_block(ctx->vm, top->ensure_block, NULL, 0);
+            }
+        }
+        *top_ptr = target->prev;
+        sta_handler_set_signaled_ctx(ctx, exc_oop);
+        longjmp(target->jmp, 1);
+    }
+
+    /* Unhandled — for actors the catch-all handler should have matched.
+     * For root actor / eval, abort. */
+    fprintf(stderr, "Unhandled FutureFailure exception\n");
+    abort();
+}
+
+/* Consume a future: remove from table and release both refs (table + lookup). */
+static void consume_future(STA_ExecContext *ctx, STA_Future *f, uint32_t future_id) {
+    sta_future_table_remove(ctx->vm->future_table, future_id);
+    sta_future_release(f);  /* table's conceptual ref */
+    sta_future_release(f);  /* lookup ref */
+}
+
+/* Handle a resolved future: copy result, clean up. */
+static int handle_resolved(STA_ExecContext *ctx, STA_Future *f,
+                            uint32_t future_id, STA_OOP *result) {
+    *result = copy_future_result(f, ctx);
+    consume_future(ctx, f, future_id);
+    return STA_PRIM_SUCCESS;
+}
+
+/* Handle a failed future: clean up, signal exception (does not return). */
+static int handle_failed(STA_ExecContext *ctx, STA_Future *f,
+                          uint32_t future_id) {
+    STA_OOP reason = ctx->vm->specials[SPC_NIL];
+    if (f->result_count > 0 && f->result_buf)
+        reason = f->result_buf[0];
+    consume_future(ctx, f, future_id);
+    signal_future_failure(ctx, reason);
+    return STA_PRIM_NOT_AVAILABLE;  /* unreachable */
+}
+
+/* Primitive 201: Future >> wait
+ * Returns the resolved value, signals FutureFailure on failure,
+ * or suspends the actor if the future is still pending. */
+static int prim_future_wait(STA_ExecContext *ctx, STA_OOP *args,
+                             uint8_t nargs, STA_OOP *result) {
+    (void)nargs;
+    STA_OOP receiver = args[0];
+
+    if (STA_IS_IMMEDIATE(receiver)) return STA_PRIM_BAD_RECEIVER;
+    STA_ObjHeader *h = (STA_ObjHeader *)(uintptr_t)receiver;
+    if (h->class_index != STA_CLS_FUTURE) return STA_PRIM_BAD_RECEIVER;
+
+    /* Extract futureId instance variable (slot 0). */
+    STA_OOP future_id_oop = sta_payload(h)[0];
+    if (!STA_IS_SMALLINT(future_id_oop)) return STA_PRIM_BAD_RECEIVER;
+    uint32_t future_id = (uint32_t)STA_SMALLINT_VAL(future_id_oop);
+
+    STA_Future *f = sta_future_table_lookup(ctx->vm->future_table, future_id);
+    if (!f) return STA_PRIM_BAD_RECEIVER;
+
+    uint32_t state = atomic_load_explicit(&f->state, memory_order_acquire);
+
+    if (state == STA_FUTURE_RESOLVED)
+        return handle_resolved(ctx, f, future_id, result);
+
+    if (state == STA_FUTURE_FAILED)
+        return handle_failed(ctx, f, future_id);
+
+    /* State is PENDING (or transient RESOLVING/FAILING) — suspend. */
+    if (!ctx->actor || ctx->actor == ctx->vm->root_actor) {
+        /* Cannot suspend root actor / eval context. */
+        sta_future_release(f);
+        return STA_PRIM_BAD_RECEIVER;
+    }
+
+    /* Record that this actor is waiting on this future. */
+    atomic_store_explicit(&f->waiter_actor_id, ctx->actor->actor_id,
+                          memory_order_release);
+
+    /* Re-check state after storing waiter_actor_id to close the race
+     * where resolve/fail completes between our state check and the
+     * waiter_actor_id store. If the future is now terminal, resolve/fail
+     * may have already called wake_waiter and seen waiter_actor_id=0.
+     * Handle the terminal state inline rather than relying on retry. */
+    uint32_t recheck = atomic_load_explicit(&f->state, memory_order_acquire);
+    if (recheck == STA_FUTURE_RESOLVED)
+        return handle_resolved(ctx, f, future_id, result);
+    if (recheck == STA_FUTURE_FAILED)
+        return handle_failed(ctx, f, future_id);
+
+    sta_future_release(f);
+
+    /* CAS actor RUNNING → SUSPENDED. */
+    uint32_t expected = STA_ACTOR_RUNNING;
+    atomic_compare_exchange_strong_explicit(
+        &ctx->actor->state, &expected, STA_ACTOR_SUSPENDED,
+        memory_order_acq_rel, memory_order_acquire);
+
+    return STA_PRIM_SUSPEND;
+}
+
 /* ── Table initialization ──────────────────────────────────────────────── */
 
 void sta_primitive_table_init(void) {
@@ -1180,6 +1355,7 @@ void sta_primitive_table_init(void) {
     sta_primitives[17] = prim_smallint_bitshift;
 
     sta_primitives[200] = prim_smallint_printstring;
+    sta_primitives[201] = prim_future_wait;  /* Future >> wait (Epic 7B) */
 
     sta_primitives[29] = prim_identity;
     sta_primitives[30] = prim_class;

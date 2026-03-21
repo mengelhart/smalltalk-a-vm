@@ -108,7 +108,7 @@ STA_VM* sta_vm_create(const STA_VMConfig* config) {
     }
     inited |= INIT_REGISTRY;
 
-    vm->future_table = sta_future_table_create(256);
+    vm->future_table = sta_future_table_create(256, vm);
     if (!vm->future_table) {
         set_error(vm, "future table allocation failed"); goto fail;
     }

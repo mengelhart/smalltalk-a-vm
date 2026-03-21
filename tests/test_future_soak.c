@@ -160,7 +160,7 @@ static void test_future_table_stress(void) {
            T1_THREADS, T1_FUTURES_EACH, total);
     fflush(stdout);
 
-    STA_FutureTable *table = sta_future_table_create(256);
+    STA_FutureTable *table = sta_future_table_create(256, NULL);
     assert(table != NULL);
 
     _Atomic int completed = 0;
@@ -300,7 +300,7 @@ static void test_future_table_growth(void) {
            T3_FUTURE_COUNT);
     fflush(stdout);
 
-    STA_FutureTable *table = sta_future_table_create(256);
+    STA_FutureTable *table = sta_future_table_create(256, NULL);
     assert(table != NULL);
 
     STA_Future *futures[T3_FUTURE_COUNT];

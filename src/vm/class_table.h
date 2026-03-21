@@ -51,7 +51,9 @@
 #define STA_CLS_MESSAGENOTUNDERSTOOD  29u  /* MessageNotUnderstood           */
 #define STA_CLS_BLOCKCANNOTRETURN     30u  /* BlockCannotReturn              */
 #define STA_CLS_SYSTEMDICTIONARY      31u  /* SystemDictionary               */
-#define STA_CLS_RESERVED_COUNT        32u  /* first dynamically-assigned idx */
+#define STA_CLS_FUTURE                32u  /* Future (Epic 7B)               */
+#define STA_CLS_FUTUREFAILURE         33u  /* FutureFailure (Epic 7B)        */
+#define STA_CLS_RESERVED_COUNT        34u  /* first dynamically-assigned idx */
 
 /* ── Struct definition (visible for STA_VM embedding) ───────────────────── */
 typedef struct STA_ClassTable {

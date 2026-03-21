@@ -16,9 +16,11 @@ typedef struct STA_FutureTable {
     uint32_t     count;         /* live entries */
     uint32_t     next_id;       /* monotonic, starts at 1 (0 = no future) */
     pthread_mutex_t lock;
+    struct STA_VM  *vm;         /* back-pointer for waiter wake (Epic 7B) */
 } STA_FutureTable;
 
-STA_FutureTable *sta_future_table_create(uint32_t initial_capacity);
+STA_FutureTable *sta_future_table_create(uint32_t initial_capacity,
+                                          struct STA_VM *vm);
 void             sta_future_table_destroy(STA_FutureTable *table);
 
 /* Create a PENDING future, insert into table. Returns retained ref.

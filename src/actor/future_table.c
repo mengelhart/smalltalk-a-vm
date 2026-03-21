@@ -52,7 +52,8 @@ static int table_rehash(STA_FutureTable *t, uint32_t new_cap) {
 
 /* ── Public API ────────────────────────────────────────────────────── */
 
-STA_FutureTable *sta_future_table_create(uint32_t initial_capacity) {
+STA_FutureTable *sta_future_table_create(uint32_t initial_capacity,
+                                          struct STA_VM *vm) {
     STA_FutureTable *t = calloc(1, sizeof(STA_FutureTable));
     if (!t) return NULL;
 
@@ -66,6 +67,7 @@ STA_FutureTable *sta_future_table_create(uint32_t initial_capacity) {
     t->capacity = cap;
     t->count    = 0;
     t->next_id  = 1;  /* 0 = no future */
+    t->vm       = vm;  /* Epic 7B: back-pointer for waiter wake */
 
     if (pthread_mutex_init(&t->lock, NULL) != 0) {
         free(t->buckets);
@@ -111,6 +113,7 @@ STA_Future *sta_future_table_new(STA_FutureTable *table, uint32_t sender_id) {
 
     f->future_id = table->next_id++;
     f->sender_id = sender_id;
+    f->vm        = table->vm;  /* Epic 7B: back-pointer for waiter wake */
     atomic_store_explicit(&f->state, STA_FUTURE_PENDING, memory_order_relaxed);
     atomic_store_explicit(&f->refcount, 2, memory_order_relaxed);  /* caller + table */
     atomic_store_explicit(&f->waiter_actor_id, 0, memory_order_relaxed);

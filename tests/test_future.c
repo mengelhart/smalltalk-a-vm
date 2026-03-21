@@ -24,7 +24,7 @@ static int tests_passed = 0;
 /* ── Test 1: Create a PENDING future ──────────────────────────────── */
 
 static void test_future_create_pending(void) {
-    STA_FutureTable *table = sta_future_table_create(256);
+    STA_FutureTable *table = sta_future_table_create(256, NULL);
     assert(table);
 
     STA_Future *f = sta_future_table_new(table, 42);
@@ -41,7 +41,7 @@ static void test_future_create_pending(void) {
 /* ── Test 2: Resolve a future ─────────────────────────────────────── */
 
 static void test_future_resolve(void) {
-    STA_FutureTable *table = sta_future_table_create(256);
+    STA_FutureTable *table = sta_future_table_create(256, NULL);
     STA_Future *f = sta_future_table_new(table, 1);
 
     STA_OOP *buf = malloc(sizeof(STA_OOP));
@@ -61,7 +61,7 @@ static void test_future_resolve(void) {
 /* ── Test 3: Fail a future ────────────────────────────────────────── */
 
 static void test_future_fail(void) {
-    STA_FutureTable *table = sta_future_table_create(256);
+    STA_FutureTable *table = sta_future_table_create(256, NULL);
     STA_Future *f = sta_future_table_new(table, 1);
 
     STA_OOP *buf = malloc(sizeof(STA_OOP));
@@ -80,7 +80,7 @@ static void test_future_fail(void) {
 /* ── Test 4: Double resolve — second returns false ────────────────── */
 
 static void test_future_double_resolve(void) {
-    STA_FutureTable *table = sta_future_table_create(256);
+    STA_FutureTable *table = sta_future_table_create(256, NULL);
     STA_Future *f = sta_future_table_new(table, 1);
 
     STA_OOP *buf1 = malloc(sizeof(STA_OOP));
@@ -131,7 +131,7 @@ static void test_future_resolve_vs_fail(void) {
     int total_resolve = 0, total_fail = 0;
 
     for (int iter = 0; iter < 100; iter++) {
-        STA_FutureTable *table = sta_future_table_create(8);
+        STA_FutureTable *table = sta_future_table_create(8, NULL);
         STA_Future *f = sta_future_table_new(table, 1);
 
         RaceCtx ctx = { .future = f };
@@ -161,7 +161,7 @@ static void test_future_resolve_vs_fail(void) {
 /* ── Test 6: Refcount retain/release ──────────────────────────────── */
 
 static void test_future_refcount(void) {
-    STA_FutureTable *table = sta_future_table_create(256);
+    STA_FutureTable *table = sta_future_table_create(256, NULL);
     STA_Future *f = sta_future_table_new(table, 1);
 
     assert(atomic_load(&f->refcount) == 2);  /* caller + table */
@@ -188,7 +188,7 @@ static void test_future_refcount(void) {
 /* ── Test 7: Table lookup ─────────────────────────────────────────── */
 
 static void test_future_table_lookup(void) {
-    STA_FutureTable *table = sta_future_table_create(256);
+    STA_FutureTable *table = sta_future_table_create(256, NULL);
     STA_Future *f = sta_future_table_new(table, 1);
     uint32_t id = f->future_id;
 
@@ -208,7 +208,7 @@ static void test_future_table_lookup(void) {
 /* ── Test 8: Table remove ─────────────────────────────────────────── */
 
 static void test_future_table_remove(void) {
-    STA_FutureTable *table = sta_future_table_create(256);
+    STA_FutureTable *table = sta_future_table_create(256, NULL);
     STA_Future *f = sta_future_table_new(table, 1);
     uint32_t id = f->future_id;
 
@@ -225,7 +225,7 @@ static void test_future_table_remove(void) {
 /* ── Test 9: Table grow (insert 200 into capacity 256) ────────────── */
 
 static void test_future_table_grow(void) {
-    STA_FutureTable *table = sta_future_table_create(256);
+    STA_FutureTable *table = sta_future_table_create(256, NULL);
     uint32_t ids[200];
 
     for (int i = 0; i < 200; i++) {
@@ -251,7 +251,7 @@ static void test_future_table_grow(void) {
 /* ── Test 10: Table destroy releases all futures ──────────────────── */
 
 static void test_future_table_destroy_cleanup(void) {
-    STA_FutureTable *table = sta_future_table_create(256);
+    STA_FutureTable *table = sta_future_table_create(256, NULL);
 
     for (int i = 0; i < 10; i++) {
         STA_Future *f = sta_future_table_new(table, 1);
