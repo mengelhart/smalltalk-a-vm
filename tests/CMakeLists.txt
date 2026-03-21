@@ -363,6 +363,14 @@ target_compile_definitions(test_mailbox_heap_growth PRIVATE
 target_link_libraries(test_mailbox_heap_growth PRIVATE sta_vm)
 add_test(NAME mailbox_heap_growth COMMAND test_mailbox_heap_growth)
 
+add_executable(test_ask_mailbox_full test_ask_mailbox_full.c)
+target_include_directories(test_ask_mailbox_full PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_compile_definitions(test_ask_mailbox_full PRIVATE
+    KERNEL_DIR="${CMAKE_SOURCE_DIR}/kernel")
+target_link_libraries(test_ask_mailbox_full PRIVATE sta_vm)
+add_test(NAME ask_mailbox_full COMMAND test_ask_mailbox_full)
+
 add_executable(test_deep_copy test_deep_copy.c)
 target_include_directories(test_deep_copy PRIVATE
     ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)

@@ -308,6 +308,22 @@ int sta_actor_send_msg(struct STA_VM *vm,
 
 /* ── Ask messaging (Epic 7A) ─────────────────────────────────────────── */
 
+/* Fail a future with a Symbol reason, then remove from table + release.
+ * Used by sta_actor_ask_msg error paths to ensure any holder gets a clean
+ * failure instead of a hang or DNU.  See GitHub #43. */
+static void fail_and_cleanup_future(struct STA_VM *vm, STA_Future *future,
+                                     const char *reason, size_t reason_len) {
+    STA_OOP *buf = malloc(sizeof(STA_OOP));
+    if (buf) {
+        buf[0] = sta_symbol_intern(&vm->immutable_space,
+                                     &vm->symbol_table,
+                                     reason, reason_len);
+        sta_future_fail(future, buf, 1);
+    }
+    sta_future_table_remove(vm->future_table, future->future_id);
+    sta_future_release(future);
+}
+
 struct STA_Future *sta_actor_ask_msg(struct STA_VM *vm,
                                      uint32_t sender_id,
                                      uint32_t target_id,
@@ -351,8 +367,7 @@ struct STA_Future *sta_actor_ask_msg(struct STA_VM *vm,
             /* Zero-copy fast path: all immediates/immutables. */
             copied_args = malloc((size_t)arg_count * sizeof(STA_OOP));
             if (!copied_args) {
-                sta_future_table_remove(vm->future_table, future->future_id);
-                sta_future_release(future);
+                fail_and_cleanup_future(vm, future, "outOfMemory", 11);
                 sta_actor_release(target);
                 *err = STA_ERR_OOM;
                 return NULL;
@@ -369,8 +384,7 @@ struct STA_Future *sta_actor_ask_msg(struct STA_VM *vm,
                 size_t needed = target->heap.used + estimated;
                 size_t new_cap = needed + needed / 2;
                 if (sta_heap_grow(&target->heap, new_cap) != 0) {
-                    sta_future_table_remove(vm->future_table, future->future_id);
-                    sta_future_release(future);
+                    fail_and_cleanup_future(vm, future, "outOfMemory", 11);
                     sta_actor_release(target);
                     *err = STA_ERR_OOM;
                     return NULL;
@@ -379,8 +393,7 @@ struct STA_Future *sta_actor_ask_msg(struct STA_VM *vm,
 
             copied_args = malloc((size_t)arg_count * sizeof(STA_OOP));
             if (!copied_args) {
-                sta_future_table_remove(vm->future_table, future->future_id);
-                sta_future_release(future);
+                fail_and_cleanup_future(vm, future, "outOfMemory", 11);
                 sta_actor_release(target);
                 *err = STA_ERR_OOM;
                 return NULL;
@@ -398,8 +411,7 @@ struct STA_Future *sta_actor_ask_msg(struct STA_VM *vm,
                     !STA_IS_IMMEDIATE(args[i])) {
                     if (sender) sta_actor_release(sender);
                     free(copied_args);
-                    sta_future_table_remove(vm->future_table, future->future_id);
-                    sta_future_release(future);
+                    fail_and_cleanup_future(vm, future, "outOfMemory", 11);
                     sta_actor_release(target);
                     *err = STA_ERR_OOM;
                     return NULL;
@@ -414,8 +426,7 @@ struct STA_Future *sta_actor_ask_msg(struct STA_VM *vm,
         selector, copied_args, (uint8_t)arg_count, sender_id);
     if (!msg) {
         if (args_mallocd) free(copied_args);
-        sta_future_table_remove(vm->future_table, future->future_id);
-        sta_future_release(future);
+        fail_and_cleanup_future(vm, future, "outOfMemory", 11);
         sta_actor_release(target);
         *err = STA_ERR_OOM;
         return NULL;
@@ -427,8 +438,7 @@ struct STA_Future *sta_actor_ask_msg(struct STA_VM *vm,
     int rc = sta_mailbox_enqueue(&target->mailbox, msg);
     if (rc != 0) {
         sta_mailbox_msg_destroy(msg);
-        sta_future_table_remove(vm->future_table, future->future_id);
-        sta_future_release(future);
+        fail_and_cleanup_future(vm, future, "mailboxFull", 11);
         sta_actor_release(target);
         *err = STA_ERR_MAILBOX_FULL;
         return NULL;
