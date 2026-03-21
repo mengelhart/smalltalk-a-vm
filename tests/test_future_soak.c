@@ -1,11 +1,9 @@
 /* tests/test_future_soak.c
- * Phase 2 Epic 7A: Futures stress tests.
- * Exercises future table contention, end-to-end reply routing at
- * moderate scale, and table growth past initial capacity.
- * NOT part of the default ctest suite (DISABLED).
- *
- * Full sustained ask/reply soak deferred to Epic 7B — requires the
- * wait primitive for proper actor suspension.  See issue #330.
+ * Phase 2 Epics 7A + 7B: Futures stress tests.
+ * Tests 1–3 (Epic 7A): table contention, reply routing, table growth.
+ * Test 4 (Epic 7B): sustained ask/wait soak — 100 actors × 10 asks
+ *   each = 1,000 round trips where actors suspend on wait and are
+ *   woken by the resolve path. Closes issue #330.
  *
  * Usage:
  *   ./build/tests/test_future_soak
@@ -344,14 +342,181 @@ static void test_future_table_growth(void) {
     printf("  PASS\n");
 }
 
+/* ══════════════════════════════════════════════════════════════════════════
+ * Test 4: Sustained ask/wait soak (Epic 7B — closes #330)
+ * 100 sender actors × 10 asks each = 1,000 round trips.
+ * Each sender executes a Smalltalk method that creates a Future proxy
+ * and calls wait — exercising the full STA_PRIM_SUSPEND → scheduler
+ * frees thread → resolve → wake_waiter → scheduler reschedules path.
+ *
+ * Key difference from test 2: test 2 drives asks from the main C thread
+ * and polls with usleep.  This test has actors themselves doing the
+ * waiting, with real actor suspension and wake under contention.
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+#include <time.h>
+
+#define T4_SENDERS       100
+#define T4_ASKS_EACH     10
+#define T4_TOTAL         (T4_SENDERS * T4_ASKS_EACH)
+#define T4_TIMEOUT_SEC   30
+
+static void test_sustained_ask_wait(void) {
+    int total = T4_TOTAL;
+    printf("  test_sustained_ask_wait (%d senders × %d asks = %d round trips)...\n",
+           T4_SENDERS, T4_ASKS_EACH, total);
+    fflush(stdout);
+
+    STA_VM *vm = make_vm();
+
+    /* ── Install behavior methods ──────────────────────────────────── */
+
+    /* Service: answer ^42 */
+    install_method(vm, "answer", "answer ^42");
+
+    /* Sender: doWaitOn: aFutureId
+     *   Creates a Future proxy, sets its futureId ivar, calls wait.
+     *   This is the Smalltalk-level code that suspends the actor. */
+    STA_OOP obj_cls = sta_class_table_get(&vm->class_table, STA_CLS_OBJECT);
+    {
+        const char *source =
+            "doWaitOn: aFutureId "
+            "| f | "
+            "f := Future new. "
+            "f instVarAt: 1 put: aFutureId. "
+            "^f wait";
+        STA_CompileResult r = sta_compile_method(
+            source, obj_cls, NULL, 0,
+            &vm->symbol_table, &vm->immutable_space,
+            &vm->root_actor->heap,
+            vm->specials[SPC_SMALLTALK]);
+        if (r.had_error) {
+            fprintf(stderr, "compile error: %s\n", r.error_msg);
+        }
+        assert(!r.had_error);
+
+        STA_OOP md = sta_class_method_dict(obj_cls);
+        STA_OOP sel = intern(vm, "doWaitOn:");
+        sta_method_dict_insert(&vm->root_actor->heap, md, sel, r.method);
+    }
+
+    /* ── Create actors ────────────────────────────────────────────── */
+
+    struct STA_Actor *service = make_service_actor(vm, 65536);
+    uint32_t service_id = service->actor_id;
+
+    struct STA_Actor *senders[T4_SENDERS];
+    for (int i = 0; i < T4_SENDERS; i++) {
+        senders[i] = make_service_actor(vm, 8192);  /* larger heap for Future proxies */
+    }
+
+    /* ── Start scheduler ──────────────────────────────────────────── */
+
+    sta_scheduler_init(vm, 0);  /* 0 = all cores */
+    sta_scheduler_start(vm);
+
+    struct timespec t0, t1;
+    clock_gettime(CLOCK_MONOTONIC, &t0);
+
+    /* ── Fire all asks + doWaitOn: messages ────────────────────────── */
+
+    STA_Future **futures = calloc(T4_TOTAL, sizeof(STA_Future *));
+    assert(futures);
+    STA_OOP answer_sel = intern(vm, "answer");
+    STA_OOP wait_sel = intern(vm, "doWaitOn:");
+    int idx = 0;
+
+    for (int s = 0; s < T4_SENDERS; s++) {
+        for (int r = 0; r < T4_ASKS_EACH; r++) {
+            /* 1. Create the ask: future (sender→service). */
+            int err = 0;
+            STA_Future *f = NULL;
+            for (int retry = 0; retry < 10000; retry++) {
+                f = sta_actor_ask_msg(vm, senders[s]->actor_id,
+                                       service_id, answer_sel, NULL, 0, &err);
+                if (f) break;
+                if (err == STA_ERR_MAILBOX_FULL) { usleep(100); continue; }
+                fprintf(stderr, "ask_msg error: %d\n", err);
+                assert(0);
+            }
+            assert(f != NULL);
+            futures[idx] = f;
+
+            /* 2. Send doWaitOn: to the sender actor with the future_id.
+             *    The sender will create a Future proxy and call wait,
+             *    which suspends it until the service resolves the future. */
+            STA_OOP fid_arg = STA_SMALLINT_OOP((intptr_t)f->future_id);
+            int send_rc = sta_actor_send_msg(vm, vm->root_actor,
+                                              senders[s]->actor_id,
+                                              wait_sel, &fid_arg, 1);
+            assert(send_rc == 0);
+            idx++;
+        }
+    }
+
+    /* ── Wait for all futures to resolve ───────────────────────────── */
+
+    int resolved = 0;
+    int failed = 0;
+    int timed_out = 0;
+
+    for (int i = 0; i < T4_TOTAL; i++) {
+        STA_Future *f = futures[i];
+        int done = 0;
+
+        for (int t = 0; t < T4_TIMEOUT_SEC * 1000; t++) {
+            uint32_t st = atomic_load_explicit(&f->state, memory_order_acquire);
+            if (st == STA_FUTURE_RESOLVED) { resolved++; done = 1; break; }
+            if (st == STA_FUTURE_FAILED) { failed++; done = 1; break; }
+            usleep(1000);
+        }
+        if (!done) {
+            timed_out++;
+            fprintf(stderr, "  TIMEOUT: future %d (id=%u) still pending\n",
+                    i, f->future_id);
+        }
+    }
+
+    clock_gettime(CLOCK_MONOTONIC, &t1);
+    double elapsed = (double)(t1.tv_sec - t0.tv_sec) +
+                     (double)(t1.tv_nsec - t0.tv_nsec) / 1e9;
+
+    printf("    resolved: %d/%d  failed: %d  timed_out: %d\n",
+           resolved, total, failed, timed_out);
+    printf("    elapsed: %.3fs  throughput: %.0f round-trips/s\n",
+           elapsed, resolved / elapsed);
+
+    /* ── Cleanup ──────────────────────────────────────────────────── */
+
+    /* Release our ask_msg refs (table refs were released by wait consumers
+     * or remain for unresolved futures). */
+    for (int i = 0; i < T4_TOTAL; i++) {
+        sta_future_release(futures[i]);
+    }
+    free(futures);
+
+    sta_scheduler_stop(vm);
+
+    printf("    future_table count after stop: %u\n", vm->future_table->count);
+
+    assert(resolved == total);
+    assert(failed == 0);
+    assert(timed_out == 0);
+
+    sta_scheduler_destroy(vm);
+    sta_vm_destroy(vm);
+    printf("  PASS\n");
+}
+
 /* ── Main ─────────────────────────────────────────────────────────────── */
 
 int main(void) {
-    printf("=== FUTURE SOAK TEST (Epic 7A) ===\n\n");
+    printf("=== FUTURE SOAK TEST (Epics 7A + 7B) ===\n\n");
 
     test_future_table_stress();
     test_reply_routing_moderate();
     test_future_table_growth();
+    test_sustained_ask_wait();
 
     printf("\nAll future soak tests passed.\n");
     return 0;
