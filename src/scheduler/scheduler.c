@@ -53,10 +53,9 @@ void sta_scheduler_enqueue(STA_Scheduler *sched, struct STA_Actor *actor) {
     atomic_fetch_add_explicit(&actor->refcount, 1, memory_order_relaxed);
 
     /* Push to global overflow queue. Workers drain this. */
-    actor->next_runnable = NULL;
-
     pthread_mutex_lock(&sched->wake_mutex);
-    /* Link into overflow list. */
+    /* Link into overflow list. next_runnable written inside the mutex so
+     * drain_overflow (which reads it under the same mutex) cannot race. */
     actor->next_runnable = sched->overflow_head;
     sched->overflow_head = actor;
     pthread_cond_signal(&sched->wake_cond);
