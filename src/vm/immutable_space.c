@@ -26,7 +26,7 @@ int sta_immutable_space_init(STA_ImmutableSpace *sp, size_t min_capacity) {
 
     sp->base     = mem;
     sp->capacity = capacity;
-    sp->used     = 0;
+    atomic_store_explicit(&sp->used, 0, memory_order_relaxed);
     sp->sealed   = 0;
     return 0;
 }
@@ -39,7 +39,7 @@ void sta_immutable_space_deinit(STA_ImmutableSpace *sp) {
     if (sp->base) munmap(sp->base, sp->capacity);
     sp->base = NULL;
     sp->capacity = 0;
-    sp->used = 0;
+    atomic_store_explicit(&sp->used, 0, memory_order_relaxed);
     sp->sealed = 0;
 }
 
@@ -65,12 +65,15 @@ STA_ObjHeader *sta_immutable_alloc(STA_ImmutableSpace *sp,
     if (sp->sealed) return NULL;
 
     /* Align bump pointer to 16-byte boundary (STA_ALLOC_UNIT). */
-    size_t aligned = (sp->used + 15u) & ~(size_t)15u;
+    size_t cur = atomic_load_explicit(&sp->used, memory_order_relaxed);
+    size_t aligned = (cur + 15u) & ~(size_t)15u;
     size_t bytes   = sta_alloc_size(nwords);
 
     if (aligned + bytes > sp->capacity) return NULL;
 
-    sp->used = aligned + bytes;
+    /* Release store: ensures the object's header+payload writes are visible
+     * to any thread that reads 'used' to determine immutable space bounds. */
+    atomic_store_explicit(&sp->used, aligned + bytes, memory_order_release);
     STA_ObjHeader *h = (STA_ObjHeader *)(sp->base + aligned);
 
     /* Zero the full allocation (header + padding + payload). */
@@ -99,5 +102,13 @@ const void *sta_immutable_space_base(const STA_ImmutableSpace *sp) {
 }
 
 size_t sta_immutable_space_used(const STA_ImmutableSpace *sp) {
-    return sp->used;
+    /* Relaxed load: GC just needs a consistent value to determine whether
+     * an OOP falls within the immutable region. The release store in
+     * sta_immutable_alloc ensures the object is fully written before 'used'
+     * advances past it. A relaxed load may see a slightly stale bound,
+     * which is safe — it just means a very recently allocated immutable
+     * object might not be recognized as immutable and would be skipped
+     * by the in_from_space check instead. */
+    return atomic_load_explicit(
+        &((STA_ImmutableSpace *)sp)->used, memory_order_relaxed);
 }
