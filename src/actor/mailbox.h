@@ -71,6 +71,16 @@ int sta_mailbox_enqueue(STA_Mailbox *mb, STA_MailboxMsg *msg);
  * call sta_mailbox_msg_destroy when done. */
 STA_MailboxMsg *sta_mailbox_dequeue(STA_Mailbox *mb);
 
+/* ── Walk (Epic 7B Story 5) ──────────────────────────────────────────── */
+
+/* Walk pending messages without dequeuing. Visitor called for each.
+ * NOT safe for concurrent consumption — caller must have exclusive
+ * consumer access (e.g., actor is crashing, no other thread dispatching).
+ * New messages enqueued concurrently may or may not be visited. */
+void sta_mailbox_walk(STA_Mailbox *mb,
+                      void (*visitor)(STA_MailboxMsg *msg, void *ctx),
+                      void *ctx);
+
 /* ── Queries ─────────────────────────────────────────────────────────── */
 
 /* Current number of messages in the mailbox (approximate — may lag

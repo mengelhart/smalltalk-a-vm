@@ -22,6 +22,7 @@ typedef enum {
 } STA_FutureState;
 
 typedef struct STA_Heap STA_Heap;   /* forward decl */
+struct STA_VM;                      /* forward decl */
 
 typedef struct STA_Future {
     _Atomic uint32_t    state;             /* STA_FutureState via CAS */
@@ -32,7 +33,8 @@ typedef struct STA_Future {
     uint32_t            result_count;      /* number of OOPs in result_buf */
     _Atomic uint32_t    waiter_actor_id;   /* actor suspended on wait, 0=none (Epic 7B) */
     STA_Heap           *transfer_heap;     /* malloc'd heap for mutable results, NULL if imm */
-} STA_Future;
+    struct STA_VM      *vm;                /* back-pointer for waiter wake (Epic 7B) */
+} STA_Future;  /* 48 bytes (was 40 — +8B for vm pointer) */
 
 /* Lifecycle — retain/release are thread-safe */
 STA_Future *sta_future_retain(STA_Future *f);

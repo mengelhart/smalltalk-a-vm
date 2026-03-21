@@ -404,6 +404,11 @@ static STA_OOP interpret_loop_ex(STA_VM *vm, STA_Frame *frame,
                         sta_stack_push(slab, prim_result);
                         break;
                     }
+                    /* Epic 7B: STA_PRIM_SUSPEND — actor should yield. */
+                    if (rc == STA_PRIM_SUSPEND && sched_actor) {
+                        sched_actor->saved_frame = frame;
+                        return STA_OOP_PREEMPTED;
+                    }
                     prim_failed = 1;
                     prim_fail_code = rc;
                 } else {
@@ -580,6 +585,11 @@ static STA_OOP interpret_loop_ex(STA_VM *vm, STA_Frame *frame,
                 int rc = fn(&exec_ctx, prim_args, na, &prim_result);
                 if (rc == 0) {
                     sta_stack_push(slab, prim_result);
+                } else if (rc == STA_PRIM_SUSPEND && sched_actor) {
+                    /* Epic 7B: actor should yield. Do NOT advance PC —
+                     * on resume, the primitive is retried. */
+                    sched_actor->saved_frame = frame;
+                    return STA_OOP_PREEMPTED;
                 } else {
                     if (frame->local_count > 0)
                         slots[frame->arg_count] = STA_SMALLINT_OOP(rc);

@@ -146,13 +146,14 @@ static int step2_symbols(BS *bs) {
 static int step3_tier0(BS *bs) {
     STA_OOP nil = bs->nil_oop;
 
-    /* Metaclass indices for the 5 Tier 0 classes. */
-    uint32_t meta_obj_idx = 32;
-    uint32_t meta_beh_idx = 33;
-    uint32_t meta_cd_idx  = 34;
-    uint32_t meta_cls_idx = 35;
-    uint32_t meta_mc_idx  = 36;
-    bs->next_meta_index = 37;
+    /* Metaclass indices for the 5 Tier 0 classes.
+     * Start at STA_CLS_RESERVED_COUNT to avoid collisions. */
+    uint32_t meta_obj_idx = STA_CLS_RESERVED_COUNT;
+    uint32_t meta_beh_idx = STA_CLS_RESERVED_COUNT + 1;
+    uint32_t meta_cd_idx  = STA_CLS_RESERVED_COUNT + 2;
+    uint32_t meta_cls_idx = STA_CLS_RESERVED_COUNT + 3;
+    uint32_t meta_mc_idx  = STA_CLS_RESERVED_COUNT + 4;
+    bs->next_meta_index = STA_CLS_RESERVED_COUNT + 5;
 
     /* ── Pass 1: Allocate all 10 objects ──────────────────────────────── */
 
@@ -350,11 +351,16 @@ static int step4_tier1(BS *bs) {
     STA_OOP error      = create_class(bs, "Error", exception, STA_CLS_ERROR, 0, STA_FMT_NORMAL);
     STA_OOP mnu        = create_class(bs, "MessageNotUnderstood", error, STA_CLS_MESSAGENOTUNDERSTOOD, 2, STA_FMT_NORMAL);
     STA_OOP bcr        = create_class(bs, "BlockCannotReturn", error, STA_CLS_BLOCKCANNOTRETURN, 2, STA_FMT_NORMAL);
-    (void)mnu; (void)bcr;
+    STA_OOP futfail    = create_class(bs, "FutureFailure", error, STA_CLS_FUTUREFAILURE, 0, STA_FMT_NORMAL);
+    (void)mnu; (void)bcr; (void)futfail;
 
     /* SystemDictionary. */
     STA_OOP sysdict    = create_class(bs, "SystemDictionary", obj, STA_CLS_SYSTEMDICTIONARY, 2, STA_FMT_NORMAL);
     (void)sysdict;
+
+    /* Future (Epic 7B): 1 instance variable (futureId as SmallInt). */
+    STA_OOP future     = create_class(bs, "Future", obj, STA_CLS_FUTURE, 1, STA_FMT_NORMAL);
+    (void)future;
 
     /* Verify all expected classes were created. */
     if (!smallint || !true_cls || !false_cls) return -1;
@@ -693,6 +699,11 @@ static int step7_methods(BS *bs) {
     if (install_prim_method(bs, cls_cls,
             "subclass:instanceVariableNames:classVariableNames:poolDictionaries:category:",
             122, 5) != 0) return -1;
+
+    /* ── Future >> wait — primitive 201 (Epic 7B) ────────────────────── */
+    STA_OOP future_cls = sta_class_table_get(bs->ct, STA_CLS_FUTURE);
+    if (future_cls && install_prim_method(bs, future_cls, "wait", 201, 0) != 0)
+        return -1;
 
     return 0;
 }

@@ -96,10 +96,10 @@ static void test_metaclass_circularity(void) {
     STA_OOP object_cls = sta_class_table_get(&g_vm->class_table, STA_CLS_OBJECT);
     assert(object_cls != 0);
 
-    /* Object's class → Object class (index 32). */
+    /* Object's class → Object class (index STA_CLS_RESERVED_COUNT). */
     STA_ObjHeader *obj_h = (STA_ObjHeader *)(uintptr_t)object_cls;
     uint32_t obj_meta_idx = obj_h->class_index;
-    assert(obj_meta_idx == 32);
+    assert(obj_meta_idx == STA_CLS_RESERVED_COUNT);
     STA_OOP object_metaclass = sta_class_table_get(&g_vm->class_table, obj_meta_idx);
     assert(object_metaclass != 0);
 
@@ -107,13 +107,13 @@ static void test_metaclass_circularity(void) {
     STA_ObjHeader *obj_mc_h = (STA_ObjHeader *)(uintptr_t)object_metaclass;
     assert(obj_mc_h->class_index == STA_CLS_METACLASS);
 
-    /* Metaclass (index 17) → its class is Metaclass class (index 36). */
+    /* Metaclass (index 17) → its class is Metaclass class (RESERVED_COUNT+4). */
     STA_OOP metaclass_cls = sta_class_table_get(&g_vm->class_table, STA_CLS_METACLASS);
     STA_ObjHeader *mc_h = (STA_ObjHeader *)(uintptr_t)metaclass_cls;
     uint32_t mc_meta_idx = mc_h->class_index;
-    assert(mc_meta_idx == 36);
+    assert(mc_meta_idx == STA_CLS_RESERVED_COUNT + 4);
 
-    /* Metaclass class (index 36) → its class is Metaclass (index 17). Circularity. */
+    /* Metaclass class → its class is Metaclass (index 17). Circularity. */
     STA_OOP metaclass_metaclass = sta_class_table_get(&g_vm->class_table, mc_meta_idx);
     STA_ObjHeader *mc_mc_h = (STA_ObjHeader *)(uintptr_t)metaclass_metaclass;
     assert(mc_mc_h->class_index == STA_CLS_METACLASS);

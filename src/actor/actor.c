@@ -567,14 +567,65 @@ static void notify_supervisor(struct STA_VM *vm, struct STA_Actor *actor,
                        selector, notif_args, 2);
 }
 
+/* ── Crash-triggered future failure (Epic 7B Story 5) ─────────────────── */
+
+/* Fail a single future by ID. Used during actor crash to fail pending
+ * ask: messages whose futures are still PENDING. */
+static void fail_future_for_crash(struct STA_VM *vm, uint32_t future_id) {
+    if (future_id == 0) return;
+
+    STA_Future *f = sta_future_table_lookup(vm->future_table, future_id);
+    if (!f) return;
+
+    /* Use the pre-interned "actorCrashed" symbol as the failure reason.
+     * Symbols are immutable and shared — safe in the crash path. */
+    STA_OOP *buf = malloc(sizeof(STA_OOP));
+    if (buf) {
+        buf[0] = sta_symbol_intern(&vm->immutable_space,
+                                     &vm->symbol_table,
+                                     "actorCrashed", 12);
+        /* sta_future_fail takes ownership of buf.
+         * If CAS fails (already terminal), buf is freed by fail(). */
+        sta_future_fail(f, buf, 1);
+        /* sta_future_fail handles: CAS, wake waiter, free buf if CAS fails */
+    }
+
+    sta_future_table_remove(vm->future_table, future_id);
+    sta_future_release(f);  /* table's ref */
+    sta_future_release(f);  /* lookup ref */
+}
+
+/* Mailbox walk visitor: fail futures for queued ask: messages. */
+static void fail_queued_future_visitor(STA_MailboxMsg *msg, void *ctx) {
+    struct STA_VM *vm = (struct STA_VM *)ctx;
+    if (msg->future_id != 0) {
+        fail_future_for_crash(vm, msg->future_id);
+    }
+}
+
 /* Handle an unhandled exception in a scheduled actor:
- * 1. Transition to TERMINATED (CAS for thread safety)
- * 2. Notify supervisor (if any)
- * 3. Drain remaining messages */
-static int handle_actor_exception(struct STA_VM *vm, struct STA_Actor *actor) {
+ * 1. Fail pending futures (current message + queued ask: messages)
+ * 2. Transition to TERMINATED (CAS for thread safety)
+ * 3. Notify supervisor (if any)
+ * 4. Drain remaining messages
+ *
+ * current_future_id: future_id of the message being processed when
+ * the exception occurred. 0 for fire-and-forget messages. */
+static int handle_actor_exception(struct STA_VM *vm, struct STA_Actor *actor,
+                                   uint32_t current_future_id) {
     /* Extract exception class name BEFORE termination — we are still
      * on the failed actor's thread and its heap is valid. */
     STA_OOP reason = extract_reason_symbol(vm, actor);
+
+    /* Epic 7B: Fail all pending ask: futures BEFORE termination.
+     * After termination, the mailbox is drained and freed —
+     * by then we must have already failed all the futures. */
+
+    /* 1. Fail the current message's future (if any). */
+    fail_future_for_crash(vm, current_future_id);
+
+    /* 2. Walk the mailbox and fail all queued ask: futures. */
+    sta_mailbox_walk(&actor->mailbox, fail_queued_future_visitor, vm);
 
     /* CAS to TERMINATED — another thread should not race on this. */
     uint32_t expected = STA_ACTOR_RUNNING;
@@ -662,8 +713,9 @@ int sta_actor_process_one_preemptible(struct STA_VM *vm, struct STA_Actor *actor
             return STA_ACTOR_MSG_PREEMPTED;
         }
         if (rc == STA_INTERPRET_EXCEPTION) {
+            uint32_t fid = actor->pending_future_id;
             actor->pending_future_id = 0;
-            return handle_actor_exception(vm, actor);
+            return handle_actor_exception(vm, actor, fid);
         }
         /* COMPLETED — pop return value and route reply if ask: message. */
         STA_OOP return_val = sta_stack_pop(&actor->slab);
@@ -715,8 +767,9 @@ int sta_actor_process_one_preemptible(struct STA_VM *vm, struct STA_Actor *actor
         return STA_ACTOR_MSG_PREEMPTED;
     }
     if (rc == STA_INTERPRET_EXCEPTION) {
+        uint32_t crash_fid = actor->pending_future_id;
         actor->pending_future_id = 0;
-        return handle_actor_exception(vm, actor);
+        return handle_actor_exception(vm, actor, crash_fid);
     }
 
     /* COMPLETED — pop return value and route reply if ask: message. */

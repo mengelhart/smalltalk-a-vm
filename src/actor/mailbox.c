@@ -112,6 +112,26 @@ STA_MailboxMsg *sta_mailbox_dequeue(STA_Mailbox *mb) {
     return msg;
 }
 
+/* ── Walk (Epic 7B Story 5) ──────────────────────────────────────────── */
+
+void sta_mailbox_walk(STA_Mailbox *mb,
+                      void (*visitor)(STA_MailboxMsg *msg, void *ctx),
+                      void *ctx) {
+    if (!mb || !visitor) return;
+
+    /* Walk from head->next (first real message) through the linked list.
+     * head is the sentinel — its msg is always NULL.
+     * We follow the same path as dequeue but don't modify anything. */
+    STA_MbNode *node = atomic_load_explicit(&mb->head->next,
+                                              memory_order_acquire);
+    while (node != NULL) {
+        if (node->msg) {
+            visitor(node->msg, ctx);
+        }
+        node = atomic_load_explicit(&node->next, memory_order_acquire);
+    }
+}
+
 /* ── Queries ─────────────────────────────────────────────────────────── */
 
 uint32_t sta_mailbox_count(const STA_Mailbox *mb) {

@@ -571,7 +571,34 @@ target_compile_definitions(test_reply_routing PRIVATE
 target_link_libraries(test_reply_routing PRIVATE sta_vm Threads::Threads)
 add_test(NAME reply_routing COMMAND test_reply_routing)
 
-# ── Future soak test (manual, not in default ctest) ──────────────────────
+# ── Phase 2 Epic 7B: Future wait, crash safety, stress ───────────────────
+add_executable(test_future_wait test_future_wait.c)
+target_include_directories(test_future_wait PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_compile_definitions(test_future_wait PRIVATE
+    KERNEL_DIR="${CMAKE_SOURCE_DIR}/kernel")
+target_link_libraries(test_future_wait PRIVATE sta_vm Threads::Threads)
+add_test(NAME future_wait COMMAND test_future_wait)
+
+add_executable(test_future_crash test_future_crash.c)
+target_include_directories(test_future_crash PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_compile_definitions(test_future_crash PRIVATE
+    KERNEL_DIR="${CMAKE_SOURCE_DIR}/kernel")
+target_link_libraries(test_future_crash PRIVATE sta_vm Threads::Threads)
+add_test(NAME future_crash COMMAND test_future_crash)
+set_tests_properties(future_crash PROPERTIES TIMEOUT 30)
+
+add_executable(test_future_integration test_future_integration.c)
+target_include_directories(test_future_integration PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_compile_definitions(test_future_integration PRIVATE
+    KERNEL_DIR="${CMAKE_SOURCE_DIR}/kernel")
+target_link_libraries(test_future_integration PRIVATE sta_vm Threads::Threads)
+add_test(NAME future_integration COMMAND test_future_integration)
+set_tests_properties(future_integration PROPERTIES TIMEOUT 60)
+
+# ── Future soak test (Epic 7A + 7B — now enabled) ────────────────────────
 add_executable(test_future_soak test_future_soak.c)
 target_include_directories(test_future_soak PRIVATE
     ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
@@ -579,7 +606,7 @@ target_compile_definitions(test_future_soak PRIVATE
     KERNEL_DIR="${CMAKE_SOURCE_DIR}/kernel")
 target_link_libraries(test_future_soak PRIVATE sta_vm Threads::Threads)
 add_test(NAME future_soak COMMAND test_future_soak)
-set_tests_properties(future_soak PROPERTIES DISABLED TRUE LABELS "soak")
+set_tests_properties(future_soak PROPERTIES TIMEOUT 60)
 
 # ── Soak test (manual, not in default ctest) ─────────────────────────────
 add_executable(test_soak test_soak.c)

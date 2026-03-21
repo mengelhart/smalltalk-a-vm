@@ -14,7 +14,7 @@ Detailed history of all completed work: `docs/PROJECT_HISTORY.md`
 Phase 1 (Minimal Live Kernel) complete. Phase 1.5 (Class Library Foundation) complete.
 Now: scheduler, supervision, async I/O, headless lifecycle.
 
-**Current epic:** Epic 7A (Futures Infrastructure) complete. Epic 7B next.
+**Current epic:** Epic 7B (Futures Wait, Crash Safety, Stress) complete.
 
 ---
 
@@ -77,7 +77,7 @@ Now: scheduler, supervision, async I/O, headless lifecycle.
 | 6.2 | Lightweight supervisor notifications | ✅ Complete — zero heap allocation on supervisor |
 | 6.3 | Actor refcount & race fixes | ✅ Complete — refcount lifecycle, TSan clean 91/91 |
 | 7A | Futures infrastructure | ✅ Complete — STA_Future, future table, ask/reply routing |
-| 7B | Wait primitive, crash failure, stress | Next |
+| 7B | Wait primitive, crash failure, stress | ✅ Complete — Future class, prim 201, crash→fail, soak 275K rts/s |
 
 ---
 
@@ -87,8 +87,8 @@ Now: scheduler, supervision, async I/O, headless lifecycle.
 |---|---|
 | sizeof(STA_Actor) | 208 bytes (grew from 200 in Epic 7A: +pending_future_id) |
 | Creation cost | 864 bytes (208 struct + 128 nursery + 512 stack + 16 identity) |
-| sizeof(STA_Future) | 40 bytes |
-| sizeof(STA_FutureTable) | 88 bytes |
+| sizeof(STA_Future) | 48 bytes (grew from 40 in Epic 7B: +vm back-pointer) |
+| sizeof(STA_FutureTable) | 96 bytes (grew from 88 in Epic 7B: +vm pointer) |
 | sizeof(STA_Frame) | 56 bytes (was 48, +context field in Epic 1) |
 | BEAM comparison | 2,704 bytes at spawn — Smalltalk/A is ~3.1× more compact |
 
@@ -122,6 +122,7 @@ Resolved items moved to `docs/PROJECT_HISTORY.md`.
 - #244: Catching DNU via on:do: triggers unhandled BlockCannotReturn
 - SmallInteger >> #/ needs Smalltalk fallback for ZeroDivide (prim 10 returns out-of-range, DNU results)
 - `STA_MailboxMsg.args` holds raw C pointers into target heap — stale if heap grows between sends
+- #337: TSan race in sta_scheduler_enqueue — next_runnable written outside wake_mutex
 
 ---
 
@@ -181,7 +182,7 @@ docs/spikes/              ← spike-001 through spike-007
 ---
 
 ## Test count
-94 CTest targets, all passing. ASan clean. TSan clean on multi-threaded tests.
+98 active CTest targets (100 total, 2 disabled), all passing. ASan clean. TSan: 1 pre-existing race in sta_scheduler_enqueue (#337).
 
 ---
 
