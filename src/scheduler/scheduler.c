@@ -161,11 +161,16 @@ static void *worker_thread_main(void *arg) {
 
             worker->current = NULL;
 
-            if (rc == STA_ACTOR_MSG_EXCEPTION) {
-                /* Actor terminated due to unhandled exception.
-                 * handle_actor_exception already set state to TERMINATED,
-                 * notified supervisor, and drained the mailbox. Do not
-                 * re-enqueue or change state. Release queue reference. */
+            /* Check whether another thread (e.g. a supervisor's
+             * terminate_all_children) set state to TERMINATED while
+             * we were processing.  If so, do not re-enqueue. */
+            uint32_t cur = atomic_load_explicit(&actor->state,
+                                                 memory_order_acquire);
+
+            if (rc == STA_ACTOR_MSG_EXCEPTION || cur == STA_ACTOR_TERMINATED) {
+                /* Actor terminated — either by its own exception handler
+                 * or by a supervisor on another thread.  Release the
+                 * scheduler's reference. */
                 sta_actor_release(actor);
             } else if (rc == STA_ACTOR_MSG_PREEMPTED) {
                 /* Re-enqueue: transfer the reference to the deque. */
@@ -181,6 +186,17 @@ static void *worker_thread_main(void *arg) {
                 /* Actor idle — transition to SUSPENDED. */
                 atomic_store_explicit(&actor->state, STA_ACTOR_SUSPENDED,
                                       memory_order_release);
+
+                /* ── Store-buffer fence (GitHub #319) ─────────────────
+                 * We just wrote state=SUSPENDED (release).  The re-check
+                 * below reads the mailbox count.  A matching seq_cst
+                 * fence in sta_actor_send_msg sits between the enqueue
+                 * (count write) and the state CAS (state read).  The
+                 * fence pair guarantees mutual visibility: either the
+                 * sender's CAS sees SUSPENDED (waking us) OR our
+                 * re-check sees count > 0 (we re-enqueue ourselves). */
+                atomic_thread_fence(memory_order_seq_cst);
+
                 /* Re-check: a message may have arrived between the
                  * mailbox check and the state transition. The sender's
                  * CAS SUSPENDED→READY would have failed (state was

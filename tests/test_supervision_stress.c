@@ -178,22 +178,10 @@ static void test_mass_restart(void) {
         sta_mailbox_enqueue(&workers[i]->mailbox, msg);
     }
 
-    sta_scheduler_init(vm, 0);
-    sta_scheduler_start(vm);
-
-    for (int i = 0; i < 100; i++) {
-        atomic_store_explicit(&workers[i]->state, STA_ACTOR_READY,
-                              memory_order_release);
-        sta_scheduler_enqueue(vm->scheduler, workers[i]);
-    }
-
-    /* Wait for all crashes and restarts to propagate.
-     * Each spec remembers its original actor_id (saved in spec_original_ids).
-     * A spec is "restarted" when current_actor is non-NULL and its actor_id
-     * differs from the original. No index gymnastics — we store the original
-     * ID per-spec before starting the scheduler. */
-
-    /* Build a map: for each spec, save the original actor_id. */
+    /* Build a map: for each spec, save the original actor_id BEFORE
+     * the scheduler starts — otherwise workers can crash and restart
+     * before capture, making the "original" ID indistinguishable from
+     * the restarted state. */
     uint32_t spec_original_ids[100];
     STA_ChildSpec *spec_ptrs[100];
     int spec_idx = 0;
@@ -209,6 +197,15 @@ static void test_mass_restart(void) {
         }
     }
     assert(spec_idx == 100);
+
+    sta_scheduler_init(vm, 0);
+    sta_scheduler_start(vm);
+
+    for (int i = 0; i < 100; i++) {
+        atomic_store_explicit(&workers[i]->state, STA_ACTOR_READY,
+                              memory_order_release);
+        sta_scheduler_enqueue(vm->scheduler, workers[i]);
+    }
 
     int restarted = 0;
     for (int attempt = 0; attempt < 100000; attempt++) {
@@ -226,11 +223,6 @@ static void test_mass_restart(void) {
 
     sta_scheduler_stop(vm);
 
-    printf("  PASS: test_mass_restart (restarted=%d/100)\n", restarted);
-    /* KNOWN_FAIL: This assertion is flaky due to a pre-existing scheduler
-     * wakeup race — a supervisor can transition to SUSPENDED while a
-     * childFailed notification is in-flight, and the auto-schedule CAS
-     * misses the window. See GitHub #319. */
     assert(restarted == 100);
 
     sta_scheduler_destroy(vm);
@@ -316,7 +308,6 @@ static void test_simultaneous_crashes(void) {
 
     sta_scheduler_stop(vm);
 
-    printf("  PASS: test_simultaneous_crashes (restarted=%d/10)\n", restarted);
     assert(restarted == 10);
 
     sta_scheduler_destroy(vm);

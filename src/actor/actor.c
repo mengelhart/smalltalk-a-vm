@@ -139,8 +139,10 @@ void sta_actor_terminate(struct STA_Actor *actor) {
         sta_registry_unregister(actor->vm->registry, actor->actor_id);
     }
 
-    /* Drain pending messages. */
-    drain_mailbox(actor);
+    /* Do NOT drain the mailbox here — the actor may still be RUNNING on
+     * another worker thread, and the mailbox is single-consumer.
+     * sta_mailbox_destroy (called from sta_actor_free when refcount
+     * reaches 0) safely drains any remaining messages. */
 
     /* If this actor is a supervisor, terminate children depth-first. */
     if (actor->sup_data) {
@@ -258,6 +260,18 @@ int sta_actor_send_msg(struct STA_VM *vm,
         sta_actor_release(target);
         return rc;  /* STA_ERR_MAILBOX_FULL */
     }
+
+    /* ── Store-buffer fence (GitHub #319) ───────────────────────────
+     * The enqueue above wrote to the mailbox count (release).  The CAS
+     * below reads the actor state.  Without a full fence, both this
+     * thread and the scheduler thread can each read stale values of the
+     * *other* variable (classic Dekker/store-buffer race).  A matching
+     * seq_cst fence sits in the scheduler dispatch loop between the
+     * SUSPENDED store and the mailbox re-check.  Together the two
+     * fences guarantee: either our CAS sees SUSPENDED (and we wake the
+     * actor) OR the scheduler's re-check sees count > 0 (and it
+     * re-enqueues the actor). */
+    atomic_thread_fence(memory_order_seq_cst);
 
     /* Auto-schedule: if the target is idle (CREATED or SUSPENDED) and the
      * scheduler is running, transition to READY and enqueue.

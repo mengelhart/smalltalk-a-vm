@@ -300,7 +300,7 @@ int sta_supervisor_handle_failure(struct STA_Actor *supervisor,
     /* Find the child spec. */
     STA_ChildSpec *spec = find_child_by_id(supervisor->sup_data, failed_id);
     if (!spec) {
-        /* Unknown child or already removed — log and return. */
+        /* Unknown child or already removed. */
         return 0;
     }
 

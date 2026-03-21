@@ -771,10 +771,55 @@ ArrayedCollection, Character, String, Symbol, ByteArray, Array, OrderedCollectio
   - Lightweight notifications: SmallInt actor_id + immutable Symbol reason, zero supervisor heap allocation
 - sizeof(STA_Actor) = 200 bytes (184 + 16 for supervisor/sup_data pointers)
 - Known issues (filed separately):
-  - #316: spec->current_actor pointer race during supervisor restart (non-atomic field, test/diagnostic only)
-  - #317: mailbox destroy races with in-flight enqueue during restart (requires actor reference counting)
+  - ~~#316: spec->current_actor pointer race during supervisor restart~~ — **Resolved** by actor reference counting (see cleanup sprint below)
+  - ~~#317: mailbox destroy races with in-flight enqueue during restart~~ — **Resolved** by actor reference counting (see cleanup sprint below)
 - Tests: 90 CTest targets, all passing
 - Removed: scheduler_spike disabled test target (superseded by production scheduler tests)
+
+### Actor Registry and Safe Send — COMPLETE
+- GitHub: #313 (closed)
+- Branch: phase2/epic-6-supervision (continuation)
+- Merged via PR #315
+- Changes:
+  - `src/actor/registry.h/c` — VM-wide actor_id→STA_Actor* hash map with mutex protection
+  - `src/actor/actor.c` — sta_actor_send_msg resolves targets by registry lookup; zero-copy fast path for immediates/immutables
+  - `src/actor/mailbox_msg.h/c` — args_owned flag for zero-copy sends
+- All sends now go through registry indirection — no raw STA_Actor* pointer chasing
+
+### Lightweight Supervisor Notifications — COMPLETE
+- GitHub: #311, #312 (closed)
+- Merged via PR #318
+- Changes:
+  - Supervisor failure notifications use SmallInt actor_id + immutable Symbol reason
+  - Zero heap allocation on supervisor during childFailed processing
+  - Event system: sta_event_register/unregister with 16-slot callback table
+
+### Actor Reference Counting and Race Fixes — COMPLETE
+- GitHub: #316, #317, #319 (all resolved)
+- Branch: task/actor-refcount
+- New/modified files:
+  - `src/actor/actor.h` — STA_Actor gains `_Atomic uint32_t refcount` (fits in existing padding, sizeof unchanged at 200 bytes)
+  - `src/actor/actor.c` — sta_actor_release (decrement + free on zero), sta_actor_create initializes refcount=1 (registry ref), registry lookup increments refcount, scheduler dispatch holds reference during processing. Removed drain_mailbox from sta_actor_terminate (was racing with active dispatch on other threads — sta_mailbox_destroy handles drain on final free).
+  - `src/actor/registry.c` — sta_registry_lookup returns retained reference (caller must release)
+  - `src/actor/mailbox.c` — Enqueue count upgraded to memory_order_release; sta_mailbox_count upgraded to memory_order_acquire (closes store-buffer visibility gap)
+  - `src/scheduler/scheduler.c` — Holds refcount during dispatch; checks for TERMINATED state after processing (prevents overwriting TERMINATED with READY/SUSPENDED); seq_cst fence after SUSPENDED store closes Dekker-style store-buffer race (#319)
+  - `src/actor/actor.c` — seq_cst fence in sta_actor_send_msg between enqueue and state CAS (matching fence pair with scheduler, closes #319)
+  - `tests/test_actor_refcount.c` — 4 refcount lifecycle tests
+  - `tests/test_supervision_stress.c` — Capture spec IDs before scheduler start; removed KNOWN_FAIL on test_mass_restart (now reliable)
+- Design:
+  - Registry owns the base reference (refcount=1 at creation)
+  - Every lookup (registry, scheduler dequeue) increments refcount
+  - Every release decrements; actor freed when refcount reaches 0
+  - sta_actor_terminate: unregisters + releases registry ref, but struct lives until last holder releases
+  - Terminate-while-running safety: scheduler checks for externally-set TERMINATED after dispatch, skips re-enqueue
+- sizeof(STA_Actor) = 200 bytes (unchanged — refcount fits in padding after existing atomic state field)
+- Density: creation cost = 856 bytes (200 struct + 128 nursery + 512 stack + 16 identity)
+- Sanitizers: TSan clean (91/91), ASan clean (86/86, 5 spike tests excluded due to hardcoded TSan flags)
+- Stability: 20/20 consecutive runs of test_supervision_stress
+- Tests: 91 CTest targets, all passing
+- Known issues (filed during cleanup):
+  - #320: Actor registered before fully initialized — behavior_obj is zero during registration window
+  - #321: restart_child skips scheduling when scheduler is stopping — new child stranded in CREATED
 
 ---
 
