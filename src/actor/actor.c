@@ -91,12 +91,20 @@ struct STA_Actor *sta_actor_create(struct STA_VM *vm,
     actor->supervisor = NULL;
     actor->sup_data = NULL;
 
-    /* Register in the VM-wide actor registry. */
-    if (vm && vm->registry) {
-        sta_registry_register(vm->registry, actor);
-    }
+    /* NOTE: The caller must call sta_registry_register() after finishing
+     * initialization (behavior_obj, supervisor, etc.).  Registering here
+     * would expose a half-initialized actor to concurrent lookups.
+     * See GitHub #320. */
 
     return actor;
+}
+
+void sta_actor_register(struct STA_Actor *actor) {
+    if (!actor || !actor->vm) return;
+    struct STA_VM *vm = actor->vm;
+    if (vm->registry) {
+        sta_registry_register(vm->registry, actor);
+    }
 }
 
 /* Forward declaration — used by sta_actor_terminate. */

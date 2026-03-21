@@ -47,6 +47,7 @@ static void teardown(void) {
 static struct STA_Actor *make_actor(size_t heap_size) {
     struct STA_Actor *a = sta_actor_create(g_vm, heap_size, 512);
     assert(a != NULL);
+    sta_actor_register(a);
     return a;
 }
 
@@ -217,6 +218,7 @@ static void test_send_mailbox_full(void) {
     struct STA_Actor *a = make_actor(4096);
     struct STA_Actor *b = sta_actor_create(g_vm, 4096, 512);
     assert(b != NULL);
+    sta_actor_register(b);
 
     /* Destroy default mailbox and reinit with tiny capacity. */
     sta_mailbox_destroy(&b->mailbox);

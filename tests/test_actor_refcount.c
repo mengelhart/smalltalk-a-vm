@@ -40,6 +40,7 @@ static void test_create_refcount(void) {
 
     struct STA_Actor *a = sta_actor_create(vm, 128, 512);
     assert(a != NULL);
+    sta_actor_register(a);
 
     uint32_t rc = atomic_load_explicit(&a->refcount, memory_order_acquire);
     assert(rc == 1);
@@ -59,6 +60,7 @@ static void test_lookup_increments_refcount(void) {
 
     struct STA_Actor *a = sta_actor_create(vm, 128, 512);
     assert(a != NULL);
+    sta_actor_register(a);
     uint32_t id = a->actor_id;
 
     /* Lookup increments refcount. */
@@ -87,6 +89,7 @@ static void test_terminate_with_held_ref(void) {
 
     struct STA_Actor *a = sta_actor_create(vm, 128, 512);
     assert(a != NULL);
+    sta_actor_register(a);
     uint32_t id = a->actor_id;
 
     /* Acquire a reference (simulating in-flight use). */
@@ -126,6 +129,7 @@ static void test_terminate_frees_when_no_refs(void) {
 
     struct STA_Actor *a = sta_actor_create(vm, 128, 512);
     assert(a != NULL);
+    sta_actor_register(a);
 
     /* Terminate with no extra references → refcount hits 0 → freed. */
     sta_actor_terminate(a);
@@ -158,6 +162,7 @@ static void test_concurrent_lookups(void) {
 
     struct STA_Actor *a = sta_actor_create(vm, 128, 512);
     assert(a != NULL);
+    sta_actor_register(a);
     uint32_t id = a->actor_id;
 
     pthread_t threads[NUM_LOOKUP_THREADS];
@@ -208,6 +213,8 @@ static void test_send_to_terminated(void) {
     struct STA_Actor *sender = sta_actor_create(vm, 128, 512);
     struct STA_Actor *target = sta_actor_create(vm, 128, 512);
     assert(sender && target);
+    sta_actor_register(sender);
+    sta_actor_register(target);
 
     uint32_t target_id = target->actor_id;
 
@@ -241,6 +248,7 @@ static void test_lookup_after_unregister(void) {
 
     struct STA_Actor *a = sta_actor_create(vm, 128, 512);
     assert(a != NULL);
+    sta_actor_register(a);
     uint32_t id = a->actor_id;
 
     /* Manually unregister. */

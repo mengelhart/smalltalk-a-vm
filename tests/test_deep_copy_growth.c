@@ -51,6 +51,7 @@ static void teardown(void) {
 static struct STA_Actor *make_actor(size_t heap_size) {
     struct STA_Actor *a = sta_actor_create(g_vm, heap_size, 512);
     assert(a != NULL);
+    sta_actor_register(a);
     return a;
 }
 

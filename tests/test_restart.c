@@ -72,6 +72,7 @@ static struct STA_Actor *make_supervisor(void) {
     assert(obj_h);
     sup->behavior_obj = (STA_OOP)(uintptr_t)obj_h;
     atomic_store_explicit(&sup->state, STA_ACTOR_SUSPENDED, memory_order_relaxed);
+    sta_actor_register(sup);
     return sup;
 }
 

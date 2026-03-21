@@ -92,6 +92,7 @@ static struct STA_Actor *make_gc_actor(STA_OOP cls, uint32_t inst_vars,
         slots[i] = nil_oop;
     a->behavior_obj = (STA_OOP)(uintptr_t)obj_h;
     a->state = STA_ACTOR_READY;
+    sta_actor_register(a);
     return a;
 }
 

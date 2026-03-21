@@ -119,6 +119,7 @@ static void destroy_test_vm(STA_VM *vm) {
 static struct STA_Actor *create_test_actor(STA_VM *vm, size_t heap_size) {
     struct STA_Actor *actor = sta_actor_create(vm, heap_size, 4096);
     assert(actor);
+    sta_actor_register(actor);
     return actor;
 }
 

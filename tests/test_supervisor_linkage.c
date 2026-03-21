@@ -30,6 +30,7 @@ static void test_supervisor_init(void) {
     setup();
     struct STA_Actor *sup = sta_actor_create(g_vm, 128, 512);
     assert(sup);
+    sta_actor_register(sup);
 
     /* Before init, sup_data should be NULL. */
     assert(sup->sup_data == NULL);
@@ -57,6 +58,7 @@ static void test_add_child(void) {
     setup();
     struct STA_Actor *sup = sta_actor_create(g_vm, 128, 512);
     assert(sup);
+    sta_actor_register(sup);
     sta_supervisor_init(sup, 3, 5);
 
     /* Use a dummy behavior class OOP (nil works for linkage testing). */
@@ -88,6 +90,7 @@ static void test_multiple_children(void) {
     setup();
     struct STA_Actor *sup = sta_actor_create(g_vm, 128, 512);
     assert(sup);
+    sta_actor_register(sup);
     sta_supervisor_init(sup, 3, 5);
 
     STA_OOP behavior = g_vm->specials[SPC_NIL];
@@ -130,6 +133,7 @@ static void test_non_supervisor(void) {
     setup();
     struct STA_Actor *actor = sta_actor_create(g_vm, 128, 512);
     assert(actor);
+    sta_actor_register(actor);
 
     assert(actor->supervisor == NULL);
     assert(actor->sup_data == NULL);
@@ -157,6 +161,7 @@ static void test_destroy_tears_down_children(void) {
     setup();
     struct STA_Actor *sup = sta_actor_create(g_vm, 128, 512);
     assert(sup);
+    sta_actor_register(sup);
     sta_supervisor_init(sup, 3, 5);
 
     STA_OOP behavior = g_vm->specials[SPC_NIL];
@@ -180,6 +185,7 @@ static void test_nested_supervisors(void) {
     /* Grandparent supervisor. */
     struct STA_Actor *gp = sta_actor_create(g_vm, 128, 512);
     assert(gp);
+    sta_actor_register(gp);
     sta_supervisor_init(gp, 3, 5);
 
     STA_OOP behavior = g_vm->specials[SPC_NIL];

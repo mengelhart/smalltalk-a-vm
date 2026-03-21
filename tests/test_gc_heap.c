@@ -98,6 +98,7 @@ static void test_alloc_gc_triggers(void) {
     STA_VM *vm = create_test_vm();
     struct STA_Actor *actor = sta_actor_create(vm, 128, 4096);
     assert(actor);
+    sta_actor_register(actor);
     STA_Heap *heap = &actor->heap;
 
     /* Allocate until the heap is full using plain sta_heap_alloc. */
@@ -135,6 +136,7 @@ static void test_repeated_gc_cycles(void) {
     STA_VM *vm = create_test_vm();
     struct STA_Actor *actor = sta_actor_create(vm, 256, 4096);
     assert(actor);
+    sta_actor_register(actor);
 
     /* Root: an Association that we keep updating. */
     STA_ObjHeader *root = sta_heap_alloc(&actor->heap, STA_CLS_ASSOCIATION, 2);
@@ -180,6 +182,7 @@ static void test_heap_growth(void) {
     /* Start with a tiny 128-byte heap. */
     struct STA_Actor *actor = sta_actor_create(vm, 128, 4096);
     assert(actor);
+    sta_actor_register(actor);
 
     size_t initial_capacity = actor->heap.capacity;
 
@@ -246,6 +249,7 @@ static void test_alloc_gc_no_gc_needed(void) {
     STA_VM *vm = create_test_vm();
     struct STA_Actor *actor = sta_actor_create(vm, 1024, 4096);
     assert(actor);
+    sta_actor_register(actor);
 
     size_t used_before = actor->heap.used;
 
@@ -266,6 +270,7 @@ static void test_heap_min_size(void) {
     STA_VM *vm = create_test_vm();
     struct STA_Actor *actor = sta_actor_create(vm, 128, 4096);
     assert(actor);
+    sta_actor_register(actor);
 
     /* GC on nearly empty heap — should keep 128 byte capacity. */
     STA_ObjHeader *obj = sta_heap_alloc(&actor->heap, STA_CLS_ARRAY, 1);
@@ -286,6 +291,7 @@ static void test_refs_survive_growth(void) {
     STA_VM *vm = create_test_vm();
     struct STA_Actor *actor = sta_actor_create(vm, 128, 4096);
     assert(actor);
+    sta_actor_register(actor);
 
     /* Create an object, root it, then force growth by allocating
      * more live data than fits in 128 bytes. */
@@ -347,6 +353,8 @@ static void test_independent_actor_gc(void) {
     struct STA_Actor *a1 = sta_actor_create(vm, 256, 4096);
     struct STA_Actor *a2 = sta_actor_create(vm, 256, 4096);
     assert(a1 && a2);
+    sta_actor_register(a1);
+    sta_actor_register(a2);
 
     /* Put objects on both heaps. */
     STA_ObjHeader *obj1 = sta_heap_alloc(&a1->heap, STA_CLS_ASSOCIATION, 2);

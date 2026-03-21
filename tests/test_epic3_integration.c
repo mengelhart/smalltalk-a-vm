@@ -79,6 +79,7 @@ static struct STA_Actor *make_actor_with_behavior(STA_OOP cls, uint32_t ivars) {
     a->behavior_obj = (STA_OOP)(uintptr_t)obj;
     a->behavior_class = cls;
     a->state = STA_ACTOR_READY;
+    sta_actor_register(a);
     return a;
 }
 
@@ -109,6 +110,7 @@ static void test_e2e_send_and_process(void) {
 
     struct STA_Actor *a = sta_actor_create(g_vm, 8192, 512);
     assert(a != NULL);
+    sta_actor_register(a);
 
     struct STA_Actor *b = make_actor_with_behavior(assoc_cls, 2);
 
@@ -138,6 +140,7 @@ static void test_e2e_deep_copy_isolation(void) {
     install_method(assoc_cls, "setKey:", "setKey: k key := k", ivars, 2);
 
     struct STA_Actor *a = sta_actor_create(g_vm, 16384, 512);
+    sta_actor_register(a);
     struct STA_Actor *b = make_actor_with_behavior(assoc_cls, 2);
 
     /* Create a mutable array on A's heap. */
@@ -172,7 +175,9 @@ static void test_e2e_deep_copy_isolation(void) {
 
 static void test_bounded_mailbox_flow(void) {
     struct STA_Actor *a = sta_actor_create(g_vm, 4096, 512);
+    sta_actor_register(a);
     struct STA_Actor *b = sta_actor_create(g_vm, 4096, 512);
+    sta_actor_register(b);
 
     /* Reinit B's mailbox with capacity 3. */
     sta_mailbox_destroy(&b->mailbox);
@@ -199,7 +204,9 @@ static void test_bounded_mailbox_flow(void) {
 
 static void test_deep_copy_large_graph(void) {
     struct STA_Actor *src = sta_actor_create(g_vm, 65536, 512);
+    sta_actor_register(src);
     struct STA_Actor *dst = sta_actor_create(g_vm, 65536, 512);
+    sta_actor_register(dst);
 
     /* Build a linked list of 100 arrays. */
     STA_OOP prev = STA_SMALLINT_OOP(0);  /* terminal */
@@ -231,7 +238,9 @@ static void test_deep_copy_large_graph(void) {
 
 static void test_deep_copy_deeply_nested(void) {
     struct STA_Actor *src = sta_actor_create(g_vm, 65536, 512);
+    sta_actor_register(src);
     struct STA_Actor *dst = sta_actor_create(g_vm, 65536, 512);
+    sta_actor_register(dst);
 
     /* 25 levels deep (exceeds the spec's 20+). */
     STA_OOP inner = STA_SMALLINT_OOP(7);
@@ -258,7 +267,9 @@ static void test_deep_copy_deeply_nested(void) {
 
 static void test_deep_copy_multiple_cycles(void) {
     struct STA_Actor *src = sta_actor_create(g_vm, 16384, 512);
+    sta_actor_register(src);
     struct STA_Actor *dst = sta_actor_create(g_vm, 16384, 512);
+    sta_actor_register(dst);
 
     /* Cycle 1: A ↔ B */
     STA_ObjHeader *ah = sta_heap_alloc(&src->heap, STA_CLS_ARRAY, 2);
@@ -302,7 +313,9 @@ static void test_deep_copy_multiple_cycles(void) {
 
 static void test_deep_copy_mixed_graph(void) {
     struct STA_Actor *src = sta_actor_create(g_vm, 16384, 512);
+    sta_actor_register(src);
     struct STA_Actor *dst = sta_actor_create(g_vm, 16384, 512);
+    sta_actor_register(dst);
 
     STA_OOP sym = intern("shared");
     STA_OOP str = make_string(&src->heap, "mutable");
@@ -336,6 +349,7 @@ static void test_three_actor_chain(void) {
     /* Already installed from earlier tests: setValue:, setKey: */
 
     struct STA_Actor *a = sta_actor_create(g_vm, 8192, 512);
+    sta_actor_register(a);
     struct STA_Actor *b = make_actor_with_behavior(assoc_cls, 2);
     struct STA_Actor *c = make_actor_with_behavior(assoc_cls, 2);
 
@@ -364,6 +378,7 @@ static void test_same_message_to_multiple_actors(void) {
     STA_OOP assoc_cls = sta_class_table_get(&g_vm->class_table, STA_CLS_ASSOCIATION);
 
     struct STA_Actor *a = sta_actor_create(g_vm, 8192, 512);
+    sta_actor_register(a);
     struct STA_Actor *b = make_actor_with_behavior(assoc_cls, 2);
     struct STA_Actor *c = make_actor_with_behavior(assoc_cls, 2);
 

@@ -77,7 +77,8 @@ static void test_enqueue_overflow(void) {
     struct STA_Actor *a1 = sta_actor_create(vm, 1024, 512);
     struct STA_Actor *a2 = sta_actor_create(vm, 1024, 512);
     assert(a1 && a2);
-
+    sta_actor_register(a1);
+    sta_actor_register(a2);
 
     STA_Scheduler *sched = vm->scheduler;
 
@@ -102,6 +103,7 @@ static void test_single_actor_dispatch(void) {
     struct STA_Actor *child = sta_actor_create(vm, 4096, 2048);
     assert(child != NULL);
     child->vm = vm;
+    sta_actor_register(child);
 
     /* Set up actor behavior: use Object class (has methods via bootstrap).
      * We'll send #yourself which is prim 42 — returns self. */
@@ -165,6 +167,7 @@ static void test_multiple_messages(void) {
     struct STA_Actor *child = sta_actor_create(vm, 4096, 2048);
     assert(child != NULL);
     child->vm = vm;
+    sta_actor_register(child);
 
     STA_OOP obj_cls = sta_class_table_get(&vm->class_table, STA_CLS_OBJECT);
     STA_ObjHeader *obj_h = sta_heap_alloc(&child->heap, STA_CLS_OBJECT, 0);
@@ -232,6 +235,7 @@ static void test_actor_state_transitions(void) {
 
     struct STA_Actor *child = sta_actor_create(vm, 1024, 512);
     assert(child != NULL);
+    sta_actor_register(child);
 
     /* CREATED at birth. */
     assert(atomic_load(&child->state) == STA_ACTOR_CREATED);
