@@ -18,6 +18,14 @@ macOS Tahoe · Xcode 26.3 · Apple clang 17 · CMake 4.2.3 · arm64 M4 Max
 - CMake is the build system. No Makefiles, no Xcode projects in this repo.
 - Internal headers live beside their .c files in `src/`. See ADR 003.
 - Error shape: `STA_OK` / `STA_ERR_*` integer codes + `sta_vm_last_error()`. See ADR 005.
+- Production `src/` files must not be modified for test diagnosis only.
+
+## Context budget
+This codebase is architecturally complex (bytecode interpreter, actor scheduler,
+GC, lock-free data structures). Session quality degrades noticeably after
+~250K tokens of context usage. Plan work to complete within that budget.
+If approaching 250K, finish the current story, commit, and suggest starting
+a fresh session rather than pushing further.
 
 ## Actor density targets (Phase 1)
 - `STA_Actor` struct: **164 bytes**. Any addition requires a new ADR.
@@ -28,9 +36,9 @@ macOS Tahoe · Xcode 26.3 · Apple clang 17 · CMake 4.2.3 · arm64 M4 Max
   targets are the numbers above. See ADR 014.
 
 ## Current phase
-Phase 1 — Minimal Live Kernel.
-Object memory, interpreter, bootstrap, image save/load.
-Phase 0 spikes are complete — all spike code in `src/` is exploratory reference.
+Phase 2 — Actor Runtime and Headless.
+Scheduler, supervision, async I/O, headless lifecycle.
+Phase 0 spikes and Phase 1 (Minimal Live Kernel) are complete.
 
 ## Key architectural decisions (summary — see ADRs and arch doc for full rationale)
 - VM: C17, no GIL, concurrent data structures from day one
@@ -68,6 +76,11 @@ Run the full test suite:
 3. Only after the new test passes, run the full suite: `ctest --test-dir build --output-on-failure`
 4. Never run the full suite as the first validation of new code.
 
+## Debugging rule
+Strict 3-attempt debug limit. If a test failure or bug is not resolved within
+3 focused attempts, stop and report the situation to the human rather than
+spiraling. Include what was tried and what was observed.
+
 ## File layout
 ```
 include/sta/vm.h        ← public API (only external contract)
@@ -90,19 +103,18 @@ docs/decisions/         ← ADRs 001-014
 Never commit directly to `main`. Every epic and every task gets its own branch.
 
 ```bash
-# Phase 1 epics
-git checkout -b phase1/epic-N-<short-name>
+# Phase 2 epics
+git checkout -b phase2/epic-N-<short-name>
 
 # Non-epic tasks (ADR revisions, tooling, doc fixes)
 git checkout -b task/<short-name>
 ```
 
 Naming conventions:
-- `phase1/epic-N-<short-name>` — one branch per Phase 1 epic (e.g. `phase1/epic-1-object-memory`)
+- `phase2/epic-N-<short-name>` — one branch per Phase 2 epic (e.g. `phase2/epic-7b-futures-wait`)
 - `task/<short-name>` — for any non-epic work (e.g. `task/update-adr-007`)
-- `spike/00N-<short-name>` — Phase 0 only (complete, no new spike branches)
 
-Phase 1 epic branches are merged to `main` via squash-merge PR after review.
+Epic branches are merged to `main` via squash-merge PR after review.
 
 ---
 ## Pacing — pause between stories
@@ -129,7 +141,7 @@ Use the `gh` CLI for all issue operations.
 
 ### Orientation — start here in a new session
 ```bash
-gh issue list --milestone "Phase 1 — Minimal Live Kernel" --state open
+gh issue list --milestone "Phase 2 — Actor Runtime and Headless" --state open
 gh issue list --label "decision-pending"
 ```
 
@@ -151,35 +163,18 @@ gh issue list --label "decision-pending"
 | `Phase 2 — Actor Runtime and Headless` | Scheduler, supervision, async I/O, headless lifecycle |
 | `Phase 3 — Native IDE` | Workspace, browser, inspector, debugger, actor monitor |
 
-### Creating a spike epic and child issues
+### Creating issues
 ```bash
-# Create the epic first — note the issue number it returns
 gh issue create \
-  --title "Phase 0 Spike 00N: <title>" \
-  --body "<summary of goals, key questions, links to spike doc and ADR>" \
-  --label "spike,phase-0" \
-  --milestone "Phase 0 — Architectural Spikes"
-
-# Create child issues referencing the epic number
-gh issue create \
-  --title "<child story title>" \
-  --body "Part of #<epic-number>. <detail>" \
-  --label "spike,phase-0" \
-  --milestone "Phase 0 — Architectural Spikes"
+  --title "<title>" \
+  --body "<detail>" \
+  --label "<labels>" \
+  --milestone "Phase 2 — Actor Runtime and Headless"
 ```
 
-### Creating a decision-pending issue
+### Closing issues
 ```bash
-gh issue create \
-  --title "<open question — exact wording from ADR open questions section>" \
-  --body "From ADR 00N. Must be resolved before <component> is built. See docs/decisions/00N-*.md" \
-  --label "decision-pending,phase-0" \
-  --milestone "Phase 0 — Architectural Spikes"
-```
-
-### Closing issues on spike completion
-```bash
-gh issue close <number> --comment "Spike complete. ADR accepted: docs/decisions/00N-*.md"
+gh issue close <number> --comment "<what was completed>"
 ```
 
 ---
@@ -201,8 +196,9 @@ Then update GitHub issues to reflect current state:
 # Close completed work
 gh issue close <number> --comment "<what was completed>"
 
-# Update in-progress work if session ends mid-spike
+# Update in-progress work if session ends mid-epic
 gh issue edit <number> --body "<updated status and where things stand>"
 ```
 
 Never leave work stranded locally. Push before ending the session.
+
