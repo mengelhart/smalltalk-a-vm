@@ -73,6 +73,7 @@ static struct STA_Actor *make_actor(void) {
     assert(obj_h != NULL);
     a->behavior_obj = (STA_OOP)(uintptr_t)obj_h;
     atomic_store_explicit(&a->state, STA_ACTOR_READY, memory_order_relaxed);
+    sta_actor_register(a);
     return a;
 }
 
@@ -122,6 +123,7 @@ static void test_supervisor_receives_notification(void) {
     assert(sup);
     sta_supervisor_init(sup, 3, 5);
     atomic_store_explicit(&sup->state, STA_ACTOR_SUSPENDED, memory_order_relaxed);
+    sta_actor_register(sup);
 
     /* Create worker with supervisor link. */
     struct STA_Actor *worker = make_actor();
@@ -254,6 +256,7 @@ static void test_scheduler_crash(void) {
     struct STA_Actor *sup = sta_actor_create(g_vm, 16384, 2048);
     assert(sup);
     sta_supervisor_init(sup, 3, 5);
+    sta_actor_register(sup);
     /* Supervisor needs behavior to be schedulable but won't process. */
     sup->behavior_class = obj_cls;
     STA_ObjHeader *sup_obj = sta_heap_alloc(&sup->heap, STA_CLS_OBJECT, 0);

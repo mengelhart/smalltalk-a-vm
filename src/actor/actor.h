@@ -88,10 +88,17 @@ struct STA_Actor {
 /* Create a new actor with the given heap and stack sizes.
  * The actor is allocated via malloc. heap and slab are initialized in-place.
  * Returns NULL on allocation failure.
- * Initial state: STA_ACTOR_CREATED, refcount = 1 (registry ref). */
+ * Initial state: STA_ACTOR_CREATED, refcount = 1.
+ * IMPORTANT: The caller must call sta_actor_register() after finishing
+ * initialization (behavior_obj, supervisor, etc.).  See #320. */
 struct STA_Actor *sta_actor_create(struct STA_VM *vm,
                                    size_t heap_size,
                                    size_t stack_size);
+
+/* Register a fully-initialized actor in the VM's registry.
+ * Must be called after sta_actor_create and after setting behavior_obj,
+ * supervisor, etc.  No-op if vm or registry is NULL. */
+void sta_actor_register(struct STA_Actor *actor);
 
 /* Logically terminate an actor — fixes #316, #317.
  * Sets state to TERMINATED, unregisters from registry (no new lookups),

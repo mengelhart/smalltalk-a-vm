@@ -60,9 +60,6 @@ struct STA_Actor *sta_supervisor_add_child(struct STA_Actor *supervisor,
     child->supervisor = supervisor;
     child->behavior_class = behavior_class;
 
-    /* actor_id is now assigned by sta_actor_create via the VM's
-     * atomic counter, and registered in the VM-wide registry. */
-
     /* Create child spec. */
     STA_ChildSpec *spec = calloc(1, sizeof(STA_ChildSpec));
     if (!spec) {
@@ -79,6 +76,9 @@ struct STA_Actor *sta_supervisor_add_child(struct STA_Actor *supervisor,
 
     supervisor->sup_data->children = spec;
     supervisor->sup_data->child_count++;
+
+    /* Register after initialization is complete (#320). */
+    sta_actor_register(child);
 
     return child;
 }
@@ -126,8 +126,6 @@ static struct STA_Actor *restart_child(struct STA_Actor *supervisor,
     child->supervisor = supervisor;
     child->behavior_class = spec->behavior_class;
 
-    /* actor_id assigned by sta_actor_create via VM's atomic counter. */
-
     /* Allocate a behavior_obj on the child's heap (instance of behavior_class).
      * Need to get the class index from the class table. */
     struct STA_VM *vm = supervisor->vm;
@@ -155,6 +153,9 @@ static struct STA_Actor *restart_child(struct STA_Actor *supervisor,
         }
     }
 
+    /* Register after full initialization (#320). */
+    sta_actor_register(child);
+
     /* Send #initialize to the new actor's mailbox. */
     STA_OOP init_sel = sta_spc_get(SPC_INITIALIZE);
     if (init_sel != 0) {
@@ -165,7 +166,10 @@ static struct STA_Actor *restart_child(struct STA_Actor *supervisor,
         }
     }
 
-    /* Set to CREATED — auto-schedule will transition when appropriate. */
+    /* Set to CREATED — auto-schedule will transition when appropriate.
+     * If the scheduler has already stopped (#321), the actor stays in
+     * CREATED and is cleaned up by supervision tree teardown in
+     * sta_vm_destroy. */
     atomic_store_explicit(&child->state, STA_ACTOR_CREATED, memory_order_relaxed);
 
     /* If scheduler is running, auto-schedule the new actor. */

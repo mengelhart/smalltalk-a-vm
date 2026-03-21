@@ -36,6 +36,7 @@ static struct STA_Actor *make_child_actor(STA_VM *vm) {
     assert(obj_h != NULL);
     child->behavior_class = obj_cls;
     child->behavior_obj = (STA_OOP)(uintptr_t)obj_h;
+    sta_actor_register(child);
     return child;
 }
 
@@ -62,7 +63,9 @@ static void test_deque_basic(void) {
     struct STA_Actor *a1 = sta_actor_create(vm, 128, 128);
     struct STA_Actor *a2 = sta_actor_create(vm, 128, 128);
     struct STA_Actor *a3 = sta_actor_create(vm, 128, 128);
-
+    sta_actor_register(a1);
+    sta_actor_register(a2);
+    sta_actor_register(a3);
 
     /* Push 3. */
     assert(sta_deque_push(&dq, a1) == 0);
@@ -104,12 +107,14 @@ static void test_deque_capacity(void) {
     struct STA_Actor *actors[STA_DEQUE_CAPACITY];
     for (uint32_t i = 0; i < STA_DEQUE_CAPACITY; i++) {
         actors[i] = sta_actor_create(vm, 128, 128);
+        sta_actor_register(actors[i]);
         assert(sta_deque_push(&dq, actors[i]) == 0);
     }
     assert(sta_deque_size(&dq) == (int)STA_DEQUE_CAPACITY);
 
     /* Overflow. */
     struct STA_Actor *extra = sta_actor_create(vm, 128, 128);
+    sta_actor_register(extra);
     assert(sta_deque_push(&dq, extra) == -1);
 
     /* Drain. */

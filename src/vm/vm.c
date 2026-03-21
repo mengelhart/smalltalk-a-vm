@@ -221,7 +221,6 @@ STA_VM* sta_vm_create(const STA_VMConfig* config) {
             goto fail;
         }
         rsup->behavior_obj = (STA_OOP)(uintptr_t)obj_h;
-        /* actor_id assigned and registered by sta_actor_create. */
         rsup->supervisor = NULL;  /* root of the tree */
         atomic_store_explicit(&rsup->state, STA_ACTOR_SUSPENDED,
                               memory_order_relaxed);
@@ -231,6 +230,9 @@ STA_VM* sta_vm_create(const STA_VMConfig* config) {
             set_error(vm, "failed to init root supervisor data");
             goto fail;
         }
+
+        /* Register after full initialization (#320). */
+        sta_actor_register(rsup);
 
         vm->root_supervisor = rsup;
     }

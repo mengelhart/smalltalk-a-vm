@@ -320,6 +320,7 @@ static void test_actor_mailbox_wired(void) {
 
     struct STA_Actor *actor = sta_actor_create(vm, 1024, 512);
     assert(actor != NULL);
+    sta_actor_register(actor);
 
     /* The mailbox should be initialized with default capacity. */
     assert(sta_mailbox_is_empty(&actor->mailbox));
