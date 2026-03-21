@@ -541,6 +541,13 @@ target_include_directories(test_actor_registry PRIVATE
 target_link_libraries(test_actor_registry PRIVATE sta_vm)
 add_test(NAME actor_registry COMMAND test_actor_registry)
 
+# ── Actor Reference Counting (fixes #316, #317) ────────────────────────
+add_executable(test_actor_refcount test_actor_refcount.c)
+target_include_directories(test_actor_refcount PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(test_actor_refcount PRIVATE sta_vm Threads::Threads)
+add_test(NAME actor_refcount COMMAND test_actor_refcount)
+
 # ── Spike 002: MPSC mailbox — TSan correctness gate ───────────────────────
 find_package(Threads REQUIRED)
 

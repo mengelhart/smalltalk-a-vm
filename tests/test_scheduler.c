@@ -86,8 +86,8 @@ static void test_enqueue_overflow(void) {
     sta_scheduler_enqueue(sched, a2);
     assert(sched->overflow_head != NULL);
 
-    sta_actor_destroy(a1);
-    sta_actor_destroy(a2);
+    sta_actor_terminate(a1);
+    sta_actor_terminate(a2);
     sta_scheduler_destroy(vm);
     sta_vm_destroy(vm);
     printf("  PASS: enqueue_overflow\n");
@@ -152,7 +152,7 @@ static void test_single_actor_dispatch(void) {
     assert(state == STA_ACTOR_SUSPENDED);
 
     sta_scheduler_destroy(vm);
-    sta_actor_destroy(child);
+    sta_actor_terminate(child);
     sta_vm_destroy(vm);
     printf("  PASS: single_actor_dispatch\n");
 }
@@ -204,7 +204,7 @@ static void test_multiple_messages(void) {
     assert(vm->scheduler->workers[0].messages_processed >= 5);
 
     sta_scheduler_destroy(vm);
-    sta_actor_destroy(child);
+    sta_actor_terminate(child);
     sta_vm_destroy(vm);
     printf("  PASS: multiple_messages\n");
 }
@@ -252,7 +252,7 @@ static void test_actor_state_transitions(void) {
     atomic_store(&child->state, STA_ACTOR_TERMINATED);
     assert(atomic_load(&child->state) == STA_ACTOR_TERMINATED);
 
-    sta_actor_destroy(child);
+    sta_actor_terminate(child);
     sta_vm_destroy(vm);
     printf("  PASS: actor_state_transitions\n");
 }

@@ -141,7 +141,7 @@ static void test_gc_count_increments(void) {
 
     assert(actor->gc_stats.gc_count > count_after_first);
 
-    sta_actor_destroy(actor);
+    sta_actor_terminate(actor);
     teardown();
 }
 
@@ -186,7 +186,7 @@ static void test_gc_bytes_reclaimed(void) {
            actor->gc_stats.gc_bytes_reclaimed,
            actor->gc_stats.gc_count);
 
-    sta_actor_destroy(actor);
+    sta_actor_terminate(actor);
     teardown();
 }
 
@@ -230,7 +230,7 @@ static void test_gc_bytes_survived(void) {
            actor->gc_stats.gc_bytes_survived,
            actor->heap.capacity);
 
-    sta_actor_destroy(actor);
+    sta_actor_terminate(actor);
     teardown();
 }
 
@@ -273,7 +273,7 @@ static void test_heap_growth_reflected(void) {
     /* Verify GC ran at least once. */
     assert(actor->gc_stats.gc_count >= 1);
 
-    sta_actor_destroy(actor);
+    sta_actor_terminate(actor);
     teardown();
 }
 
@@ -324,7 +324,7 @@ static void test_stats_accumulate(void) {
            actor->gc_stats.gc_bytes_reclaimed,
            actor->gc_stats.gc_bytes_survived);
 
-    sta_actor_destroy(actor);
+    sta_actor_terminate(actor);
     teardown();
 }
 
@@ -342,7 +342,7 @@ static void test_stats_zero_initialized(void) {
     assert(actor->gc_stats.gc_bytes_reclaimed == 0);
     assert(actor->gc_stats.gc_bytes_survived == 0);
 
-    sta_actor_destroy(actor);
+    sta_actor_terminate(actor);
     teardown();
 }
 

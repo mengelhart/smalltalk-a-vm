@@ -157,7 +157,7 @@ static void test_gc_basic_survive(void) {
     assert(new_slots[0] == STA_SMALLINT_OOP(42));
     assert(new_slots[1] == STA_SMALLINT_OOP(99));
 
-    sta_actor_destroy(actor);
+    sta_actor_terminate(actor);
     destroy_test_vm(vm);
 }
 
@@ -198,7 +198,7 @@ static void test_gc_dead_not_copied(void) {
     assert(sta_payload(new_live)[0] == STA_SMALLINT_OOP(1));
     assert(sta_payload(new_live)[1] == STA_SMALLINT_OOP(2));
 
-    sta_actor_destroy(actor);
+    sta_actor_terminate(actor);
     destroy_test_vm(vm);
 }
 
@@ -245,7 +245,7 @@ static void test_gc_forwarding(void) {
     /* A's slot[1] should be unchanged SmallInt. */
     assert(sta_payload(new_a)[1] == STA_SMALLINT_OOP(999));
 
-    sta_actor_destroy(actor);
+    sta_actor_terminate(actor);
     destroy_test_vm(vm);
 }
 
@@ -278,7 +278,7 @@ static void test_gc_immediates_unchanged(void) {
     assert(sta_payload(new_arr)[2] == true_oop);
     assert(sta_payload(new_arr)[3] == STA_CHAR_OOP('A'));
 
-    sta_actor_destroy(actor);
+    sta_actor_terminate(actor);
     destroy_test_vm(vm);
 }
 
@@ -309,7 +309,7 @@ static void test_gc_immutable_refs(void) {
     /* The symbol reference should be unchanged (immutable, not copied). */
     assert(sta_payload(new_arr)[0] == sym_oop);
 
-    sta_actor_destroy(actor);
+    sta_actor_terminate(actor);
     destroy_test_vm(vm);
 }
 
@@ -345,7 +345,7 @@ static void test_gc_zero_payload(void) {
     /* Must have moved (different address). */
     assert(new_id != id_obj);
 
-    sta_actor_destroy(actor);
+    sta_actor_terminate(actor);
     destroy_test_vm(vm);
 }
 
@@ -384,7 +384,7 @@ static void test_gc_bytes_measurement(void) {
     assert(sta_payload(new_live)[0] == STA_SMALLINT_OOP(1));
     assert(sta_payload(new_live)[1] == STA_SMALLINT_OOP(2));
 
-    sta_actor_destroy(actor);
+    sta_actor_terminate(actor);
     destroy_test_vm(vm);
 }
 
@@ -417,7 +417,7 @@ static void test_gc_circular_ref(void) {
     /* B[0] should point back to new A. */
     assert(sta_payload(new_b)[0] == actor->behavior_obj);
 
-    sta_actor_destroy(actor);
+    sta_actor_terminate(actor);
     destroy_test_vm(vm);
 }
 
@@ -446,7 +446,7 @@ static void test_gc_byte_object(void) {
     assert(new_str->reserved == 3);
     assert(memcmp(sta_payload(new_str), "hello\0\0\0", 8) == 0);
 
-    sta_actor_destroy(actor);
+    sta_actor_terminate(actor);
     destroy_test_vm(vm);
 }
 
@@ -495,7 +495,7 @@ static void test_gc_multiple_cycles(void) {
     assert(sta_payload(new_obj2)[0] == STA_SMALLINT_OOP(3));
     assert(sta_payload(new_obj2)[1] == STA_SMALLINT_OOP(4));
 
-    sta_actor_destroy(actor);
+    sta_actor_terminate(actor);
     destroy_test_vm(vm);
 }
 
@@ -518,7 +518,7 @@ static void test_gc_flags_cleared(void) {
     /* gc_flags should be WHITE (0) — no forwarded flag, no color bits. */
     assert(new_obj->gc_flags == STA_GC_WHITE);
 
-    sta_actor_destroy(actor);
+    sta_actor_terminate(actor);
     destroy_test_vm(vm);
 }
 
@@ -533,7 +533,7 @@ static void test_gc_empty_heap(void) {
     assert(rc == 0);
     assert(actor->heap.used == 0);
 
-    sta_actor_destroy(actor);
+    sta_actor_terminate(actor);
     destroy_test_vm(vm);
 }
 

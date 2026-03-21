@@ -62,6 +62,9 @@ struct STA_Actor *sta_actor_create(struct STA_VM *vm,
     /* Lifecycle state. */
     atomic_store_explicit(&actor->state, STA_ACTOR_CREATED, memory_order_relaxed);
 
+    /* Reference count: 1 = the registry holds the owning reference. */
+    atomic_store_explicit(&actor->refcount, 1, memory_order_relaxed);
+
     /* Assign a unique actor_id from the VM's atomic counter.
      * If no VM is provided (test-only path), leave at 0. */
     if (vm) {
@@ -96,24 +99,13 @@ struct STA_Actor *sta_actor_create(struct STA_VM *vm,
     return actor;
 }
 
-void sta_actor_destroy(struct STA_Actor *actor) {
-    if (!actor) return;
+/* Forward declaration — used by sta_actor_terminate. */
+static void drain_mailbox(struct STA_Actor *actor);
 
-    /* Unregister from the VM-wide actor registry before freeing. */
-    if (actor->vm && actor->vm->registry) {
-        sta_registry_unregister(actor->vm->registry, actor->actor_id);
-    }
+/* ── Internal: free actor resources (called when refcount reaches 0) ── */
 
-    /* If this actor is a supervisor, destroy children depth-first. */
+static void sta_actor_free(struct STA_Actor *actor) {
     if (actor->sup_data) {
-        STA_ChildSpec *spec = actor->sup_data->children;
-        while (spec) {
-            if (spec->current_actor) {
-                sta_actor_destroy(spec->current_actor);
-                spec->current_actor = NULL;
-            }
-            spec = spec->next;
-        }
         sta_supervisor_data_destroy(actor->sup_data);
         actor->sup_data = NULL;
     }
@@ -121,9 +113,52 @@ void sta_actor_destroy(struct STA_Actor *actor) {
     sta_mailbox_destroy(&actor->mailbox);
     sta_stack_slab_deinit(&actor->slab);
     sta_heap_deinit(&actor->heap);
-
-    atomic_store_explicit(&actor->state, STA_ACTOR_TERMINATED, memory_order_relaxed);
     free(actor);
+}
+
+void sta_actor_release(struct STA_Actor *actor) {
+    if (!actor) return;
+
+    uint32_t prev = atomic_fetch_sub_explicit(&actor->refcount, 1,
+                                               memory_order_acq_rel);
+    if (prev == 1) {
+        /* refcount reached 0 — we are the last reference. Free. */
+        sta_actor_free(actor);
+    }
+}
+
+void sta_actor_terminate(struct STA_Actor *actor) {
+    if (!actor) return;
+
+    /* Set state to TERMINATED. */
+    atomic_store_explicit(&actor->state, STA_ACTOR_TERMINATED,
+                          memory_order_release);
+
+    /* Unregister from the VM-wide actor registry — no new lookups. */
+    if (actor->vm && actor->vm->registry) {
+        sta_registry_unregister(actor->vm->registry, actor->actor_id);
+    }
+
+    /* Do NOT drain the mailbox here — the actor may still be RUNNING on
+     * another worker thread, and the mailbox is single-consumer.
+     * sta_mailbox_destroy (called from sta_actor_free when refcount
+     * reaches 0) safely drains any remaining messages. */
+
+    /* If this actor is a supervisor, terminate children depth-first. */
+    if (actor->sup_data) {
+        STA_ChildSpec *spec = actor->sup_data->children;
+        while (spec) {
+            if (spec->current_actor) {
+                sta_actor_terminate(spec->current_actor);
+                spec->current_actor = NULL;
+            }
+            spec = spec->next;
+        }
+    }
+
+    /* Release the registry's owning reference.
+     * If no other thread holds a reference, this frees the actor. */
+    sta_actor_release(actor);
 }
 
 /* ── Messaging ───────────────────────────────────────────────────────── */
@@ -135,16 +170,18 @@ int sta_actor_send_msg(struct STA_VM *vm,
                        STA_OOP *args, uint8_t nargs)
 {
     /* Resolve target by ID through the actor registry.
-     *
-     * TOCTOU note: the registry lock is released after lookup, so the
-     * returned pointer could theoretically become stale if a supervisor
-     * destroys the target between the lookup and the enqueue below.
-     * This is acceptable: supervision restarts are single-threaded
-     * within the supervisor's message processing, and the window
-     * between lookup and enqueue is microseconds. A full fix would
-     * require reference counting or hazard pointers on actors. */
+     * Registry lookup atomically increments refcount under the mutex,
+     * so the target cannot be freed while we hold the reference. */
     struct STA_Actor *target = sta_registry_lookup(vm->registry, target_id);
     if (!target) return STA_ERR_ACTOR_DEAD;
+
+    /* Check if the actor was terminated after lookup but before we use it.
+     * Refcount keeps it alive but it's logically dead. */
+    uint32_t tstate = atomic_load_explicit(&target->state, memory_order_acquire);
+    if (tstate == STA_ACTOR_TERMINATED) {
+        sta_actor_release(target);
+        return STA_ERR_ACTOR_DEAD;
+    }
 
     /* Deep copy each argument from sender's heap to target's heap. */
     STA_OOP *copied_args = NULL;
@@ -157,14 +194,14 @@ int sta_actor_send_msg(struct STA_VM *vm,
          * Estimate the total bytes needed for deep copying all args.
          * If zero, all args are immediates or immutables — no target
          * heap access needed. Use a malloc'd array instead, avoiding
-         * the TOCTOU window where the target could be destroyed. */
+         * the heap allocation entirely. */
         size_t estimated = sta_deep_copy_estimate_roots(args, nargs, ct);
 
         if (estimated == 0) {
             /* Zero-copy fast path: all args are immediates/immutables.
              * Allocate the args array via malloc (not on any heap). */
             copied_args = malloc((size_t)nargs * sizeof(STA_OOP));
-            if (!copied_args) return -1;
+            if (!copied_args) { sta_actor_release(target); return -1; }
             args_mallocd = true;
             for (uint8_t i = 0; i < nargs; i++)
                 copied_args[i] = args[i];
@@ -180,14 +217,16 @@ int sta_actor_send_msg(struct STA_VM *vm,
             if (estimated > free_space) {
                 size_t needed = target->heap.used + estimated;
                 size_t new_cap = needed + needed / 2;
-                if (sta_heap_grow(&target->heap, new_cap) != 0)
+                if (sta_heap_grow(&target->heap, new_cap) != 0) {
+                    sta_actor_release(target);
                     return -1;
+                }
             }
 
             STA_ObjHeader *args_h = sta_heap_alloc_gc(vm, target,
                                                         STA_CLS_ARRAY,
                                                         (uint32_t)nargs);
-            if (!args_h) return -1;
+            if (!args_h) { sta_actor_release(target); return -1; }
             copied_args = sta_payload(args_h);
 
             for (uint8_t i = 0; i < nargs; i++) {
@@ -196,6 +235,7 @@ int sta_actor_send_msg(struct STA_VM *vm,
                                                    vm, target, ct);
                 if (copied_args[i] == 0 && args[i] != 0 &&
                     !STA_IS_IMMEDIATE(args[i])) {
+                    sta_actor_release(target);
                     return -1;
                 }
             }
@@ -207,6 +247,7 @@ int sta_actor_send_msg(struct STA_VM *vm,
         selector, copied_args, nargs, sender->actor_id);
     if (!msg) {
         if (args_mallocd) free(copied_args);
+        sta_actor_release(target);
         return -1;
     }
     msg->args_owned = args_mallocd;
@@ -216,12 +257,26 @@ int sta_actor_send_msg(struct STA_VM *vm,
     if (rc != 0) {
         /* Mailbox full — destroy the envelope (frees args if owned). */
         sta_mailbox_msg_destroy(msg);
+        sta_actor_release(target);
         return rc;  /* STA_ERR_MAILBOX_FULL */
     }
 
+    /* ── Store-buffer fence (GitHub #319) ───────────────────────────
+     * The enqueue above wrote to the mailbox count (release).  The CAS
+     * below reads the actor state.  Without a full fence, both this
+     * thread and the scheduler thread can each read stale values of the
+     * *other* variable (classic Dekker/store-buffer race).  A matching
+     * seq_cst fence sits in the scheduler dispatch loop between the
+     * SUSPENDED store and the mailbox re-check.  Together the two
+     * fences guarantee: either our CAS sees SUSPENDED (and we wake the
+     * actor) OR the scheduler's re-check sees count > 0 (and it
+     * re-enqueues the actor). */
+    atomic_thread_fence(memory_order_seq_cst);
+
     /* Auto-schedule: if the target is idle (CREATED or SUSPENDED) and the
      * scheduler is running, transition to READY and enqueue.
-     * Uses CAS to ensure only one sender wins the race. */
+     * Uses CAS to ensure only one sender wins the race.
+     * sta_scheduler_enqueue increments refcount for the queue. */
     STA_Scheduler *sched = target->vm ? target->vm->scheduler : NULL;
     if (sched && atomic_load_explicit(&sched->running, memory_order_acquire)) {
         uint32_t expected = STA_ACTOR_SUSPENDED;
@@ -239,6 +294,8 @@ int sta_actor_send_msg(struct STA_VM *vm,
         }
     }
 
+    /* Release the reference acquired by registry lookup. */
+    sta_actor_release(target);
     return 0;
 }
 

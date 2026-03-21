@@ -62,11 +62,13 @@ int sta_mailbox_enqueue(STA_Mailbox *mb, STA_MailboxMsg *msg) {
     if (!node) return -1;
 
     /* Capacity check — drop-newest overflow policy.
-     * memory_order_relaxed is sufficient; the list's release/acquire on
-     * the next pointer provides the necessary happens-before for the message. */
+     * The count increment uses release so that the scheduler's re-check
+     * (acquire load on count) sees enqueued messages.  Together with the
+     * seq_cst fences in sta_actor_send_msg and the scheduler dispatch
+     * loop, this closes the store-buffer race in GitHub #319. */
     if (mb->capacity > 0) {
         uint32_t prev = atomic_fetch_add_explicit(&mb->count, 1u,
-                                                   memory_order_relaxed);
+                                                   memory_order_release);
         if (prev >= mb->capacity) {
             atomic_fetch_sub_explicit(&mb->count, 1u, memory_order_relaxed);
             free(node);
@@ -115,7 +117,7 @@ STA_MailboxMsg *sta_mailbox_dequeue(STA_Mailbox *mb) {
 uint32_t sta_mailbox_count(const STA_Mailbox *mb) {
     return atomic_load_explicit(
         (_Atomic uint32_t *)&mb->count,
-        memory_order_relaxed);
+        memory_order_acquire);
 }
 
 bool sta_mailbox_is_empty(const STA_Mailbox *mb) {

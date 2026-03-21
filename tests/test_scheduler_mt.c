@@ -101,8 +101,8 @@ static void test_two_threads_two_actors(void) {
     assert(total_msgs >= 10);
 
     sta_scheduler_destroy(vm);
-    sta_actor_destroy(a1);
-    sta_actor_destroy(a2);
+    sta_actor_terminate(a1);
+    sta_actor_terminate(a2);
     sta_vm_destroy(vm);
     printf("  PASS: two_threads_two_actors (total_msgs=%llu)\n",
            (unsigned long long)total_msgs);
@@ -148,7 +148,7 @@ static void test_four_actors_two_threads(void) {
 
     sta_scheduler_destroy(vm);
     for (int i = 0; i < 4; i++) {
-        sta_actor_destroy(actors[i]);
+        sta_actor_terminate(actors[i]);
     }
     sta_vm_destroy(vm);
     printf("  PASS: four_actors_two_threads\n");
@@ -188,7 +188,7 @@ static void test_actor_exclusivity(void) {
     assert(sta_mailbox_is_empty(&child->mailbox));
 
     sta_scheduler_destroy(vm);
-    sta_actor_destroy(child);
+    sta_actor_terminate(child);
     sta_vm_destroy(vm);
     printf("  PASS: actor_exclusivity\n");
 }
@@ -249,7 +249,7 @@ static void test_concurrent_sends(void) {
 
     sta_scheduler_destroy(vm);
     for (int i = 0; i < 3; i++) {
-        sta_actor_destroy(actors[i]);
+        sta_actor_terminate(actors[i]);
     }
     sta_vm_destroy(vm);
     printf("  PASS: concurrent_sends\n");
@@ -335,8 +335,8 @@ static void test_preemption_multithread(void) {
            (unsigned long long)total_runs);
 
     sta_scheduler_destroy(vm);
-    sta_actor_destroy(a1);
-    sta_actor_destroy(a2);
+    sta_actor_terminate(a1);
+    sta_actor_terminate(a2);
     sta_vm_destroy(vm);
 }
 

@@ -132,7 +132,7 @@ static void test_gc_during_basicNew(void) {
     int rc = sta_actor_process_one(g_vm, actor);
     assert(rc == STA_ACTOR_MSG_PROCESSED);
 
-    sta_actor_destroy(actor);
+    sta_actor_terminate(actor);
     teardown();
 }
 
@@ -160,7 +160,7 @@ static void test_gc_during_shallowCopy(void) {
     int rc = sta_actor_process_one(g_vm, actor);
     assert(rc == STA_ACTOR_MSG_PROCESSED);
 
-    sta_actor_destroy(actor);
+    sta_actor_terminate(actor);
     teardown();
 }
 
@@ -229,8 +229,8 @@ static void test_gc_during_deep_copy(void) {
     STA_ObjHeader *last_h = (STA_ObjHeader *)(uintptr_t)last;
     assert(sta_payload(last_h)[0] == STA_SMALLINT_OOP(40));
 
-    sta_actor_destroy(sender);
-    sta_actor_destroy(receiver);
+    sta_actor_terminate(sender);
+    sta_actor_terminate(receiver);
     teardown();
 }
 
@@ -262,7 +262,7 @@ static void test_gc_during_closure(void) {
     int rc = sta_actor_process_one(g_vm, actor);
     assert(rc == STA_ACTOR_MSG_PROCESSED);
 
-    sta_actor_destroy(actor);
+    sta_actor_terminate(actor);
     teardown();
 }
 
@@ -305,7 +305,7 @@ static void test_gc_sustained_pressure(void) {
     assert(arr->class_index == STA_CLS_ARRAY);
     assert(arr->size == 3);
 
-    sta_actor_destroy(actor);
+    sta_actor_terminate(actor);
     teardown();
 }
 

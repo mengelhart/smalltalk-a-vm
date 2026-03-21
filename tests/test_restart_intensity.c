@@ -161,7 +161,7 @@ static void test_rapid_crash_exceeds_intensity(void) {
 
     sta_supervisor_data_destroy(sup->sup_data);
     sup->sup_data = NULL;
-    sta_actor_destroy(sup);
+    sta_actor_terminate(sup);
     teardown();
     printf("  PASS: test_rapid_crash_exceeds_intensity\n");
 }
@@ -194,7 +194,7 @@ static void test_window_reset(void) {
     /* Verify restart_count is 1 (reset + 1 increment). */
     assert(sup->sup_data->restart_count == 1);
 
-    sta_actor_destroy(sup);
+    sta_actor_terminate(sup);
     teardown();
     printf("  PASS: test_window_reset\n");
 }
@@ -244,7 +244,7 @@ static void test_multiple_children_intensity(void) {
 
     sta_supervisor_data_destroy(sup->sup_data);
     sup->sup_data = NULL;
-    sta_actor_destroy(sup);
+    sta_actor_terminate(sup);
     teardown();
     printf("  PASS: test_multiple_children_intensity\n");
 }
@@ -285,7 +285,7 @@ static void test_all_children_terminated(void) {
 
     sta_supervisor_data_destroy(sup->sup_data);
     sup->sup_data = NULL;
-    sta_actor_destroy(sup);
+    sta_actor_terminate(sup);
     teardown();
     printf("  PASS: test_all_children_terminated\n");
 }
@@ -339,7 +339,7 @@ static void test_intensity_escalation_to_grandparent(void) {
     assert(gp_spec->current_actor != NULL);
     assert(gp_spec->current_actor->actor_id != old_parent_id);
 
-    sta_actor_destroy(gp);
+    sta_actor_terminate(gp);
     teardown();
     printf("  PASS: test_intensity_escalation_to_grandparent\n");
 }
@@ -366,7 +366,7 @@ static void test_supervisor_terminated_on_exceeded(void) {
 
     sta_supervisor_data_destroy(sup->sup_data);
     sup->sup_data = NULL;
-    sta_actor_destroy(sup);
+    sta_actor_terminate(sup);
     teardown();
     printf("  PASS: test_supervisor_terminated_on_exceeded\n");
 }
@@ -390,7 +390,7 @@ static void test_max_restarts_zero(void) {
 
     sta_supervisor_data_destroy(sup->sup_data);
     sup->sup_data = NULL;
-    sta_actor_destroy(sup);
+    sta_actor_terminate(sup);
     teardown();
     printf("  PASS: test_max_restarts_zero\n");
 }
@@ -435,7 +435,7 @@ static void test_stop_escalate_no_counter_increment(void) {
     uint32_t state = atomic_load_explicit(&sup->state, memory_order_acquire);
     assert(state != STA_ACTOR_TERMINATED);
 
-    sta_actor_destroy(gp);
+    sta_actor_terminate(gp);
     teardown();
     printf("  PASS: test_stop_escalate_no_counter_increment\n");
 }

@@ -44,7 +44,7 @@ static void test_register_and_lookup(void) {
     struct STA_Actor *found = sta_registry_lookup(reg, 10);
     assert(found == a);
 
-    sta_actor_destroy(a);
+    sta_actor_terminate(a);
     sta_registry_destroy(reg);
 }
 
@@ -68,7 +68,7 @@ static void test_register_unregister_lookup(void) {
     sta_registry_unregister(reg, 20);
     assert(sta_registry_lookup(reg, 20) == NULL);
 
-    sta_actor_destroy(a);
+    sta_actor_terminate(a);
     sta_registry_destroy(reg);
 }
 
@@ -87,7 +87,7 @@ static void test_register_100_actors(void) {
     }
 
     for (int i = 0; i < 100; i++)
-        sta_actor_destroy(actors[i]);
+        sta_actor_terminate(actors[i]);
     sta_registry_destroy(reg);
 }
 
@@ -113,7 +113,7 @@ static void test_unregister_every_other(void) {
     }
 
     for (int i = 0; i < 100; i++)
-        sta_actor_destroy(actors[i]);
+        sta_actor_terminate(actors[i]);
     sta_registry_destroy(reg);
 }
 
@@ -135,7 +135,7 @@ static void test_growth_beyond_load_factor(void) {
     }
 
     for (int i = 0; i < 50; i++)
-        sta_actor_destroy(actors[i]);
+        sta_actor_terminate(actors[i]);
     sta_registry_destroy(reg);
 }
 
@@ -154,8 +154,8 @@ static void test_duplicate_id_updates_pointer(void) {
     /* Count should be 1, not 2. */
     assert(sta_registry_count(reg) == 1);
 
-    sta_actor_destroy(a);
-    sta_actor_destroy(b);
+    sta_actor_terminate(a);
+    sta_actor_terminate(b);
     sta_registry_destroy(reg);
 }
 
@@ -181,9 +181,9 @@ static void test_count(void) {
     sta_registry_unregister(reg, 3);
     assert(sta_registry_count(reg) == 0);
 
-    sta_actor_destroy(a);
-    sta_actor_destroy(b);
-    sta_actor_destroy(c);
+    sta_actor_terminate(a);
+    sta_actor_terminate(b);
+    sta_actor_terminate(c);
     sta_registry_destroy(reg);
 }
 

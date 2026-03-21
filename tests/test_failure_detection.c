@@ -103,7 +103,7 @@ static void test_crash_terminates_actor(void) {
     uint32_t state = atomic_load_explicit(&a->state, memory_order_relaxed);
     assert(state == STA_ACTOR_TERMINATED);
 
-    sta_actor_destroy(a);
+    sta_actor_terminate(a);
     teardown();
     printf("  PASS: test_crash_terminates_actor\n");
 }
@@ -164,8 +164,8 @@ static void test_supervisor_receives_notification(void) {
     sta_mailbox_msg_destroy(notif);
     /* Detach worker from sup to avoid double-free. */
     worker->supervisor = NULL;
-    sta_actor_destroy(worker);
-    sta_actor_destroy(sup);
+    sta_actor_terminate(worker);
+    sta_actor_terminate(sup);
     teardown();
     printf("  PASS: test_supervisor_receives_notification\n");
 }
@@ -206,7 +206,7 @@ static void test_drain_remaining_messages(void) {
     /* Remaining messages should be drained. */
     assert(sta_mailbox_is_empty(&a->mailbox));
 
-    sta_actor_destroy(a);
+    sta_actor_terminate(a);
     teardown();
     printf("  PASS: test_drain_remaining_messages\n");
 }
@@ -236,7 +236,7 @@ static void test_null_supervisor_no_crash(void) {
     uint32_t state = atomic_load_explicit(&a->state, memory_order_relaxed);
     assert(state == STA_ACTOR_TERMINATED);
 
-    sta_actor_destroy(a);
+    sta_actor_terminate(a);
     teardown();
     printf("  PASS: test_null_supervisor_no_crash\n");
 }
@@ -296,8 +296,8 @@ static void test_scheduler_crash(void) {
 
     sta_scheduler_destroy(g_vm);
     worker->supervisor = NULL;
-    sta_actor_destroy(worker);
-    sta_actor_destroy(sup);
+    sta_actor_terminate(worker);
+    sta_actor_terminate(sup);
     teardown();
     printf("  PASS: test_scheduler_crash\n");
 }

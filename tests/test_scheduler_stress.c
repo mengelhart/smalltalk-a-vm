@@ -128,7 +128,7 @@ static void test_10_actors_100_messages(void) {
            (unsigned long long)total_msgs, (unsigned long long)total_runs);
 
     sta_scheduler_destroy(vm);
-    for (int i = 0; i < 10; i++) sta_actor_destroy(actors[i]);
+    for (int i = 0; i < 10; i++) sta_actor_terminate(actors[i]);
     sta_vm_destroy(vm);
 }
 
@@ -174,7 +174,7 @@ static void test_preemption_stress(void) {
            (unsigned long long)total_runs, (unsigned long long)total_steals);
 
     sta_scheduler_destroy(vm);
-    for (int i = 0; i < 4; i++) sta_actor_destroy(actors[i]);
+    for (int i = 0; i < 4; i++) sta_actor_terminate(actors[i]);
     sta_vm_destroy(vm);
 }
 
@@ -201,7 +201,7 @@ static void test_fifo_ordering_under_load(void) {
     assert(count == 50);
     assert(sta_mailbox_is_empty(&child->mailbox));
 
-    sta_actor_destroy(child);
+    sta_actor_terminate(child);
     sta_vm_destroy(vm);
     printf("  PASS: fifo_ordering_under_load\n");
 }
@@ -258,7 +258,7 @@ static void test_stop_with_pending_messages(void) {
 
     /* No crash, no hang. Some messages may be unprocessed. */
     sta_scheduler_destroy(vm);
-    sta_actor_destroy(child);
+    sta_actor_terminate(child);
     sta_vm_destroy(vm);
     printf("  PASS: stop_with_pending_messages\n");
 }
@@ -300,7 +300,7 @@ static void test_state_machine(void) {
 
     sta_scheduler_stop(vm);
     sta_scheduler_destroy(vm);
-    sta_actor_destroy(child);
+    sta_actor_terminate(child);
     sta_vm_destroy(vm);
     printf("  PASS: state_machine\n");
 }
@@ -345,7 +345,7 @@ static void test_many_actors_few_messages(void) {
     #undef N_ACTORS
 
     sta_scheduler_destroy(vm);
-    for (int i = 0; i < 50; i++) sta_actor_destroy(actors[i]);
+    for (int i = 0; i < 50; i++) sta_actor_terminate(actors[i]);
     sta_vm_destroy(vm);
 }
 
@@ -391,7 +391,7 @@ static void test_steal_verification(void) {
            active_workers, (unsigned long long)total_steals);
 
     sta_scheduler_destroy(vm);
-    for (int i = 0; i < 8; i++) sta_actor_destroy(actors[i]);
+    for (int i = 0; i < 8; i++) sta_actor_terminate(actors[i]);
     sta_vm_destroy(vm);
 }
 
@@ -432,7 +432,7 @@ static void test_eval_under_stress(void) {
     assert(done);
 
     sta_scheduler_destroy(vm);
-    for (int i = 0; i < 10; i++) sta_actor_destroy(actors[i]);
+    for (int i = 0; i < 10; i++) sta_actor_terminate(actors[i]);
     sta_vm_destroy(vm);
     printf("  PASS: eval_under_stress\n");
 }
@@ -501,7 +501,7 @@ static void test_full_core_stress(void) {
            active_workers);
 
     sta_scheduler_destroy(vm);
-    for (int i = 0; i < FC_ACTORS; i++) sta_actor_destroy(actors[i]);
+    for (int i = 0; i < FC_ACTORS; i++) sta_actor_terminate(actors[i]);
     free(actors);
     sta_vm_destroy(vm);
 
@@ -570,7 +570,7 @@ static void test_heavy_contention(void) {
            active_workers);
 
     sta_scheduler_destroy(vm);
-    for (int i = 0; i < HC_ACTORS; i++) sta_actor_destroy(actors[i]);
+    for (int i = 0; i < HC_ACTORS; i++) sta_actor_terminate(actors[i]);
     free(actors);
     sta_vm_destroy(vm);
 

@@ -12,6 +12,7 @@
 
 #include "scheduler/scheduler.h"
 #include "actor/actor.h"
+#include "actor/registry.h"
 #include "actor/supervisor.h"
 #include "actor/mailbox.h"
 #include "actor/mailbox_msg.h"
@@ -100,11 +101,14 @@ static bool wait_actors_done(struct STA_Actor **actors, int count,
     return false;
 }
 
-/* Wait until a supervisor's child spec has a non-NULL current_actor
- * (i.e., the restart has completed). */
+/* Wait until a supervisor's child spec has a non-zero current_actor_id
+ * (i.e., the restart has completed). Uses the atomic ID, not the raw
+ * pointer, for thread safety (#316). */
 static bool wait_child_restarted(STA_ChildSpec *spec, int timeout_ms) {
     for (int i = 0; i < timeout_ms; i++) {
-        if (spec->current_actor != NULL) return true;
+        uint32_t id = atomic_load_explicit(&spec->current_actor_id,
+                                             memory_order_acquire);
+        if (id != 0) return true;
         usleep(1000);
     }
     return false;
@@ -174,6 +178,26 @@ static void test_mass_restart(void) {
         sta_mailbox_enqueue(&workers[i]->mailbox, msg);
     }
 
+    /* Build a map: for each spec, save the original actor_id BEFORE
+     * the scheduler starts — otherwise workers can crash and restart
+     * before capture, making the "original" ID indistinguishable from
+     * the restarted state. */
+    uint32_t spec_original_ids[100];
+    STA_ChildSpec *spec_ptrs[100];
+    int spec_idx = 0;
+    for (int s = 0; s < 10; s++) {
+        STA_ChildSpec *spec = supervisors[s]->sup_data->children;
+        while (spec) {
+            assert(spec_idx < 100);
+            spec_ptrs[spec_idx] = spec;
+            spec_original_ids[spec_idx] = atomic_load_explicit(
+                &spec->current_actor_id, memory_order_acquire);
+            spec_idx++;
+            spec = spec->next;
+        }
+    }
+    assert(spec_idx == 100);
+
     sta_scheduler_init(vm, 0);
     sta_scheduler_start(vm);
 
@@ -183,30 +207,8 @@ static void test_mass_restart(void) {
         sta_scheduler_enqueue(vm->scheduler, workers[i]);
     }
 
-    /* Wait for all crashes and restarts to propagate.
-     * Each spec remembers its original actor_id (saved in spec_original_ids).
-     * A spec is "restarted" when current_actor is non-NULL and its actor_id
-     * differs from the original. No index gymnastics — we store the original
-     * ID per-spec before starting the scheduler. */
-
-    /* Build a map: for each spec, save the original actor_id. */
-    uint32_t spec_original_ids[100];
-    STA_ChildSpec *spec_ptrs[100];
-    int spec_idx = 0;
-    for (int s = 0; s < 10; s++) {
-        STA_ChildSpec *spec = supervisors[s]->sup_data->children;
-        while (spec) {
-            assert(spec_idx < 100);
-            spec_ptrs[spec_idx] = spec;
-            spec_original_ids[spec_idx] = spec->current_actor->actor_id;
-            spec_idx++;
-            spec = spec->next;
-        }
-    }
-    assert(spec_idx == 100);
-
     int restarted = 0;
-    for (int attempt = 0; attempt < 50000; attempt++) {
+    for (int attempt = 0; attempt < 100000; attempt++) {
         restarted = 0;
         for (int i = 0; i < 100; i++) {
             uint32_t cur_id = atomic_load_explicit(
@@ -221,7 +223,6 @@ static void test_mass_restart(void) {
 
     sta_scheduler_stop(vm);
 
-    printf("  PASS: test_mass_restart (restarted=%d/100)\n", restarted);
     assert(restarted == 100);
 
     sta_scheduler_destroy(vm);
@@ -266,7 +267,8 @@ static void test_simultaneous_crashes(void) {
     STA_ChildSpec *sp = sup->sup_data->children;
     while (sp) {
         sim_specs[si] = sp;
-        sim_orig_ids[si] = sp->current_actor->actor_id;
+        sim_orig_ids[si] = atomic_load_explicit(
+            &sp->current_actor_id, memory_order_acquire);
         si++;
         sp = sp->next;
     }
@@ -306,7 +308,6 @@ static void test_simultaneous_crashes(void) {
 
     sta_scheduler_stop(vm);
 
-    printf("  PASS: test_simultaneous_crashes (restarted=%d/10)\n", restarted);
     assert(restarted == 10);
 
     sta_scheduler_destroy(vm);
@@ -383,10 +384,13 @@ static void test_restart_and_gc(void) {
     assert(did_restart);
 
     /* Send allocOk to the restarted actor — verify it allocates and GCs ok.
-     * Stop scheduler first so we can safely read spec->current_actor. */
+     * Stop scheduler first, then use registry lookup (refcounted). */
     sta_scheduler_stop(vm);
 
-    struct STA_Actor *new_child = spec->current_actor;
+    uint32_t new_id = atomic_load_explicit(&spec->current_actor_id,
+                                             memory_order_acquire);
+    struct STA_Actor *new_child = sta_registry_lookup(vm->registry, new_id);
+    assert(new_child != NULL);
     STA_OOP alloc_sel = intern(vm, "allocOk");
     {
         STA_MailboxMsg *msg = sta_mailbox_msg_create(alloc_sel, NULL, 0, 0);
@@ -405,9 +409,12 @@ static void test_restart_and_gc(void) {
     sta_scheduler_stop(vm);
 
     /* Verify the restarted actor processed without crashing. */
-    uint32_t final_state = atomic_load_explicit(&spec->current_actor->state,
+    uint32_t final_state = atomic_load_explicit(&new_child->state,
                                                   memory_order_acquire);
     assert(final_state == STA_ACTOR_SUSPENDED);
+
+    /* Release the reference acquired by registry lookup. */
+    sta_actor_release(new_child);
 
     printf("  PASS: test_restart_and_gc\n");
 

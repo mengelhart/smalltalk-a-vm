@@ -170,7 +170,7 @@ static void test_eval_concurrent_with_actors(void) {
     assert(sta_mailbox_is_empty(&child->mailbox));
 
     sta_scheduler_destroy(vm);
-    sta_actor_destroy(child);
+    sta_actor_terminate(child);
     sta_vm_destroy(vm);
     printf("  PASS: eval_concurrent_with_actors\n");
 }
@@ -226,7 +226,7 @@ static void test_multiple_evals_with_scheduler(void) {
 
     sta_scheduler_destroy(vm);
     for (int i = 0; i < 3; i++) {
-        sta_actor_destroy(actors[i]);
+        sta_actor_terminate(actors[i]);
     }
     sta_vm_destroy(vm);
     printf("  PASS: multiple_evals_with_scheduler\n");

@@ -8,6 +8,7 @@
 #include "scheduler.h"
 #include "actor/actor.h"
 #include "vm/vm_state.h"
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -46,6 +47,10 @@ void sta_scheduler_enqueue(STA_Scheduler *sched, struct STA_Actor *actor) {
      * Pragmatic solution: keep a global overflow queue (mutex-protected)
      * for external pushes. Workers check it when their deque is empty.
      */
+
+    /* Acquire a reference for the queue — protects the actor from being
+     * freed between enqueue and the worker's dequeue+dispatch. */
+    atomic_fetch_add_explicit(&actor->refcount, 1, memory_order_relaxed);
 
     /* Push to global overflow queue. Workers drain this. */
     actor->next_runnable = NULL;
@@ -135,11 +140,15 @@ static void *worker_thread_main(void *arg) {
         }
 
         if (actor) {
-            /* READY → RUNNING (atomic claim). */
+            /* READY → RUNNING (atomic claim). If the CAS fails the actor
+             * may have been terminated by a supervisor — skip it. */
             uint32_t expected = STA_ACTOR_READY;
             if (!atomic_compare_exchange_strong_explicit(
                     &actor->state, &expected, STA_ACTOR_RUNNING,
                     memory_order_acq_rel, memory_order_relaxed)) {
+                /* Release the queue's reference — we are not going to
+                 * process this actor. */
+                sta_actor_release(actor);
                 continue;
             }
             worker->current = actor;
@@ -152,22 +161,59 @@ static void *worker_thread_main(void *arg) {
 
             worker->current = NULL;
 
-            if (rc == STA_ACTOR_MSG_EXCEPTION) {
-                /* Actor terminated due to unhandled exception.
-                 * handle_actor_exception already set state to TERMINATED,
-                 * notified supervisor, and drained the mailbox. Do not
-                 * re-enqueue or change state. */
+            /* Check whether another thread (e.g. a supervisor's
+             * terminate_all_children) set state to TERMINATED while
+             * we were processing.  If so, do not re-enqueue. */
+            uint32_t cur = atomic_load_explicit(&actor->state,
+                                                 memory_order_acquire);
+
+            if (rc == STA_ACTOR_MSG_EXCEPTION || cur == STA_ACTOR_TERMINATED) {
+                /* Actor terminated — either by its own exception handler
+                 * or by a supervisor on another thread.  Release the
+                 * scheduler's reference. */
+                sta_actor_release(actor);
             } else if (rc == STA_ACTOR_MSG_PREEMPTED) {
+                /* Re-enqueue: transfer the reference to the deque. */
                 atomic_store_explicit(&actor->state, STA_ACTOR_READY,
                                       memory_order_release);
                 sta_deque_push(&worker->deque, actor);
             } else if (!sta_mailbox_is_empty(&actor->mailbox)) {
+                /* More messages: transfer the reference to the deque. */
                 atomic_store_explicit(&actor->state, STA_ACTOR_READY,
                                       memory_order_release);
                 sta_deque_push(&worker->deque, actor);
             } else {
+                /* Actor idle — transition to SUSPENDED. */
                 atomic_store_explicit(&actor->state, STA_ACTOR_SUSPENDED,
                                       memory_order_release);
+
+                /* ── Store-buffer fence (GitHub #319) ─────────────────
+                 * We just wrote state=SUSPENDED (release).  The re-check
+                 * below reads the mailbox count.  A matching seq_cst
+                 * fence in sta_actor_send_msg sits between the enqueue
+                 * (count write) and the state CAS (state read).  The
+                 * fence pair guarantees mutual visibility: either the
+                 * sender's CAS sees SUSPENDED (waking us) OR our
+                 * re-check sees count > 0 (we re-enqueue ourselves). */
+                atomic_thread_fence(memory_order_seq_cst);
+
+                /* Re-check: a message may have arrived between the
+                 * mailbox check and the state transition. The sender's
+                 * CAS SUSPENDED→READY would have failed (state was
+                 * RUNNING), leaving the message stranded. */
+                if (!sta_mailbox_is_empty(&actor->mailbox)) {
+                    uint32_t exp = STA_ACTOR_SUSPENDED;
+                    if (atomic_compare_exchange_strong_explicit(
+                            &actor->state, &exp, STA_ACTOR_READY,
+                            memory_order_acq_rel, memory_order_relaxed)) {
+                        sta_deque_push(&worker->deque, actor);
+                    } else {
+                        /* Another thread already woke it — release. */
+                        sta_actor_release(actor);
+                    }
+                } else {
+                    sta_actor_release(actor);
+                }
             }
         } else {
             /* No work anywhere — sleep. */
@@ -262,6 +308,26 @@ void sta_scheduler_stop(struct STA_VM *vm) {
 
     for (uint32_t i = 0; i < sched->num_threads; i++) {
         pthread_join(sched->workers[i].thread, NULL);
+    }
+
+    /* Drain residual actors from all deques — release their queue refs. */
+    for (uint32_t i = 0; i < sched->num_threads; i++) {
+        struct STA_Actor *a;
+        while ((a = sta_deque_pop(&sched->workers[i].deque)) != NULL) {
+            sta_actor_release(a);
+        }
+    }
+
+    /* Drain overflow queue. */
+    pthread_mutex_lock(&sched->wake_mutex);
+    struct STA_Actor *list = sched->overflow_head;
+    sched->overflow_head = NULL;
+    pthread_mutex_unlock(&sched->wake_mutex);
+    while (list) {
+        struct STA_Actor *next = list->next_runnable;
+        list->next_runnable = NULL;
+        sta_actor_release(list);
+        list = next;
     }
 }
 

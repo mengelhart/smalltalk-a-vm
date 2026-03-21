@@ -86,9 +86,9 @@ static void test_deque_basic(void) {
     assert(sta_deque_pop(&dq) == NULL);
     assert(sta_deque_steal(&dq) == NULL);
 
-    sta_actor_destroy(a1);
-    sta_actor_destroy(a2);
-    sta_actor_destroy(a3);
+    sta_actor_terminate(a1);
+    sta_actor_terminate(a2);
+    sta_actor_terminate(a3);
     sta_vm_destroy(vm);
     printf("  PASS: deque_basic\n");
 }
@@ -119,9 +119,9 @@ static void test_deque_capacity(void) {
     assert(sta_deque_pop(&dq) == NULL);
 
     for (uint32_t i = 0; i < STA_DEQUE_CAPACITY; i++) {
-        sta_actor_destroy(actors[i]);
+        sta_actor_terminate(actors[i]);
     }
-    sta_actor_destroy(extra);
+    sta_actor_terminate(extra);
     sta_vm_destroy(vm);
     printf("  PASS: deque_capacity\n");
 }
@@ -174,7 +174,7 @@ static void test_imbalanced_stealing(void) {
 
     sta_scheduler_destroy(vm);
     for (int i = 0; i < 6; i++) {
-        sta_actor_destroy(actors[i]);
+        sta_actor_terminate(actors[i]);
     }
     sta_vm_destroy(vm);
 }
@@ -245,8 +245,8 @@ static void test_long_running_stealing(void) {
            (unsigned long long)total_steals);
 
     sta_scheduler_destroy(vm);
-    sta_actor_destroy(a1);
-    sta_actor_destroy(a2);
+    sta_actor_terminate(a1);
+    sta_actor_terminate(a2);
     sta_vm_destroy(vm);
 }
 

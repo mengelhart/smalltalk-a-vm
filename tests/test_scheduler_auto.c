@@ -86,7 +86,7 @@ static void test_send_auto_schedules_created(void) {
     assert(state == STA_ACTOR_SUSPENDED);
 
     sta_scheduler_destroy(vm);
-    sta_actor_destroy(child);
+    sta_actor_terminate(child);
     sta_vm_destroy(vm);
     printf("  PASS: send_auto_schedules_created\n");
 }
@@ -122,7 +122,7 @@ static void test_send_wakes_suspended(void) {
 
     sta_scheduler_stop(vm);
     sta_scheduler_destroy(vm);
-    sta_actor_destroy(child);
+    sta_actor_terminate(child);
     sta_vm_destroy(vm);
     printf("  PASS: send_wakes_suspended\n");
 }
@@ -155,7 +155,7 @@ static void test_multiple_msgs_auto_scheduled(void) {
     assert(vm->scheduler->workers[0].messages_processed >= 10);
 
     sta_scheduler_destroy(vm);
-    sta_actor_destroy(child);
+    sta_actor_terminate(child);
     sta_vm_destroy(vm);
     printf("  PASS: multiple_msgs_auto_scheduled\n");
 }
@@ -183,7 +183,7 @@ static void test_no_schedule_without_scheduler(void) {
     assert(proc_rc == 1);
     assert(sta_mailbox_is_empty(&child->mailbox));
 
-    sta_actor_destroy(child);
+    sta_actor_terminate(child);
     sta_vm_destroy(vm);
     printf("  PASS: no_schedule_without_scheduler\n");
 }
@@ -218,7 +218,7 @@ static void test_running_actor_not_reenqueued(void) {
 
     atomic_store(&vm->scheduler->running, false);
     sta_scheduler_destroy(vm);
-    sta_actor_destroy(child);
+    sta_actor_terminate(child);
     sta_vm_destroy(vm);
     printf("  PASS: running_actor_not_reenqueued\n");
 }
@@ -256,8 +256,8 @@ static void test_two_actors_reactive(void) {
     assert(atomic_load(&a2->state) == STA_ACTOR_SUSPENDED);
 
     sta_scheduler_destroy(vm);
-    sta_actor_destroy(a1);
-    sta_actor_destroy(a2);
+    sta_actor_terminate(a1);
+    sta_actor_terminate(a2);
     sta_vm_destroy(vm);
     printf("  PASS: two_actors_reactive\n");
 }
@@ -288,7 +288,7 @@ static void test_fifo_ordering(void) {
     assert(sta_actor_process_one(vm, child) == 1);
     assert(sta_actor_process_one(vm, child) == 0);  /* empty */
 
-    sta_actor_destroy(child);
+    sta_actor_terminate(child);
     sta_vm_destroy(vm);
     printf("  PASS: fifo_ordering\n");
 }

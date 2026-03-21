@@ -66,7 +66,7 @@ struct STA_Actor *sta_supervisor_add_child(struct STA_Actor *supervisor,
     /* Create child spec. */
     STA_ChildSpec *spec = calloc(1, sizeof(STA_ChildSpec));
     if (!spec) {
-        sta_actor_destroy(child);
+        sta_actor_terminate(child);
         return NULL;
     }
 
@@ -196,7 +196,7 @@ static void terminate_all_children(struct STA_Actor *supervisor) {
     while (spec) {
         if (spec->current_actor) {
             spec->current_actor->supervisor = NULL;
-            sta_actor_destroy(spec->current_actor);
+            sta_actor_terminate(spec->current_actor);
             spec->current_actor = NULL;
             atomic_store_explicit(&spec->current_actor_id, 0,
                                   memory_order_release);
@@ -300,7 +300,7 @@ int sta_supervisor_handle_failure(struct STA_Actor *supervisor,
     /* Find the child spec. */
     STA_ChildSpec *spec = find_child_by_id(supervisor->sup_data, failed_id);
     if (!spec) {
-        /* Unknown child or already removed — log and return. */
+        /* Unknown child or already removed. */
         return 0;
     }
 
@@ -326,7 +326,7 @@ int sta_supervisor_handle_failure(struct STA_Actor *supervisor,
         /* Destroy old actor. */
         if (old_actor) {
             old_actor->supervisor = NULL;  /* Prevent recursive teardown */
-            sta_actor_destroy(old_actor);
+            sta_actor_terminate(old_actor);
         }
 
         /* Create new actor of same class. */
@@ -347,7 +347,7 @@ int sta_supervisor_handle_failure(struct STA_Actor *supervisor,
         /* Permanently stop — do not restart. Slot remains with NULL actor. */
         if (old_actor) {
             old_actor->supervisor = NULL;
-            sta_actor_destroy(old_actor);
+            sta_actor_terminate(old_actor);
         }
         spec->current_actor = NULL;
         spec->current_actor_id = 0;
@@ -357,7 +357,7 @@ int sta_supervisor_handle_failure(struct STA_Actor *supervisor,
         /* Destroy the failed child. */
         if (old_actor) {
             old_actor->supervisor = NULL;
-            sta_actor_destroy(old_actor);
+            sta_actor_terminate(old_actor);
         }
         spec->current_actor = NULL;
         spec->current_actor_id = 0;

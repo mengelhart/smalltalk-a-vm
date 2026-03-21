@@ -335,7 +335,7 @@ static void test_actor_mailbox_wired(void) {
     assert(STA_SMALLINT_VAL(out->selector) == 42);
     sta_mailbox_msg_destroy(out);
 
-    sta_actor_destroy(actor);
+    sta_actor_terminate(actor);
     free(vm);
 }
 
