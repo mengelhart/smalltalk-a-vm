@@ -86,7 +86,7 @@ scaling, async I/O, headless runtime, multi-actor image.
 | Epic | Topic | Status |
 |---|---|---|
 | 0 | Mailbox GC root fix (#341) | ✅ Complete — queued OOPs traced by GC and growth |
-| 1 | Mutable closures | Planned |
+| 1 | Closure integration + kernel cleanup | ✅ Complete — idiomatic patterns validated, workarounds reverted |
 | 2 | Class library scaling spike | Planned |
 | 3 | Async I/O (libuv) | Planned |
 | 4 | Headless runtime | Planned |
@@ -181,7 +181,7 @@ docs/spikes/              ← spike-001 through spike-007
 ---
 
 ## Test count
-103 active CTest targets (105 total, 2 disabled), all passing. TSan clean.
+104 active CTest targets (106 total, 2 disabled), all passing. TSan clean.
 ASan clean except pre-existing #348 (test_crash_under_ask_load).
 
 ---

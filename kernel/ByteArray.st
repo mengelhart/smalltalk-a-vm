@@ -5,25 +5,20 @@
 
 !ByteArray methodsFor: 'printing'!
 printString
-    | sz result i |
-    sz := self size.
+    | result |
     result := '#['.
-    i := 1.
-    [i <= sz] whileTrue: [
+    1 to: self size do: [:i |
         i > 1 ifTrue: [result := result, ' '].
-        result := result, (self at: i) printString.
-        i := i + 1].
+        result := result, (self at: i) printString].
     result := result, ']'.
     ^ result! !
 
 !ByteArray methodsFor: 'converting'!
 asString
     "Interpret bytes as character codes and return a String."
-    | sz result i |
+    | result sz |
     sz := self size.
     result := String new: sz.
-    i := 1.
-    [i <= sz] whileTrue: [
-        result at: i put: (Character value: (self at: i)).
-        i := i + 1].
+    1 to: sz do: [:i |
+        result at: i put: (Character value: (self at: i))].
     ^ result! !

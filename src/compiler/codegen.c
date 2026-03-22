@@ -143,10 +143,20 @@ static uint16_t lb_add_unique(LitBuf *l, STA_OOP oop) {
  * The analysis is conservative: if ANY non-inline block references a temp
  * from an outer scope, the method needs a context. */
 
+/* Block-scope variable entry: a param/temp introduced by an enclosing block. */
+typedef struct {
+    const char *name;
+    int         depth;   /* block nesting depth where this var is local */
+} BlockScopeEntry;
+
 typedef struct {
     /* Names of temps/args visible at method level. */
     const char **method_temps;
     uint32_t     method_temp_count;
+    /* Block-scope variables (params/temps of enclosing non-inline blocks). */
+    BlockScopeEntry *block_scope;
+    uint32_t         block_scope_count;
+    uint32_t         block_scope_capacity;
     bool         has_captures;     /* set true if any block captures */
     bool         has_nlr;          /* set true if any block has ^ */
 } CaptureAnalysis;
@@ -164,6 +174,31 @@ static void capture_walk_stmts(CaptureAnalysis *ca, STA_AstNode **stmts,
 static bool is_method_temp(CaptureAnalysis *ca, const char *name) {
     for (uint32_t i = 0; i < ca->method_temp_count; i++) {
         if (strcmp(ca->method_temps[i], name) == 0) return true;
+    }
+    return false;
+}
+
+/* Push a block-scope variable (param or temp of an enclosing block). */
+static void ca_push_scope(CaptureAnalysis *ca, const char *name, int depth) {
+    if (ca->block_scope_count == ca->block_scope_capacity) {
+        uint32_t cap = ca->block_scope_capacity ? ca->block_scope_capacity * 2 : 16;
+        BlockScopeEntry *p = realloc(ca->block_scope, cap * sizeof(BlockScopeEntry));
+        if (!p) return;
+        ca->block_scope = p;
+        ca->block_scope_capacity = cap;
+    }
+    ca->block_scope[ca->block_scope_count].name = name;
+    ca->block_scope[ca->block_scope_count].depth = depth;
+    ca->block_scope_count++;
+}
+
+/* Check if name is a block-scope variable from an enclosing (shallower) depth. */
+static bool is_enclosing_block_var(CaptureAnalysis *ca, const char *name,
+                                    int current_depth) {
+    for (uint32_t i = 0; i < ca->block_scope_count; i++) {
+        if (ca->block_scope[i].depth < current_depth &&
+            strcmp(ca->block_scope[i].name, name) == 0)
+            return true;
     }
     return false;
 }
@@ -205,6 +240,11 @@ static void capture_walk_with_parent(CaptureAnalysis *ca, STA_AstNode *node,
          * method-level temp, it's a capture. */
         if (block_depth > 0 && is_method_temp(ca, node->as.variable.name))
             ca->has_captures = true;
+        /* If this variable belongs to an enclosing block (not the current
+         * block), it's a block-in-block capture requiring a context. */
+        if (block_depth > 0 &&
+            is_enclosing_block_var(ca, node->as.variable.name, block_depth))
+            ca->has_captures = true;
         break;
 
     case NODE_ASSIGN:
@@ -242,9 +282,18 @@ static void capture_walk_with_parent(CaptureAnalysis *ca, STA_AstNode *node,
             capture_walk_stmts(ca, node->as.method.body,
                                node->as.method.body_count, block_depth);
         } else {
-            /* Real closure block — increase depth. */
+            /* Real closure block — increase depth.
+             * Push this block's params/temps into block scope so nested
+             * blocks can detect captures from enclosing blocks. */
+            int new_depth = block_depth + 1;
+            uint32_t saved_scope_count = ca->block_scope_count;
+            for (uint32_t i = 0; i < node->as.method.arg_count; i++)
+                ca_push_scope(ca, node->as.method.args[i], new_depth);
+            for (uint32_t i = 0; i < node->as.method.temp_count; i++)
+                ca_push_scope(ca, node->as.method.temps[i], new_depth);
             capture_walk_stmts(ca, node->as.method.body,
-                               node->as.method.body_count, block_depth + 1);
+                               node->as.method.body_count, new_depth);
+            ca->block_scope_count = saved_scope_count;
         }
         break;
 
@@ -262,6 +311,9 @@ static void capture_walk(CaptureAnalysis *ca, STA_AstNode *node,
 static void analyze_captures(CaptureAnalysis *ca, STA_AstNode *method_ast) {
     ca->has_captures = false;
     ca->has_nlr = false;
+    ca->block_scope = NULL;
+    ca->block_scope_count = 0;
+    ca->block_scope_capacity = 0;
 
     /* Build the list of method-level temp names (args + declared temps). */
     uint32_t total = method_ast->as.method.arg_count + method_ast->as.method.temp_count;
@@ -285,6 +337,8 @@ static void analyze_captures(CaptureAnalysis *ca, STA_AstNode *method_ast) {
 
     free(names);
     ca->method_temps = NULL;
+    free(ca->block_scope);
+    ca->block_scope = NULL;
 }
 
 /* ── Codegen state ───────────────────────────────────────────────────── */

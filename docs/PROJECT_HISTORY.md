@@ -822,3 +822,73 @@ to from-space addresses that have been freed.
 
 **Tests:** 9 new (6+3), 103 active CTest targets (105 total, 2 disabled). TSan clean.
 ASan clean except pre-existing #348.
+
+---
+
+### Phase 2.5 Epic 1: Closure Integration + Kernel Cleanup
+
+**Branch:** `phase25/epic-1-closure-cleanup`
+
+Validates Phase 2 closures against real Smalltalk iteration patterns. Fixes compiler capture
+analysis for nested block capture, fixes block activation receiver bug, and reverts Phase 1.5
+whileTrue: workarounds to idiomatic closure-based patterns.
+
+**Story 1.5: Fix nested block capture in compiler**
+- Compiler capture analysis (`codegen.c`) only detected method-level temp captures. When a
+  nested block referenced an enclosing block's parameter (e.g. `[:n | [:x | x + n]]`), the
+  method didn't get a heap-allocated context, so `n` read as 0.
+- Extended `CaptureAnalysis` with block scope tracking — `BlockScopeEntry` tracks each
+  block's params/temps with their nesting depth. `is_enclosing_block_var()` detects captures
+  across block boundaries. ~40 lines added to capture analysis.
+- No `OP_PUSH_OUTER_TEMP` needed — all blocks share the method's context via `OP_CLOSURE_COPY`,
+  so `OP_PUSH_TEMP` reads the correct slot.
+
+**Story 1.5b: Fix block activation receiver**
+- Pre-existing interpreter bug: block activation at `interpreter.c:368` used `frame->receiver`
+  (caller's receiver) instead of `bc_slots[BC_SLOT_RECEIVER]` (closure's captured receiver).
+  Never triggered before because closures were always invoked from within the same method.
+- Exposed when kernel methods pass closures to `to:do:` — the block's `self` became the
+  SmallInteger receiver of `to:do:` instead of the collection.
+- One-line fix: `frame->receiver` → `bc_slots[BC_SLOT_RECEIVER]`.
+
+**Story 2: Revert kernel .st workarounds**
+
+22 methods across 5 kernel .st files reverted from whileTrue: workarounds to idiomatic
+closure-based patterns:
+
+| File | Methods converted | Methods left as whileTrue: (legitimate) |
+|---|---|---|
+| `SequenceableCollection.st` | do:, collect:, select: (2 loops), reject: (2 loops), inject:into:, with:collect:, asArray, copyFrom:to:, copyWithout: (2 loops) | detect:ifNone:, anySatisfy:, allSatisfy:, indexOf:, includes: (early-exit), reverseDo: (backward) |
+| `OrderedCollection.st` | do:, printString, asArray | — |
+| `Array.st` | printString | — |
+| `ByteArray.st` | printString, asString | — |
+| `String.st` | , (concat, 2 loops), copyFrom:to:, reversed, asUppercase, asLowercase, hash | =, <, includes: (early-exit) |
+
+Files with no workarounds found: Collection.st, Number.st (to:do:/to:by:do:/timesRepeat: are
+standard implementations), SmallInteger.st (printString: digit loop is legitimate), all other
+kernel files.
+
+**Story 3: Collection + iteration integration tests**
+
+8 new tests exercising reverted patterns: OC add via to:do:, OC collect:, nested iteration
+with capture, select:+size, inject:into: over OC, detect:ifNone:, factorial accumulator,
+chained collection operations.
+
+**Modified files:**
+- `src/compiler/codegen.c` — capture analysis for nested block capture (~40 lines)
+- `src/vm/interpreter.c` — block activation receiver fix (1 line)
+- `kernel/SequenceableCollection.st` — 10 methods reverted to to:do:
+- `kernel/OrderedCollection.st` — 3 methods reverted
+- `kernel/Array.st` — 1 method reverted
+- `kernel/ByteArray.st` — 2 methods reverted
+- `kernel/String.st` — 6 methods reverted
+
+**New files:**
+- `tests/test_closure_integration.c` — 22 tests (14 Story 1 + 8 Story 3)
+
+**Issues filed:**
+- #354: Compiler nested block capture (fixed)
+- #355: Interpreter OP_PUSH_OUTER_TEMP depth loop is a no-op (latent bug, not triggered)
+
+**Tests:** 22 new, 104 active CTest targets (106 total, 2 disabled). TSan clean.
+ASan clean except pre-existing #348.
