@@ -76,6 +76,25 @@ Run the full test suite:
 3. Only after the new test passes, run the full suite: `ctest --test-dir build --output-on-failure`
 4. Never run the full suite as the first validation of new code.
 
+## Sanitizer builds
+Some spike tests have `-fsanitize=thread` hardcoded in CMakeLists.txt.
+TSan and ASan cannot be combined — clang will reject it.
+
+For ASan runs, exclude the spike tests:
+
+    cmake -B build-asan -DCMAKE_BUILD_TYPE=Debug \
+      -DCMAKE_C_FLAGS="-fsanitize=address -fno-omit-frame-pointer" && \
+      cmake --build build-asan
+    ctest --test-dir build-asan --output-on-failure -E "_spike"
+
+For TSan runs, use the normal build (spike tests already have TSan flags):
+
+    ctest --test-dir build --output-on-failure
+
+Do not attempt to combine ASan and TSan in the same build. Do not try to
+"fix" the spike tests — they are Phase 0 exploratory code and will not
+be modified.
+
 ## Debugging rule
 Strict 3-attempt debug limit. If a test failure or bug is not resolved within
 3 focused attempts, stop and report the situation to the human rather than
@@ -161,6 +180,7 @@ gh issue list --label "decision-pending"
 | `Phase 0 — Architectural Spikes` | Spike → measure → ADR → implement |
 | `Phase 1 — Minimal Live Kernel` | Object memory, interpreter, bootstrap, image save/load |
 | `Phase 2 — Actor Runtime and Headless` | Scheduler, supervision, async I/O, headless lifecycle |
+| `Phase 2.5 — Runtime Completion` | GC fix, mutable closures, class library scaling, async I/O, headless, multi-actor image |
 | `Phase 3 — Native IDE` | Workspace, browser, inspector, debugger, actor monitor |
 
 ### Creating issues

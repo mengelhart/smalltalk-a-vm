@@ -10,11 +10,12 @@ Detailed history of all completed work: `docs/PROJECT_HISTORY.md`
 ---
 
 ## Current phase
-**Phase 2 — Actor Runtime and Headless**
+**Phase 2.5 — Runtime Completion**
 Phase 1 (Minimal Live Kernel) complete. Phase 1.5 (Class Library Foundation) complete.
-Now: scheduler, supervision, async I/O, headless lifecycle.
+Phase 2 (Actor Runtime) complete. Now: runtime fixes, mutable closures, class library
+scaling, async I/O, headless runtime, multi-actor image.
 
-**Current epic:** Phase 2 complete. All epics (0–8) done.
+**Current epic:** Epic 0 (Mailbox GC Root Fix, #341) complete.
 
 ---
 
@@ -80,6 +81,17 @@ Now: scheduler, supervision, async I/O, headless lifecycle.
 | 7B | Wait primitive, crash failure, stress | ✅ Complete — Future class, prim 201, crash→fail, soak 275K rts/s |
 | 8 | Bug fixes & tech debt | ✅ Complete — TSan race, stale args, future fail, atomic bounds, send refactor, SmallInteger fixes |
 
+### Phase 2.5 — Runtime Completion: IN PROGRESS
+
+| Epic | Topic | Status |
+|---|---|---|
+| 0 | Mailbox GC root fix (#341) | ✅ Complete — queued OOPs traced by GC and growth |
+| 1 | Mutable closures | Planned |
+| 2 | Class library scaling spike | Planned |
+| 3 | Async I/O (libuv) | Planned |
+| 4 | Headless runtime | Planned |
+| 5 | Multi-actor image save/load | Planned |
+
 ---
 
 ## Current struct sizes and density
@@ -114,7 +126,8 @@ Resolved items moved to `docs/PROJECT_HISTORY.md`.
 
 ## Known issues (open)
 
-- #341: Mailbox messages not in GC root set — queued OOPs not traced or relocated
+- #343: Data race — deep copy allocates on receiver's heap from sender's thread
+- #348: ASan heap-use-after-free in test_crash_under_ask_load
 
 ---
 
@@ -158,7 +171,7 @@ src/image/                ← production image save/load
 src/bootstrap/            ← kernel bootstrap + file-in reader
 src/compiler/             ← scanner, parser, AST, codegen
 kernel/                   ← Smalltalk kernel .st files (17 files)
-tests/                    ← 101 CTest targets
+tests/                    ← 103 CTest targets
 examples/embed_basic/     ← public API smoke test
 docs/architecture/        ← master architecture document
 docs/decisions/           ← ADRs 001–014
@@ -168,7 +181,8 @@ docs/spikes/              ← spike-001 through spike-007
 ---
 
 ## Test count
-101 active CTest targets (103 total, 2 disabled), all passing. ASan clean. TSan clean.
+103 active CTest targets (105 total, 2 disabled), all passing. TSan clean.
+ASan clean except pre-existing #348 (test_crash_under_ask_load).
 
 ---
 

@@ -502,6 +502,22 @@ target_link_libraries(test_gc_scheduled PRIVATE sta_vm Threads::Threads)
 add_test(NAME gc_scheduled COMMAND test_gc_scheduled)
 set_tests_properties(gc_scheduled PROPERTIES TIMEOUT 60)
 
+# ── Phase 2.5 Epic 0: Mailbox GC Root Fix ────────────────────────────────
+add_executable(test_gc_mailbox test_gc_mailbox.c)
+target_include_directories(test_gc_mailbox PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(test_gc_mailbox PRIVATE sta_vm)
+add_test(NAME gc_mailbox COMMAND test_gc_mailbox)
+
+add_executable(test_gc_mailbox_mt test_gc_mailbox_mt.c)
+target_include_directories(test_gc_mailbox_mt PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_compile_definitions(test_gc_mailbox_mt PRIVATE
+    KERNEL_DIR="${CMAKE_SOURCE_DIR}/kernel")
+target_link_libraries(test_gc_mailbox_mt PRIVATE sta_vm Threads::Threads)
+add_test(NAME gc_mailbox_mt COMMAND test_gc_mailbox_mt)
+set_tests_properties(gc_mailbox_mt PROPERTIES TIMEOUT 60)
+
 # ── Phase 2 Epic 6: Supervision ──────────────────────────────────────────
 add_executable(test_supervisor_linkage test_supervisor_linkage.c)
 target_include_directories(test_supervisor_linkage PRIVATE

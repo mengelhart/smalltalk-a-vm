@@ -777,3 +777,48 @@ For current state, open decisions, and orientation, see `docs/PROJECT_STATUS.md`
 - Tests: 16 new (4+3+9), 101 active CTest targets (103 total, 2 disabled). ASan clean. TSan clean (0 warnings with halt_on_error=1).
 - Phase 2 close-out: all epics (0–8) complete. 1 known issue remains (#341: mailbox GC root set).
 - Note: Epic 7B (wait primitive, crash-triggered future failure, stress tests) follows
+
+---
+
+## Phase 2.5 — Runtime Completion
+
+### Epic 0: Mailbox GC Root Fix (#341)
+Branch: `phase25/epic-0-mailbox-gc-fix`
+
+**Problem:** The Cheney semi-space GC in `gc_scan_roots()` did not scan the mailbox queue.
+Queued messages contain OOP fields (`args[i]`) pointing to objects deep-copied onto the
+actor's heap. When GC fires with messages queued, those OOPs become stale — they point
+to from-space addresses that have been freed.
+
+**Fix:**
+- Added `gc_mailbox_visitor` callback + `sta_mailbox_walk()` call in `gc_scan_roots()`
+  (gc.c). Traces `selector` and all `args[i]` OOPs through `gc_copy()`.
+- Added `grow_fixup_mailbox()` to the `sta_heap_alloc_gc()` heap growth path. Applies
+  pointer delta to queued message OOPs when the heap is relocated.
+- Leveraged existing `sta_mailbox_walk()` (added in Epic 7B Story 5) — no changes needed
+  to mailbox.h or mailbox.c.
+
+**Modified files:**
+- `src/gc/gc.c` — mailbox scanning in `gc_scan_roots()`, growth fixup in `sta_heap_alloc_gc()`
+
+**New files:**
+- `tests/test_gc_mailbox.c` — 6 unit tests (basic, immutable args, deep graph, multiple cycles, growth, empty)
+- `tests/test_gc_mailbox_mt.c` — 3 multi-threaded tests (50-msg GC, 1000-msg stress, multi-actor cycles)
+
+**Design decisions:**
+- D1: Consumer-side scan is safe without synchronization — GC runs on the consumer thread,
+  MPSC producers only touch the tail, consumer owns the head
+- D2: Scan all queued nodes — consumer is paused during GC, no snapshot boundary needed
+- D3: Trace OOPs through `gc_copy()` — selector and each `args[i]` passed through `gc_copy()`
+  and updated in place with potentially-new addresses
+- D4: Heap growth applies pointer delta to mailbox OOPs alongside stack frames and handler chain
+- D5: A producer mid-enqueue (tail swung, `prev->next` not yet stored) is invisible to the
+  walk — safe because from-space is not freed until after scanning completes
+
+**Issues filed during investigation:**
+- #343: Data race — deep copy allocates on receiver's heap from sender's thread
+  (ADR 008 specifies transfer buffer; implementation bypasses this)
+- #348: Pre-existing ASan heap-use-after-free in `test_crash_under_ask_load`
+
+**Tests:** 9 new (6+3), 103 active CTest targets (105 total, 2 disabled). TSan clean.
+ASan clean except pre-existing #348.
