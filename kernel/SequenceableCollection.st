@@ -1,57 +1,41 @@
-"SequenceableCollection — indexed collection with whileTrue:-based iteration.
- Relies on subclasses providing at:, at:put:, size (typically primitives).
- All iteration uses inlined whileTrue: so outer temp access works."
+"SequenceableCollection — indexed collection with idiomatic iteration.
+ Relies on subclasses providing at:, at:put:, size (typically primitives)."
 
 !SequenceableCollection methodsFor: 'enumerating'!
 do: aBlock
-    | i sz |
-    i := 1.
-    sz := self size.
-    [i <= sz] whileTrue: [
-        aBlock value: (self at: i).
-        i := i + 1]!
+    1 to: self size do: [:i | aBlock value: (self at: i)]!
 collect: aBlock
-    | result i sz |
+    | result sz |
     sz := self size.
     result := Array new: sz.
-    i := 1.
-    [i <= sz] whileTrue: [
-        result at: i put: (aBlock value: (self at: i)).
-        i := i + 1].
+    1 to: sz do: [:i |
+        result at: i put: (aBlock value: (self at: i))].
     ^ result!
 select: aBlock
-    | temp count i sz result j |
+    | temp count sz result |
     sz := self size.
     temp := Array new: sz.
     count := 0.
-    i := 1.
-    [i <= sz] whileTrue: [
+    1 to: sz do: [:i |
         (aBlock value: (self at: i)) ifTrue: [
             count := count + 1.
-            temp at: count put: (self at: i)].
-        i := i + 1].
+            temp at: count put: (self at: i)]].
     result := Array new: count.
-    j := 1.
-    [j <= count] whileTrue: [
-        result at: j put: (temp at: j).
-        j := j + 1].
+    1 to: count do: [:j |
+        result at: j put: (temp at: j)].
     ^ result!
 reject: aBlock
-    | temp count i sz result j |
+    | temp count sz result |
     sz := self size.
     temp := Array new: sz.
     count := 0.
-    i := 1.
-    [i <= sz] whileTrue: [
+    1 to: sz do: [:i |
         (aBlock value: (self at: i)) ifFalse: [
             count := count + 1.
-            temp at: count put: (self at: i)].
-        i := i + 1].
+            temp at: count put: (self at: i)]].
     result := Array new: count.
-    j := 1.
-    [j <= count] whileTrue: [
-        result at: j put: (temp at: j).
-        j := j + 1].
+    1 to: count do: [:j |
+        result at: j put: (temp at: j)].
     ^ result!
 detect: aBlock ifNone: noneBlock
     | i sz result found |
@@ -67,12 +51,10 @@ detect: aBlock ifNone: noneBlock
     ^ result!
 inject: thisValue into: binaryBlock
     "Fold over elements. binaryBlock receives (accumulator, each)."
-    | result i |
+    | result |
     result := thisValue.
-    i := 1.
-    [i <= self size] whileTrue: [
-        result := binaryBlock value: result value: (self at: i).
-        i := i + 1].
+    1 to: self size do: [:i |
+        result := binaryBlock value: result value: (self at: i)].
     ^ result!
 anySatisfy: aBlock
     "True if aBlock returns true for any element."
@@ -100,13 +82,11 @@ reverseDo: aBlock
         i := i - 1]!
 with: otherCollection collect: aBlock
     "Collect from two collections in parallel."
-    | sz result i |
+    | sz result |
     sz := self size min: otherCollection size.
     result := Array new: sz.
-    i := 1.
-    [i <= sz] whileTrue: [
-        result at: i put: (aBlock value: (self at: i) value: (otherCollection at: i)).
-        i := i + 1].
+    1 to: sz do: [:i |
+        result at: i put: (aBlock value: (self at: i) value: (otherCollection at: i))].
     ^ result!
 indexOf: anElement
     | i result |
@@ -143,25 +123,21 @@ last
 
 !SequenceableCollection methodsFor: 'converting'!
 asArray
-    | result i |
+    | result |
     result := Array new: self size.
-    i := 1.
-    [i <= self size] whileTrue: [
-        result at: i put: (self at: i).
-        i := i + 1].
+    1 to: self size do: [:i |
+        result at: i put: (self at: i)].
     ^ result! !
 
 !SequenceableCollection methodsFor: 'copying'!
 copyFrom: start to: stop
     "Return a new Array from start to stop (inclusive)."
-    | newSize result i |
+    | newSize result |
     newSize := stop - start + 1.
     newSize < 0 ifTrue: [newSize := 0].
     result := Array new: newSize.
-    i := 1.
-    [i <= newSize] whileTrue: [
-        result at: i put: (self at: start + i - 1).
-        i := i + 1].
+    1 to: newSize do: [:i |
+        result at: i put: (self at: start + i - 1)].
     ^ result!
 copyWith: newElement
     "Return a copy with newElement appended."
@@ -173,17 +149,13 @@ copyWith: newElement
     ^ result!
 copyWithout: anElement
     "Return a copy with all occurrences of anElement removed."
-    | count result i j |
+    | count result j |
     count := 0.
-    i := 1.
-    [i <= self size] whileTrue: [
-        (self at: i) = anElement ifFalse: [count := count + 1].
-        i := i + 1].
+    1 to: self size do: [:i |
+        (self at: i) = anElement ifFalse: [count := count + 1]].
     result := Array new: count.
-    i := 1.
     j := 1.
-    [i <= self size] whileTrue: [
+    1 to: self size do: [:i |
         (self at: i) = anElement
-            ifFalse: [result at: j put: (self at: i). j := j + 1].
-        i := i + 1].
+            ifFalse: [result at: j put: (self at: i). j := j + 1]].
     ^ result! !

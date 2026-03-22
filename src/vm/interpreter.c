@@ -363,7 +363,7 @@ static STA_OOP interpret_loop_ex(STA_VM *vm, STA_Frame *frame,
                     bool has_ctx = (bc_h->size >= 6 && bc_slots[BC_SLOT_CONTEXT] != 0);
 
                     STA_Frame *block_frame = sta_frame_push(slab, home_method,
-                        frame->receiver, frame, NULL, 0);
+                        bc_slots[BC_SLOT_RECEIVER], frame, NULL, 0);
                     if (!block_frame) {
                         fprintf(stderr, "FATAL: stack overflow in block activation\n");
                         abort();

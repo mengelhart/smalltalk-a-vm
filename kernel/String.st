@@ -6,56 +6,45 @@
 !String methodsFor: 'copying'!
 , aString
     "Concatenation. Return a new String."
-    | newSize result i |
+    | newSize result |
     newSize := self size + aString size.
     result := String new: newSize.
-    i := 1.
-    [i <= self size] whileTrue: [
-        result at: i put: (self at: i).
-        i := i + 1].
-    [i <= newSize] whileTrue: [
-        result at: i put: (aString at: i - self size).
-        i := i + 1].
+    1 to: self size do: [:i |
+        result at: i put: (self at: i)].
+    self size + 1 to: newSize do: [:i |
+        result at: i put: (aString at: i - self size)].
     ^ result!
 copyFrom: start to: stop
     "Return a substring from start to stop (1-based, inclusive)."
-    | newSize result i |
+    | newSize result |
     newSize := stop - start + 1.
     newSize < 0 ifTrue: [newSize := 0].
     result := String new: newSize.
-    i := 1.
-    [i <= newSize] whileTrue: [
-        result at: i put: (self at: start + i - 1).
-        i := i + 1].
+    1 to: newSize do: [:i |
+        result at: i put: (self at: start + i - 1)].
     ^ result! !
 
 !String methodsFor: 'converting'!
 reversed
-    | sz result i |
+    | sz result |
     sz := self size.
     result := String new: sz.
-    i := 1.
-    [i <= sz] whileTrue: [
-        result at: i put: (self at: sz - i + 1).
-        i := i + 1].
+    1 to: sz do: [:i |
+        result at: i put: (self at: sz - i + 1)].
     ^ result!
 asUppercase
-    | sz result i |
+    | sz result |
     sz := self size.
     result := String new: sz.
-    i := 1.
-    [i <= sz] whileTrue: [
-        result at: i put: (self at: i) asUppercase.
-        i := i + 1].
+    1 to: sz do: [:i |
+        result at: i put: (self at: i) asUppercase].
     ^ result!
 asLowercase
-    | sz result i |
+    | sz result |
     sz := self size.
     result := String new: sz.
-    i := 1.
-    [i <= sz] whileTrue: [
-        result at: i put: (self at: i) asLowercase.
-        i := i + 1].
+    1 to: sz do: [:i |
+        result at: i put: (self at: i) asLowercase].
     ^ result! !
 
 !String methodsFor: 'comparing'!
@@ -110,13 +99,12 @@ includes: aCharacter
 
 !String methodsFor: 'hashing'!
 hash
-    "Content-based hash. Uses whileTrue: to avoid mutable outer temp capture.
+    "Content-based hash.
      Mask to 29-bit positive SmallInteger range (536870911 = 16r1FFFFFFF)."
-    | h i sz |
-    h := 0. i := 1. sz := self size.
-    [i <= sz] whileTrue: [
-        h := (h * 31 + (self at: i) value) bitAnd: 536870911.
-        i := i + 1].
+    | h sz |
+    h := 0. sz := self size.
+    1 to: sz do: [:i |
+        h := (h * 31 + (self at: i) value) bitAnd: 536870911].
     ^ h! !
 
 !String methodsFor: 'printing'!

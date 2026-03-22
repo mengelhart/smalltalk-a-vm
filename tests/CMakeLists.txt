@@ -308,6 +308,11 @@ add_executable(test_closures test_closures.c)
 target_link_libraries(test_closures PRIVATE sta_vm)
 add_test(NAME closures COMMAND test_closures)
 
+# ── Phase 2.5 Epic 1: Closure Integration ────────────────────────────────
+add_executable(test_closure_integration test_closure_integration.c)
+target_link_libraries(test_closure_integration PRIVATE sta_vm)
+add_test(NAME closure_integration COMMAND test_closure_integration)
+
 # ── Phase 2 Epic 2: Actor Struct ──────────────────────────────────────────
 add_executable(test_actor_lifecycle test_actor_lifecycle.c)
 target_include_directories(test_actor_lifecycle PRIVATE ${CMAKE_SOURCE_DIR}/src)

@@ -57,11 +57,8 @@ removeLast
 
 !OrderedCollection methodsFor: 'enumerating'!
 do: aBlock
-    | i |
-    i := firstIndex.
-    [i <= lastIndex] whileTrue: [
-        aBlock value: (array at: i).
-        i := i + 1]! !
+    firstIndex to: lastIndex do: [:i |
+        aBlock value: (array at: i)]! !
 
 !OrderedCollection methodsFor: 'private'!
 grow
@@ -87,22 +84,18 @@ growAtFront
 
 !OrderedCollection methodsFor: 'printing'!
 printString
-    | result i |
+    | result |
     result := 'an OrderedCollection('.
-    i := 1.
-    [i <= self size] whileTrue: [
+    1 to: self size do: [:i |
         i > 1 ifTrue: [result := result, ' '].
-        result := result, (self at: i) printString.
-        i := i + 1].
+        result := result, (self at: i) printString].
     result := result, ')'.
     ^ result! !
 
 !OrderedCollection methodsFor: 'converting'!
 asArray
-    | result i |
+    | result |
     result := Array new: self size.
-    i := 1.
-    [i <= self size] whileTrue: [
-        result at: i put: (self at: i).
-        i := i + 1].
+    1 to: self size do: [:i |
+        result at: i put: (self at: i)].
     ^ result! !

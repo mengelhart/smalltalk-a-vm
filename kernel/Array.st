@@ -9,14 +9,11 @@
 
 !Array methodsFor: 'printing'!
 printString
-    | sz result i |
-    sz := self size.
+    | result |
     result := '#('.
-    i := 1.
-    [i <= sz] whileTrue: [
+    1 to: self size do: [:i |
         i > 1 ifTrue: [result := result, ' '].
-        result := result, (self at: i) printString.
-        i := i + 1].
+        result := result, (self at: i) printString].
     result := result, ')'.
     ^ result! !
 
