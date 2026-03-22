@@ -1,8 +1,19 @@
 "Kernel methods for SmallInteger.
  Do NOT duplicate primitive methods installed by bootstrap.c step 7:
-   +, -, *, <, >, =, <=, >=, ~=, /, \\, //, quo:,
+   +, -, *, <, >, =, <=, >=, ~=, \\, //, quo:,
    bitAnd:, bitOr:, bitXor:, bitShift:, printString, basicNew, basicNew:
+ EXCEPTION: / is overridden here to signal ZeroDivide (#339).
  SKIPPED: @ (no Point class)."
+
+!SmallInteger methodsFor: 'arithmetic'!
+/ aNumber
+	"Exact integer division. Signals ZeroDivide if aNumber is zero.
+	 For non-exact results, returns the truncated quotient (no Fraction class yet)."
+	| result |
+	aNumber = 0
+		ifTrue: [ZeroDivide new signal]
+		ifFalse: [result := self quo: aNumber].
+	^ result! !
 
 !SmallInteger methodsFor: 'testing'!
 isInteger

@@ -355,6 +355,30 @@ target_compile_definitions(test_actor_send PRIVATE
 target_link_libraries(test_actor_send PRIVATE sta_vm)
 add_test(NAME actor_send COMMAND test_actor_send)
 
+add_executable(test_mailbox_heap_growth test_mailbox_heap_growth.c)
+target_include_directories(test_mailbox_heap_growth PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_compile_definitions(test_mailbox_heap_growth PRIVATE
+    KERNEL_DIR="${CMAKE_SOURCE_DIR}/kernel")
+target_link_libraries(test_mailbox_heap_growth PRIVATE sta_vm)
+add_test(NAME mailbox_heap_growth COMMAND test_mailbox_heap_growth)
+
+add_executable(test_ask_mailbox_full test_ask_mailbox_full.c)
+target_include_directories(test_ask_mailbox_full PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_compile_definitions(test_ask_mailbox_full PRIVATE
+    KERNEL_DIR="${CMAKE_SOURCE_DIR}/kernel")
+target_link_libraries(test_ask_mailbox_full PRIVATE sta_vm)
+add_test(NAME ask_mailbox_full COMMAND test_ask_mailbox_full)
+
+add_executable(test_smallint_correctness test_smallint_correctness.c)
+target_include_directories(test_smallint_correctness PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_compile_definitions(test_smallint_correctness PRIVATE
+    KERNEL_DIR="${CMAKE_SOURCE_DIR}/kernel")
+target_link_libraries(test_smallint_correctness PRIVATE sta_vm)
+add_test(NAME smallint_correctness COMMAND test_smallint_correctness)
+
 add_executable(test_deep_copy test_deep_copy.c)
 target_include_directories(test_deep_copy PRIVATE
     ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)

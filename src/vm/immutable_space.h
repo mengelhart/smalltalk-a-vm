@@ -12,14 +12,15 @@
  */
 #pragma once
 #include "oop.h"
+#include <stdatomic.h>
 #include <stddef.h>
 
 /* Struct definition (visible for STA_VM embedding). */
 typedef struct STA_ImmutableSpace {
-    char  *base;      /* page-aligned mmap'd region  */
-    size_t capacity;  /* total mapped bytes           */
-    size_t used;      /* bytes consumed so far        */
-    int    sealed;    /* 1 after mprotect(PROT_READ)  */
+    char  *base;           /* page-aligned mmap'd region  */
+    size_t capacity;       /* total mapped bytes           */
+    _Atomic size_t used;   /* bytes consumed so far (atomic for concurrent GC reads, #296) */
+    int    sealed;         /* 1 after mprotect(PROT_READ)  */
 } STA_ImmutableSpace;
 
 /* Initialize in-place. Allocates mmap backing memory.

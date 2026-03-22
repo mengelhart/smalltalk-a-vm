@@ -173,120 +173,104 @@ void sta_actor_terminate(struct STA_Actor *actor) {
 
 /* ── Messaging ───────────────────────────────────────────────────────── */
 
-int sta_actor_send_msg(struct STA_VM *vm,
-                       struct STA_Actor *sender,
-                       uint32_t target_id,
-                       STA_OOP selector,
-                       STA_OOP *args, uint8_t nargs)
+/* Shared helper for sta_actor_send_msg and sta_actor_ask_msg.
+ * Deep-copies args, creates the message envelope, enqueues, and
+ * auto-schedules the target.  See GitHub #325.
+ *
+ * sender:  non-NULL for fire-and-forget (sender actor known).
+ *          NULL for ask: path — sender_id is used to look up the
+ *          source heap from the registry if deep copy is needed.
+ * future:  non-NULL for ask: — future_id is attached to the message.
+ *          NULL for fire-and-forget send.
+ *
+ * Returns 0 on success, STA_ERR_OOM or STA_ERR_MAILBOX_FULL on failure.
+ * Does NOT manage the future on failure — the caller is responsible
+ * for failing and cleaning up the future. */
+static int send_msg_internal(struct STA_VM *vm,
+                              uint32_t sender_id,
+                              struct STA_Actor *sender,
+                              struct STA_Actor *target,
+                              STA_OOP selector,
+                              STA_OOP *args, uint8_t nargs,
+                              STA_Future *future)
 {
-    /* Resolve target by ID through the actor registry.
-     * Registry lookup atomically increments refcount under the mutex,
-     * so the target cannot be freed while we hold the reference. */
-    struct STA_Actor *target = sta_registry_lookup(vm->registry, target_id);
-    if (!target) return STA_ERR_ACTOR_DEAD;
-
-    /* Check if the actor was terminated after lookup but before we use it.
-     * Refcount keeps it alive but it's logically dead. */
-    uint32_t tstate = atomic_load_explicit(&target->state, memory_order_acquire);
-    if (tstate == STA_ACTOR_TERMINATED) {
-        sta_actor_release(target);
-        return STA_ERR_ACTOR_DEAD;
-    }
-
-    /* Deep copy each argument from sender's heap to target's heap. */
+    /* ── Deep copy args ──────────────────────────────────────────── */
     STA_OOP *copied_args = NULL;
     bool args_mallocd = false;
 
     if (nargs > 0) {
         STA_ClassTable *ct = &vm->class_table;
 
-        /* ── Pre-flight size estimation (GitHub #295) ──────────────
-         * Estimate the total bytes needed for deep copying all args.
-         * If zero, all args are immediates or immutables — no target
-         * heap access needed. Use a malloc'd array instead, avoiding
-         * the heap allocation entirely. */
+        /* Pre-flight size estimation (GitHub #295). */
         size_t estimated = sta_deep_copy_estimate_roots(args, nargs, ct);
 
         if (estimated == 0) {
-            /* Zero-copy fast path: all args are immediates/immutables.
-             * Allocate the args array via malloc (not on any heap). */
+            /* Zero-copy fast path: all args are immediates/immutables. */
             copied_args = malloc((size_t)nargs * sizeof(STA_OOP));
-            if (!copied_args) { sta_actor_release(target); return -1; }
+            if (!copied_args) return STA_ERR_OOM;
             args_mallocd = true;
             for (uint8_t i = 0; i < nargs; i++)
                 copied_args[i] = args[i];
         } else {
-            /* Deep copy path: target heap allocation required. */
-
-            /* Add the args array allocation cost. */
-            size_t args_alloc = sta_alloc_size((uint32_t)nargs);
-            args_alloc = (args_alloc + 15u) & ~(size_t)15u;
-            estimated += args_alloc;
-
+            /* Deep copy path: target heap allocation required.
+             * Args array is always malloc'd — see GitHub #340. */
             size_t free_space = target->heap.capacity - target->heap.used;
             if (estimated > free_space) {
                 size_t needed = target->heap.used + estimated;
                 size_t new_cap = needed + needed / 2;
-                if (sta_heap_grow(&target->heap, new_cap) != 0) {
-                    sta_actor_release(target);
-                    return -1;
-                }
+                if (sta_heap_grow(&target->heap, new_cap) != 0)
+                    return STA_ERR_OOM;
             }
 
-            STA_ObjHeader *args_h = sta_heap_alloc_gc(vm, target,
-                                                        STA_CLS_ARRAY,
-                                                        (uint32_t)nargs);
-            if (!args_h) { sta_actor_release(target); return -1; }
-            copied_args = sta_payload(args_h);
+            copied_args = malloc((size_t)nargs * sizeof(STA_OOP));
+            if (!copied_args) return STA_ERR_OOM;
+            args_mallocd = true;
+
+            /* Determine source heap for deep copy. */
+            struct STA_Actor *sender_ref = NULL;
+            STA_Heap *src_heap;
+            if (sender) {
+                src_heap = &sender->heap;
+            } else {
+                sender_ref = sta_registry_lookup(vm->registry, sender_id);
+                src_heap = sender_ref ? &sender_ref->heap
+                                      : &vm->root_actor->heap;
+            }
 
             for (uint8_t i = 0; i < nargs; i++) {
-                copied_args[i] = sta_deep_copy_gc(args[i],
-                                                   &sender->heap,
+                copied_args[i] = sta_deep_copy_gc(args[i], src_heap,
                                                    vm, target, ct);
                 if (copied_args[i] == 0 && args[i] != 0 &&
                     !STA_IS_IMMEDIATE(args[i])) {
-                    sta_actor_release(target);
-                    return -1;
+                    if (sender_ref) sta_actor_release(sender_ref);
+                    free(copied_args);
+                    return STA_ERR_OOM;
                 }
             }
+            if (sender_ref) sta_actor_release(sender_ref);
         }
     }
 
-    /* Create the message envelope. */
+    /* ── Create message envelope ─────────────────────────────────── */
     STA_MailboxMsg *msg = sta_mailbox_msg_create(
-        selector, copied_args, nargs, sender->actor_id);
+        selector, copied_args, nargs, sender_id);
     if (!msg) {
         if (args_mallocd) free(copied_args);
-        sta_actor_release(target);
-        return -1;
+        return STA_ERR_OOM;
     }
     msg->args_owned = args_mallocd;
+    if (future) msg->future_id = future->future_id;
 
-    /* Enqueue in target's mailbox. */
+    /* ── Enqueue ─────────────────────────────────────────────────── */
     int rc = sta_mailbox_enqueue(&target->mailbox, msg);
     if (rc != 0) {
-        /* Mailbox full — destroy the envelope (frees args if owned). */
         sta_mailbox_msg_destroy(msg);
-        sta_actor_release(target);
-        return rc;  /* STA_ERR_MAILBOX_FULL */
+        return STA_ERR_MAILBOX_FULL;
     }
 
-    /* ── Store-buffer fence (GitHub #319) ───────────────────────────
-     * The enqueue above wrote to the mailbox count (release).  The CAS
-     * below reads the actor state.  Without a full fence, both this
-     * thread and the scheduler thread can each read stale values of the
-     * *other* variable (classic Dekker/store-buffer race).  A matching
-     * seq_cst fence sits in the scheduler dispatch loop between the
-     * SUSPENDED store and the mailbox re-check.  Together the two
-     * fences guarantee: either our CAS sees SUSPENDED (and we wake the
-     * actor) OR the scheduler's re-check sees count > 0 (and it
-     * re-enqueues the actor). */
+    /* ── Store-buffer fence + auto-schedule (GitHub #319) ────────── */
     atomic_thread_fence(memory_order_seq_cst);
 
-    /* Auto-schedule: if the target is idle (CREATED or SUSPENDED) and the
-     * scheduler is running, transition to READY and enqueue.
-     * Uses CAS to ensure only one sender wins the race.
-     * sta_scheduler_enqueue increments refcount for the queue. */
     STA_Scheduler *sched = target->vm ? target->vm->scheduler : NULL;
     if (sched && atomic_load_explicit(&sched->running, memory_order_acquire)) {
         uint32_t expected = STA_ACTOR_SUSPENDED;
@@ -304,12 +288,47 @@ int sta_actor_send_msg(struct STA_VM *vm,
         }
     }
 
-    /* Release the reference acquired by registry lookup. */
-    sta_actor_release(target);
     return 0;
 }
 
+int sta_actor_send_msg(struct STA_VM *vm,
+                       struct STA_Actor *sender,
+                       uint32_t target_id,
+                       STA_OOP selector,
+                       STA_OOP *args, uint8_t nargs)
+{
+    struct STA_Actor *target = sta_registry_lookup(vm->registry, target_id);
+    if (!target) return STA_ERR_ACTOR_DEAD;
+
+    uint32_t tstate = atomic_load_explicit(&target->state, memory_order_acquire);
+    if (tstate == STA_ACTOR_TERMINATED) {
+        sta_actor_release(target);
+        return STA_ERR_ACTOR_DEAD;
+    }
+
+    int rc = send_msg_internal(vm, sender->actor_id, sender, target,
+                                selector, args, nargs, NULL);
+    sta_actor_release(target);
+    return rc;
+}
+
 /* ── Ask messaging (Epic 7A) ─────────────────────────────────────────── */
+
+/* Fail a future with a Symbol reason, then remove from table + release.
+ * Used by sta_actor_ask_msg error paths to ensure any holder gets a clean
+ * failure instead of a hang or DNU.  See GitHub #43. */
+static void fail_and_cleanup_future(struct STA_VM *vm, STA_Future *future,
+                                     const char *reason, size_t reason_len) {
+    STA_OOP *buf = malloc(sizeof(STA_OOP));
+    if (buf) {
+        buf[0] = sta_symbol_intern(&vm->immutable_space,
+                                     &vm->symbol_table,
+                                     reason, reason_len);
+        sta_future_fail(future, buf, 1);
+    }
+    sta_future_table_remove(vm->future_table, future->future_id);
+    sta_future_release(future);
+}
 
 struct STA_Future *sta_actor_ask_msg(struct STA_VM *vm,
                                      uint32_t sender_id,
@@ -342,125 +361,19 @@ struct STA_Future *sta_actor_ask_msg(struct STA_VM *vm,
         return NULL;
     }
 
-    /* 4. Build message envelope — same deep copy logic as sta_actor_send_msg. */
-    STA_OOP *copied_args = NULL;
-    bool args_mallocd = false;
-
-    if (arg_count > 0) {
-        STA_ClassTable *ct = &vm->class_table;
-        size_t estimated = sta_deep_copy_estimate_roots(args, (uint8_t)arg_count, ct);
-
-        if (estimated == 0) {
-            /* Zero-copy fast path: all immediates/immutables. */
-            copied_args = malloc((size_t)arg_count * sizeof(STA_OOP));
-            if (!copied_args) {
-                sta_future_table_remove(vm->future_table, future->future_id);
-                sta_future_release(future);
-                sta_actor_release(target);
-                *err = STA_ERR_OOM;
-                return NULL;
-            }
-            args_mallocd = true;
-            for (uint32_t i = 0; i < arg_count; i++)
-                copied_args[i] = args[i];
-        } else {
-            /* Deep copy path: target heap allocation required. */
-            size_t args_alloc = sta_alloc_size((uint32_t)arg_count);
-            args_alloc = (args_alloc + 15u) & ~(size_t)15u;
-            estimated += args_alloc;
-
-            size_t free_space = target->heap.capacity - target->heap.used;
-            if (estimated > free_space) {
-                size_t needed = target->heap.used + estimated;
-                size_t new_cap = needed + needed / 2;
-                if (sta_heap_grow(&target->heap, new_cap) != 0) {
-                    sta_future_table_remove(vm->future_table, future->future_id);
-                    sta_future_release(future);
-                    sta_actor_release(target);
-                    *err = STA_ERR_OOM;
-                    return NULL;
-                }
-            }
-
-            STA_ObjHeader *args_h = sta_heap_alloc_gc(vm, target,
-                                                        STA_CLS_ARRAY,
-                                                        (uint32_t)arg_count);
-            if (!args_h) {
-                sta_future_table_remove(vm->future_table, future->future_id);
-                sta_future_release(future);
-                sta_actor_release(target);
-                *err = STA_ERR_OOM;
-                return NULL;
-            }
-            copied_args = sta_payload(args_h);
-
-            /* Look up sender actor for deep copy source heap. */
-            struct STA_Actor *sender = sta_registry_lookup(vm->registry, sender_id);
-            STA_Heap *src_heap = sender ? &sender->heap : &vm->root_actor->heap;
-
-            for (uint32_t i = 0; i < arg_count; i++) {
-                copied_args[i] = sta_deep_copy_gc(args[i], src_heap,
-                                                    vm, target, ct);
-                if (copied_args[i] == 0 && args[i] != 0 &&
-                    !STA_IS_IMMEDIATE(args[i])) {
-                    if (sender) sta_actor_release(sender);
-                    sta_future_table_remove(vm->future_table, future->future_id);
-                    sta_future_release(future);
-                    sta_actor_release(target);
-                    *err = STA_ERR_OOM;
-                    return NULL;
-                }
-            }
-            if (sender) sta_actor_release(sender);
-        }
-    }
-
-    /* 5. Create the message envelope. */
-    STA_MailboxMsg *msg = sta_mailbox_msg_create(
-        selector, copied_args, (uint8_t)arg_count, sender_id);
-    if (!msg) {
-        if (args_mallocd) free(copied_args);
-        sta_future_table_remove(vm->future_table, future->future_id);
-        sta_future_release(future);
-        sta_actor_release(target);
-        *err = STA_ERR_OOM;
-        return NULL;
-    }
-    msg->args_owned = args_mallocd;
-    msg->future_id = future->future_id;
-
-    /* 6. Enqueue in target's mailbox. */
-    int rc = sta_mailbox_enqueue(&target->mailbox, msg);
+    /* 4. Deep copy, envelope, enqueue, auto-schedule — shared helper. */
+    int rc = send_msg_internal(vm, sender_id, NULL, target,
+                                selector, args, (uint8_t)arg_count, future);
     if (rc != 0) {
-        sta_mailbox_msg_destroy(msg);
-        sta_future_table_remove(vm->future_table, future->future_id);
-        sta_future_release(future);
+        const char *reason = (rc == STA_ERR_MAILBOX_FULL)
+                             ? "mailboxFull" : "outOfMemory";
+        fail_and_cleanup_future(vm, future, reason, 11);
         sta_actor_release(target);
-        *err = STA_ERR_MAILBOX_FULL;
+        *err = rc;
         return NULL;
     }
 
-    /* 7. Auto-schedule: same wakeup logic as sta_actor_send_msg. */
-    atomic_thread_fence(memory_order_seq_cst);
-
-    STA_Scheduler *sched = target->vm ? target->vm->scheduler : NULL;
-    if (sched && atomic_load_explicit(&sched->running, memory_order_acquire)) {
-        uint32_t expected = STA_ACTOR_SUSPENDED;
-        if (atomic_compare_exchange_strong_explicit(
-                &target->state, &expected, STA_ACTOR_READY,
-                memory_order_acq_rel, memory_order_relaxed)) {
-            sta_scheduler_enqueue(sched, target);
-        } else {
-            expected = STA_ACTOR_CREATED;
-            if (atomic_compare_exchange_strong_explicit(
-                    &target->state, &expected, STA_ACTOR_READY,
-                    memory_order_acq_rel, memory_order_relaxed)) {
-                sta_scheduler_enqueue(sched, target);
-            }
-        }
-    }
-
-    /* 8. Release target ref and return the future. */
+    /* 5. Release target ref and return the future. */
     sta_actor_release(target);
     return future;
 }

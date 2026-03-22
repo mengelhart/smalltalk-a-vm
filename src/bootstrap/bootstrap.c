@@ -133,6 +133,7 @@ static int step2_symbols(BS *bs) {
         "CompiledMethod", "BlockClosure", "Association", "MethodDictionary",
         "BlockDescriptor", "Message", "MessageNotUnderstood",
         "BlockCannotReturn", "Error", "Exception", "SystemDictionary",
+        "ArithmeticError", "ZeroDivide",
     };
     for (size_t i = 0; i < sizeof(class_names) / sizeof(class_names[0]); i++) {
         if (bs_intern(bs, class_names[i]) == 0) return -1;
@@ -352,7 +353,9 @@ static int step4_tier1(BS *bs) {
     STA_OOP mnu        = create_class(bs, "MessageNotUnderstood", error, STA_CLS_MESSAGENOTUNDERSTOOD, 2, STA_FMT_NORMAL);
     STA_OOP bcr        = create_class(bs, "BlockCannotReturn", error, STA_CLS_BLOCKCANNOTRETURN, 2, STA_FMT_NORMAL);
     STA_OOP futfail    = create_class(bs, "FutureFailure", error, STA_CLS_FUTUREFAILURE, 0, STA_FMT_NORMAL);
-    (void)mnu; (void)bcr; (void)futfail;
+    STA_OOP aritherr   = create_class(bs, "ArithmeticError", error, STA_CLS_ARITHMETICERROR, 0, STA_FMT_NORMAL);
+    STA_OOP zerodiv    = create_class(bs, "ZeroDivide", aritherr, STA_CLS_ZERODIVIDE, 0, STA_FMT_NORMAL);
+    (void)mnu; (void)bcr; (void)futfail; (void)zerodiv;
 
     /* SystemDictionary. */
     STA_OOP sysdict    = create_class(bs, "SystemDictionary", obj, STA_CLS_SYSTEMDICTIONARY, 2, STA_FMT_NORMAL);

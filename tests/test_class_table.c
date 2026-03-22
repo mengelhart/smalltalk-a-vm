@@ -50,7 +50,9 @@ int main(void) {
     CHECK(STA_CLS_SYSTEMDICTIONARY == 31,      "CLS_SYSTEMDICTIONARY == 31");
     CHECK(STA_CLS_FUTURE == 32,                "CLS_FUTURE == 32");
     CHECK(STA_CLS_FUTUREFAILURE == 33,         "CLS_FUTUREFAILURE == 33");
-    CHECK(STA_CLS_RESERVED_COUNT == 34,        "CLS_RESERVED_COUNT == 34");
+    CHECK(STA_CLS_ARITHMETICERROR == 34,       "CLS_ARITHMETICERROR == 34");
+    CHECK(STA_CLS_ZERODIVIDE == 35,            "CLS_ZERODIVIDE == 35");
+    CHECK(STA_CLS_RESERVED_COUNT == 36,        "CLS_RESERVED_COUNT == 36");
 
     /* ── Create ──────────────────────────────────────────── */
     printf("\n=== Create ===\n");
