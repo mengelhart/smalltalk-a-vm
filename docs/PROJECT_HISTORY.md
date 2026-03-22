@@ -749,4 +749,31 @@ For current state, open decisions, and orientation, see `docs/PROJECT_STATUS.md`
 - sizeof(STA_Future) = 48 bytes (was 40), sizeof(STA_FutureTable) = 96 bytes (was 88)
 - Tests: 22 new (8+7+6+1 soak), 98 active CTest targets (100 total, 2 disabled). ASan clean. TSan: 1 pre-existing race in sta_scheduler_enqueue (#337, not introduced by this epic).
 - Epic 7 (A+B) combined summary: futures infrastructure, ask/reply routing, wait with actor suspension, crash-triggered future failure, integration stress tests, sustained ask/wait soak at ~275K round-trips/s.
+
+### Epic 8: Bug Fixes & Tech Debt — COMPLETE
+- Branch: phase2/epic-8-bug-fixes (PR #342)
+- New files:
+  - `tests/test_mailbox_heap_growth.c` — 4 tests (deep-copy args malloc ownership, multiple mutable sends, immediate args ownership, mixed args ownership)
+  - `tests/test_ask_mailbox_full.c` — 3 tests (ask mailbox full returns error, ask dead actor, ask success then full)
+  - `tests/test_smallint_correctness.c` — 9 tests (equality with string/nil, inequality with string, equality same value, DNU on:do: catch, DNU handler value, ZeroDivide caught, exact division, negative division)
+- Modified files:
+  - `src/scheduler/scheduler.c` — Story 1: removed redundant `actor->next_runnable = NULL` write outside `wake_mutex` (TSan race #337)
+  - `src/actor/actor.c` — Story 2: deep-copy path always malloc's args array instead of allocating on target heap (#340). Story 3: extracted `fail_and_cleanup_future` helper; all `sta_actor_ask_msg` error paths now call `sta_future_fail` before cleanup (#43). Story 5: extracted `send_msg_internal` shared helper for deep-copy → envelope → enqueue → auto-schedule; both `sta_actor_send_msg` and `sta_actor_ask_msg` delegate to it (#325). Also fixed `sta_actor_send_msg` to return `STA_ERR_OOM` instead of bare `-1`.
+  - `src/vm/immutable_space.h` — Story 4: `used` field changed to `_Atomic size_t` (#296)
+  - `src/vm/immutable_space.c` — Story 4: writes use `memory_order_release`, reads use `memory_order_relaxed`
+  - `src/vm/primitive_table.c` — Story 6a: `prim_smallint_eq` returns `false` for non-SmallInt args (was `STA_PRIM_BAD_ARGUMENT`); `prim_smallint_ne` returns `true` (#243)
+  - `src/vm/class_table.h` — Story 6c: added `STA_CLS_ARITHMETICERROR` (34), `STA_CLS_ZERODIVIDE` (35), `STA_CLS_RESERVED_COUNT` raised to 36
+  - `src/bootstrap/bootstrap.c` — Story 6c: `ArithmeticError` (subclass of Error) and `ZeroDivide` (subclass of ArithmeticError) class creation; names interned
+  - `kernel/SmallInteger.st` — Story 6c: `SmallInteger >> /` override signals `ZeroDivide` on zero divisor, uses `quo:` for computation (#339)
+  - `tests/test_class_table.c` — Updated for new reserved class indices (34→36)
+- Design decisions:
+  - D1: Story 1 fix is a 1-line deletion — the pre-mutex `next_runnable = NULL` was redundant (overwritten inside mutex) and raced with `drain_overflow`
+  - D2: Story 2 approach (a) — always malloc the args array; deep-copied objects still live on target heap, but the OOP array is in malloc'd memory immune to `sta_heap_grow` reallocation. Filed #341 for deeper design gap (mailbox not in GC root set)
+  - D3: Story 3 uses Symbol reasons (`#mailboxFull`, `#outOfMemory`) so future holders get a typed failure
+  - D4: Story 4 relaxed read is safe — stale `used` bound means a very recently allocated immutable object fails `in_immutable` check but also fails `in_from_space`, so `gc_copy` returns the OOP unchanged
+  - D5: Story 5 helper takes `struct STA_Actor *sender` (non-NULL for send, NULL for ask) and resolves source heap internally
+  - D6: Story 6b (#244) — DNU catch via `on:do:` works correctly; the BlockCannotReturn issue was resolved by Phase 2 Epic 1 closure infrastructure
+  - D7: Story 6c — `/` method in kernel/SmallInteger.st replaces bootstrap prim method; loses primitive fast path but gains ZeroDivide signaling. Non-exact division returns truncated quotient (no Fraction class yet)
+- Tests: 16 new (4+3+9), 101 active CTest targets (103 total, 2 disabled). ASan clean. TSan clean (0 warnings with halt_on_error=1).
+- Phase 2 close-out: all epics (0–8) complete. 1 known issue remains (#341: mailbox GC root set).
 - Note: Epic 7B (wait primitive, crash-triggered future failure, stress tests) follows
