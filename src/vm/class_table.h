@@ -53,7 +53,9 @@
 #define STA_CLS_SYSTEMDICTIONARY      31u  /* SystemDictionary               */
 #define STA_CLS_FUTURE                32u  /* Future (Epic 7B)               */
 #define STA_CLS_FUTUREFAILURE         33u  /* FutureFailure (Epic 7B)        */
-#define STA_CLS_RESERVED_COUNT        34u  /* first dynamically-assigned idx */
+#define STA_CLS_ARITHMETICERROR       34u  /* ArithmeticError                */
+#define STA_CLS_ZERODIVIDE            35u  /* ZeroDivide                     */
+#define STA_CLS_RESERVED_COUNT        36u  /* first dynamically-assigned idx */
 
 /* ── Struct definition (visible for STA_VM embedding) ───────────────────── */
 typedef struct STA_ClassTable {

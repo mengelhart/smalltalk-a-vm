@@ -90,7 +90,11 @@ static int prim_smallint_gt(STA_ExecContext *ctx, STA_OOP *args, uint8_t nargs, 
 static int prim_smallint_eq(STA_ExecContext *ctx, STA_OOP *args, uint8_t nargs, STA_OOP *result) {
     (void)nargs;
     if (!STA_IS_SMALLINT(args[0])) return STA_PRIM_BAD_RECEIVER;
-    if (!STA_IS_SMALLINT(args[1])) return STA_PRIM_BAD_ARGUMENT;
+    /* Non-SmallInteger argument: different types are never equal (#243). */
+    if (!STA_IS_SMALLINT(args[1])) {
+        *result = ctx->vm->specials[SPC_FALSE];
+        return STA_PRIM_SUCCESS;
+    }
     *result = (args[0] == args[1])
               ? ctx->vm->specials[SPC_TRUE] : ctx->vm->specials[SPC_FALSE];
     return STA_PRIM_SUCCESS;
@@ -129,7 +133,11 @@ static int prim_smallint_ge(STA_ExecContext *ctx, STA_OOP *args, uint8_t nargs, 
 static int prim_smallint_ne(STA_ExecContext *ctx, STA_OOP *args, uint8_t nargs, STA_OOP *result) {
     (void)nargs;
     if (!STA_IS_SMALLINT(args[0])) return STA_PRIM_BAD_RECEIVER;
-    if (!STA_IS_SMALLINT(args[1])) return STA_PRIM_BAD_ARGUMENT;
+    /* Non-SmallInteger argument: different types are never equal (#243). */
+    if (!STA_IS_SMALLINT(args[1])) {
+        *result = ctx->vm->specials[SPC_TRUE];
+        return STA_PRIM_SUCCESS;
+    }
     *result = (args[0] != args[1])
               ? ctx->vm->specials[SPC_TRUE] : ctx->vm->specials[SPC_FALSE];
     return STA_PRIM_SUCCESS;
