@@ -58,6 +58,8 @@
 #include "vm/special_objects.h"
 #include "vm/vm_state.h"
 #include "actor/actor.h"
+#include "actor/mailbox.h"
+#include "actor/mailbox_msg.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -316,6 +318,17 @@ static void gc_root_visitor(STA_OOP *slot, void *ctx) {
     *slot = gc_copy(gc, *slot);
 }
 
+/* Visitor callback for sta_mailbox_walk — trace queued message OOPs.
+ * The selector is an immutable Symbol (gc_copy skips it, but trace
+ * for correctness). Each arg may point to the actor's heap. */
+static void gc_mailbox_visitor(STA_MailboxMsg *msg, void *ctx) {
+    GCState *gc = (GCState *)ctx;
+    msg->selector = gc_copy(gc, msg->selector);
+    for (uint8_t i = 0; i < msg->arg_count; i++) {
+        msg->args[i] = gc_copy(gc, msg->args[i]);
+    }
+}
+
 static void gc_scan_roots(GCState *gc, struct STA_Actor *actor) {
     /* 1. Stack frames — walk all frames via the existing GC root walker.
      *
@@ -345,6 +358,23 @@ static void gc_scan_roots(GCState *gc, struct STA_Actor *actor) {
     actor->behavior_class = gc_copy(gc, actor->behavior_class);
     actor->behavior_obj = gc_copy(gc, actor->behavior_obj);
     actor->signaled_exception = gc_copy(gc, actor->signaled_exception);
+
+    /* 4. Mailbox — queued message OOPs point to the actor's heap.
+     *
+     * Deep copy (sta_deep_copy_gc) allocates argument objects on the
+     * receiver's heap. If GC fires while messages are queued, those
+     * OOPs become stale. Walk all queued messages and trace their
+     * payload OOPs through gc_copy().
+     *
+     * Safe without synchronization: GC runs on the consumer thread
+     * (the scheduler thread executing this actor). MPSC producers
+     * only touch the tail; consumer owns the head. See #341.
+     *
+     * A producer mid-enqueue (tail swung, prev->next not yet stored)
+     * is invisible to the walk — safe because from-space is not freed
+     * until after scanning completes. The in-flight node's OOPs will
+     * be traced on the next GC cycle. */
+    sta_mailbox_walk(&actor->mailbox, gc_mailbox_visitor, gc);
 }
 
 /* ── sta_gc_collect — main entry point ─────────────────────────────────── */
@@ -476,6 +506,37 @@ int sta_heap_grow(STA_Heap *heap, size_t min_capacity) {
     heap->capacity = min_capacity;
 
     return 0;
+}
+
+/* ── Mailbox OOP fixup for heap growth ──────────────────────────────────── */
+
+/* Visitor for sta_mailbox_walk: apply pointer delta to OOPs in the old region. */
+typedef struct {
+    const char *old_base;
+    const char *old_limit;
+    ptrdiff_t   delta;
+} GrowFixupCtx;
+
+static void grow_fixup_msg_visitor(STA_MailboxMsg *msg, void *ctx) {
+    GrowFixupCtx *fx = (GrowFixupCtx *)ctx;
+    /* Selector is always immutable — skip. */
+    for (uint8_t i = 0; i < msg->arg_count; i++) {
+        STA_OOP val = msg->args[i];
+        if (STA_IS_HEAP(val) && val != 0) {
+            const char *p = (const char *)(uintptr_t)val;
+            if (p >= fx->old_base && p < fx->old_limit) {
+                msg->args[i] = (STA_OOP)(uintptr_t)(p + fx->delta);
+            }
+        }
+    }
+}
+
+static void grow_fixup_mailbox(STA_Mailbox *mb,
+                                const char *old_base,
+                                const char *old_limit,
+                                ptrdiff_t delta) {
+    GrowFixupCtx fx = { old_base, old_limit, delta };
+    sta_mailbox_walk(mb, grow_fixup_msg_visitor, &fx);
 }
 
 /* ── sta_heap_alloc_gc — GC-aware allocation ───────────────────────────── */
@@ -619,6 +680,9 @@ STA_ObjHeader *sta_heap_alloc_gc(struct STA_VM *vm, struct STA_Actor *actor,
             }
             he = he->prev;
         }
+
+        /* Fix mailbox queued message OOPs. See #341. */
+        grow_fixup_mailbox(&actor->mailbox, old_base, old_limit, delta);
     }
 
     /* 4. Retry allocation on the grown heap. */
