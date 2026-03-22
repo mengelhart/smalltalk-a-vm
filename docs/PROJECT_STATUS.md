@@ -14,7 +14,7 @@ Detailed history of all completed work: `docs/PROJECT_HISTORY.md`
 Phase 1 (Minimal Live Kernel) complete. Phase 1.5 (Class Library Foundation) complete.
 Now: scheduler, supervision, async I/O, headless lifecycle.
 
-**Current epic:** Epic 7B (Futures Wait, Crash Safety, Stress) complete.
+**Current epic:** Phase 2 complete. All epics (0–8) done.
 
 ---
 
@@ -61,7 +61,7 @@ Now: scheduler, supervision, async I/O, headless lifecycle.
 | 4 | Number protocol, Symbol (prims 91–93), hashing |
 | 5 | Integration stress tests (59 tests, polymorphic dispatch, deep chains) |
 
-### Phase 2 — Actor Runtime: IN PROGRESS
+### Phase 2 — Actor Runtime: COMPLETE
 
 | Epic | Topic | Status |
 |---|---|---|
@@ -78,6 +78,7 @@ Now: scheduler, supervision, async I/O, headless lifecycle.
 | 6.3 | Actor refcount & race fixes | ✅ Complete — refcount lifecycle, TSan clean 91/91 |
 | 7A | Futures infrastructure | ✅ Complete — STA_Future, future table, ask/reply routing |
 | 7B | Wait primitive, crash failure, stress | ✅ Complete — Future class, prim 201, crash→fail, soak 275K rts/s |
+| 8 | Bug fixes & tech debt | ✅ Complete — TSan race, stale args, future fail, atomic bounds, send refactor, SmallInteger fixes |
 
 ---
 
@@ -113,11 +114,7 @@ Resolved items moved to `docs/PROJECT_HISTORY.md`.
 
 ## Known issues (open)
 
-- #243: SmallInteger = with non-SmallInt arg returns receiver instead of false
-- #244: Catching DNU via on:do: triggers unhandled BlockCannotReturn
-- #339: SmallInteger >> #/ does not raise ZeroDivide — returns DNU on zero divisor
-- #340: STA_MailboxMsg.args stale pointer after target heap growth
-- #337: TSan race in sta_scheduler_enqueue — next_runnable written outside wake_mutex
+- #341: Mailbox messages not in GC root set — queued OOPs not traced or relocated
 
 ---
 
@@ -161,7 +158,7 @@ src/image/                ← production image save/load
 src/bootstrap/            ← kernel bootstrap + file-in reader
 src/compiler/             ← scanner, parser, AST, codegen
 kernel/                   ← Smalltalk kernel .st files (17 files)
-tests/                    ← 94 CTest targets
+tests/                    ← 101 CTest targets
 examples/embed_basic/     ← public API smoke test
 docs/architecture/        ← master architecture document
 docs/decisions/           ← ADRs 001–014
@@ -171,7 +168,7 @@ docs/spikes/              ← spike-001 through spike-007
 ---
 
 ## Test count
-98 active CTest targets (100 total, 2 disabled), all passing. ASan clean. TSan: 1 pre-existing race in sta_scheduler_enqueue (#337).
+101 active CTest targets (103 total, 2 disabled), all passing. ASan clean. TSan clean.
 
 ---
 
